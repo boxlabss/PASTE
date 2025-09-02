@@ -1,6 +1,5 @@
 <?php
 /*
-/*
  * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *

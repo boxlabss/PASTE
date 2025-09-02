@@ -92,10 +92,15 @@ $loginNext = function(string $frag = '#comments') use ($basePasteUrl, $baseurl) 
 // Convenience: detect if comments are globally disabled (from paste.php logic)
 $show_comments_ui = isset($show_comments) ? (bool)$show_comments : true;
 
-/* Comments helpers (kept local so this file is theme-self-contained) */
+/* ---------------------------
+   Comment helpers (safe + UX)
+   --------------------------- */
+
+// total count including replies (for badge)
 if (!function_exists('count_comments_total')) {
     function count_comments_total($list): int {
         if (!is_array($list) || !$list) return 0;
+        // If it’s a flat list (no 'children'), just count
         if (!isset($list[0]['children'])) return (int)count($list);
         $sum = 0;
         foreach ($list as $n) {
@@ -107,6 +112,8 @@ if (!function_exists('count_comments_total')) {
         return $sum;
     }
 }
+
+// descendants counter for a single node (used by "Show X more replies")
 if (!function_exists('count_descendants')) {
     function count_descendants(array $node): int {
         $sum = 0;
@@ -119,6 +126,8 @@ if (!function_exists('count_descendants')) {
         return $sum;
     }
 }
+
+// Safe body_html fallback (sanitizes body when needed)
 if (!function_exists('comment_body_html_safe')) {
     function comment_body_html_safe(array $c): string {
         return isset($c['body_html'])
@@ -126,7 +135,18 @@ if (!function_exists('comment_body_html_safe')) {
             : render_comment_html((string)($c['body'] ?? ''));
     }
 }
+
+// Simple recursive render for threaded comments
 if (!function_exists('render_comment_node')) {
+    /**
+     * @param array    $c           Comment node (may contain children[])
+     * @param bool     $can_comment Current user can reply?
+     * @param string   $commentsActionUrl POST target for comment actions
+     * @param string   $csrf       CSRF token
+     * @param callable $loginNext  login redirect builder
+     * @param int      $depth      current nesting depth (0-based)
+     * @param int      $maxDepth   depth after which children are collapsed
+     */
     function render_comment_node(
         array $c,
         bool $can_comment,
@@ -153,7 +173,10 @@ if (!function_exists('render_comment_node')) {
         $clamped    = ($depth >= $maxDepth) && $hasKids;
         $threadId   = 'thread-' . $id;
         $descCnt    = $clamped ? count_descendants($c) : 0;
+
+        // For visual clamp: cap left padding and show a subtle thread rail
         $depthStyle = '--d:' . (int)$depth . ';';
+
         ?>
         <li id="c-<?php echo $id; ?>"
             class="list-group-item bg-body comment-item depth-<?php echo (int)$depth; ?>"
@@ -206,7 +229,7 @@ if (!function_exists('render_comment_node')) {
               </div>
 
               <div class="comment-body lh-base">
-                <?php echo $body_html; ?>
+                <?php echo $body_html; // already sanitized/rendered ?>
               </div>
 
               <?php if ($can_comment): ?>
@@ -245,6 +268,7 @@ if (!function_exists('render_comment_node')) {
 
               <?php if (!empty($children)): ?>
                 <?php if ($clamped): ?>
+                  <!-- Collapsed tail -->
                   <div class="mt-2">
                     <button class="btn btn-outline-secondary btn-sm comment-expand" data-target="#<?php echo $threadId; ?>">
                       <i class="bi bi-chevron-down"></i> Show <?php echo (int)$descCnt; ?> more repl<?php echo $descCnt===1?'y':'ies'; ?>
@@ -254,6 +278,7 @@ if (!function_exists('render_comment_node')) {
                     <?php foreach ($children as $ch) { render_comment_node($ch, $can_comment, $commentsActionUrl, $csrf, $loginNext, $depth + 1, $maxDepth); } ?>
                   </ul>
                 <?php else: ?>
+                  <!-- Inline children -->
                   <ul class="list-group list-group-flush mt-2" style="--pd: <?php echo (int)$depth; ?>;">
                     <?php foreach ($children as $ch) { render_comment_node($ch, $can_comment, $commentsActionUrl, $csrf, $loginNext, $depth + 1, $maxDepth); } ?>
                   </ul>
@@ -273,7 +298,7 @@ if (!function_exists('render_comment_node')) {
   <div class="row">
 <?php if (isset($privatesite) && $privatesite === "on"): ?>
 
-    <!-- Private site -->
+    <!-- Private site: Main content full width, sidebar below -->
     <div class="col-lg-12">
       <?php if (!isset($_SESSION['username'])): ?>
         <div class="card">
@@ -297,9 +322,7 @@ if (!function_exists('render_comment_node')) {
                 <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
                     <span class="text-muted small">
                       Detected
-                      <button type="button" class="btn btn-link btn-sm p-0 align-baseline"
-                              data-bs-toggle="modal" data-bs-target="#detectedExplainModal"
-                              title="Why this language?">
+                      <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-bs-toggle="modal" data-bs-target="#detectedExplainModal" title="Why this language?">
                         <i class="bi bi-question-circle"></i>
                       </button>
                     </span>
@@ -330,7 +353,7 @@ if (!function_exists('render_comment_node')) {
               </a>
               <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
                 <select class="form-select form-select-sm btn-select hljs-theme-select order-first me-0" title="Code Theme">
-                  <?php foreach ($hl_theme_options as $opt):
+                  <?php foreach ($hl_theme_options as $opt): 
                         $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                   ?>
                     <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -372,11 +395,12 @@ if (!function_exists('render_comment_node')) {
             <?php if (isset($error)): ?>
               <div class="alert alert-danger"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php else: ?>
+              <!-- Code block: movable into fullscreen modal -->
               <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
               <span id="code-content-home"></span>
             <?php endif; ?>
 
-            <!-- Raw paste (lazy load) -->
+            <!-- Raw paste (lazy load; JS wraps textarea later) -->
             <div class="mb-3 position-relative" id="raw-block"
                  data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? '')), ENT_QUOTES, 'UTF-8'); ?>">
               <p><?php echo htmlspecialchars($lang['rawpaste'] ?? 'Raw Paste'); ?></p>
@@ -385,6 +409,7 @@ if (!function_exists('render_comment_node')) {
               <div id="line-number-tooltip" class="line-number-tooltip"></div>
             </div>
 
+            <!-- Fork/Edit buttons for guests -->
             <div class="btn-group" role="group" aria-label="Fork and Edit actions">
               <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to fork this paste">
@@ -488,7 +513,7 @@ if (!function_exists('render_comment_node')) {
             <?php endif; ?>
           </div>
 
-          <!-- Full Screen Modal (private) -->
+          <!-- Full Screen Modal -->
           <div class="modal fade" id="fullscreenModal" tabindex="-1" aria-labelledby="fullscreenModalLabel" aria-hidden="true">
             <div class="modal-dialog modal-fullscreen">
               <div class="modal-content">
@@ -497,7 +522,7 @@ if (!function_exists('render_comment_node')) {
                   <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
                   <div class="ms-2" style="min-width:180px">
                     <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                      <?php foreach ($hl_theme_options as $opt):
+                      <?php foreach ($hl_theme_options as $opt): 
                             $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                       ?>
                         <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -510,6 +535,7 @@ if (!function_exists('render_comment_node')) {
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                  <!-- host where #code-content is moved to -->
                   <div id="fullscreen-host"></div>
                 </div>
               </div>
@@ -517,7 +543,7 @@ if (!function_exists('render_comment_node')) {
           </div>
 
           <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
-          <!-- Detection Explain Modal (private) -->
+          <!-- Detection Explain Modal -->
           <div class="modal fade" id="detectedExplainModal" tabindex="-1" aria-labelledby="detectedExplainLabel" aria-hidden="true">
             <div class="modal-dialog">
               <div class="modal-content">
@@ -532,7 +558,9 @@ if (!function_exists('render_comment_node')) {
                   <?php endif; ?>
                   <pre class="small bg-dark p-2 border rounded" style="white-space: pre-wrap;"><?php echo htmlspecialchars($p_code_explain); ?></pre>
                   <hr>
-                  <p class="small text-muted mb-0">Tips: Add a file extension to the title or choose a language explicitly.</p>
+                  <p class="small text-muted mb-0">
+                    Tips: Add a file extension to the title (e.g., <code>.php</code>, <code>.py</code>) or choose a language explicitly to override autodetection.
+                  </p>
                 </div>
                 <div class="modal-footer">
                   <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
@@ -544,7 +572,7 @@ if (!function_exists('render_comment_node')) {
 
         </div>
 
-        <!-- Comments (Private) -->
+        <!-- ===== Comments (Private) ===== -->
         <?php if ($show_comments_ui): ?>
         <div class="mt-5" id="comments">
           <div class="card border-0 shadow-sm">
@@ -566,6 +594,7 @@ if (!function_exists('render_comment_node')) {
                 <div class="alert alert-danger rounded-0 m-0"><?php echo htmlspecialchars($comment_error, ENT_QUOTES, 'UTF-8'); ?></div>
               <?php endif; ?>
 
+              <!-- List -->
               <ul class="list-group list-group-flush">
                 <?php if (!empty($comments)): ?>
                   <?php
@@ -667,13 +696,24 @@ if (!function_exists('render_comment_node')) {
                 <?php endif; ?>
               </ul>
 
+              <!-- Composer -->
               <div class="p-3 border-top">
                 <?php if ($can_comment): ?>
                   <form method="post" action="<?php echo htmlspecialchars($commentsActionUrl, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="add_comment">
+
                     <div class="mb-2">
-                      <textarea id="comment-body-main" class="form-control" name="comment_body" rows="3" minlength="1" maxlength="4000" placeholder="Write a thoughtful comment…" required></textarea>
+                      <textarea
+                        class="form-control"
+                        id="comment-body-main"
+                        name="comment_body"
+                        rows="3"
+                        minlength="1"
+                        maxlength="4000"
+                        placeholder="Write a thoughtful comment…"
+                        required
+                      ></textarea>
                       <div class="d-flex justify-content-between mt-1">
                         <small class="text-muted">Markdown is not enabled; links will be auto-linked.</small>
                         <small class="text-muted"><span id="c-remaining">4000</span> chars left</small>
@@ -688,7 +728,7 @@ if (!function_exists('render_comment_node')) {
                 <?php else: ?>
                   <div class="alert alert-info mb-0">
                     <div class="d-flex align-items-center justify-content-between">
-                      <span>Please login or register.</span>
+                      <span>Login to post a comment.</span>
                       <a class="btn btn-sm btn-outline-primary"
                          href="<?php echo htmlspecialchars($loginNext('#comments'), ENT_QUOTES, 'UTF-8'); ?>">
                         <i class="bi bi-box-arrow-in-right"></i> Login
@@ -715,23 +755,22 @@ if (!function_exists('render_comment_node')) {
 
 <?php else: ?>
 
-    <!-- Non-private site -->
+    <!-- Non-private site: Main content and sidebar side by side -->
     <div class="col-lg-10">
       <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
+          <!-- Paste Info -->
           <div class="paste-info">
             <h1 class="h3 mb-2"><?php echo ucfirst(htmlspecialchars($p_title ?? 'Untitled')); ?></h1>
             <div class="meta d-flex flex-wrap gap-2 text-muted small align-items-center">
               <span class="badge bg-primary"><?php echo htmlspecialchars($display_code); ?></span>
               <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
-                <span class="text-muted small">
-                  Detected
-                  <button type="button" class="btn btn-link btn-sm p-0 align-baseline"
-                          data-bs-toggle="modal" data-bs-target="#detectedExplainModal"
-                          title="Why this language?">
-                    <i class="bi bi-question-circle"></i>
-                  </button>
-                </span>
+                  <span class="text-muted small">
+                    Detected
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-bs-toggle="modal" data-bs-target="#detectedExplainModal" title="Why this language?">
+                      <i class="bi bi-question-circle"></i>
+                    </button>
+                  </span>
               <?php endif; ?>
               <span>
               <?php
@@ -752,13 +791,16 @@ if (!function_exists('render_comment_node')) {
             </div>
           </div>
 
+          <!-- Actions -->
           <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Paste actions">
             <a href="#comments" class="btn btn-outline-secondary" title="Jump to comments">
               <i class="bi bi-chat-square-text"></i>
             </a>
             <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
-              <select class="form-select form-select-sm btn-select hljs-theme-select order-first me-0" title="Code Theme">
-                <?php foreach ($hl_theme_options as $opt):
+              <select
+                class="form-select form-select-sm btn-select hljs-theme-select order-first me-0"
+                title="Code Theme">
+                <?php foreach ($hl_theme_options as $opt): 
                       $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                 ?>
                   <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -805,6 +847,7 @@ if (!function_exists('render_comment_node')) {
           <?php if (isset($error)): ?>
             <div class="alert alert-danger"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
           <?php else: ?>
+            <!-- Code block: movable into fullscreen modal -->
             <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
             <span id="code-content-home"></span>
           <?php endif; ?>
@@ -832,64 +875,159 @@ if (!function_exists('render_comment_node')) {
               <?php endif; ?>
             </div>
           <?php endif; ?>
-        </div>
-      </div> <!-- /card -->
 
-      <!-- Full Screen Modal (public) -->
-      <div class="modal fade" id="fullscreenModal" tabindex="-1" aria-labelledby="fullscreenModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-fullscreen">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title" id="fullscreenModalLabel"><?php echo htmlspecialchars($p_title ?? 'Untitled'); ?></h5>
-              <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
-              <div class="ms-2" style="min-width:180px">
-                <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                  <?php foreach ($hl_theme_options as $opt):
-                        $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
-                  ?>
-                    <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
-                      <?php echo htmlspecialchars($opt['name']); ?>
-                    </option>
-                  <?php endforeach; ?>
-                </select>
+          <?php if (isset($_SESSION['username'])): ?>
+            <!-- Paste Edit/Fork Form -->
+            <div class="mt-3">
+              <div class="card">
+                <div class="card-header"><?php echo htmlspecialchars($lang['modpaste'] ?? 'Modify Paste'); ?></div>
+                <div class="card-body">
+                  <form class="form-horizontal" name="mainForm" action="index.php" method="POST">
+                    <div class="row mb-3 g-3">
+                      <div class="col-sm-4">
+                        <div class="input-group">
+                          <span class="input-group-text"><i class="bi bi-fonts"></i></span>
+                          <input type="text" class="form-control" name="title" placeholder="<?php echo htmlspecialchars($lang['pastetitle'] ?? 'Paste Title'); ?>" value="<?php echo htmlspecialchars(ucfirst($p_title ?? 'Untitled')); ?>">
+                        </div>
+                      </div>
+                      <div class="col-sm-4">
+                        <select class="form-select" name="format">
+                          <?php
+                            $geshiformats     = $geshiformats ?? [];
+                            $popular_formats  = $popular_formats ?? [];
+                            foreach ($geshiformats as $code => $name) {
+                                if (in_array($code, $popular_formats)) {
+                                    $sel = ($effective_code === $code) ? 'selected' : '';
+                                    echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+                                }
+                            }
+                            echo '<option value="text">-------------------------------------</option>';
+                            foreach ($geshiformats as $code => $name) {
+                                if (!in_array($code, $popular_formats)) {
+                                    $sel = ($effective_code === $code) ? 'selected' : '';
+                                    echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+                                }
+                            }
+                          ?>
+                        </select>
+                      </div>
+                      <div class="col-sm-2 ms-auto">
+                        <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
+                      </div>
+                    </div>
+
+                    <div class="mb-3">
+                      <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="helloworld"><?php echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    </div>
+
+                    <div class="row mb-3">
+                      <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['expiration'] ?? 'Expiration'); ?></label>
+                      <div class="col-sm-10">
+                        <select class="form-select" name="paste_expire_date">
+                          <option value="N"    <?php echo ($p_expire_date ?? 'N')  == "N"    ? 'selected' : ''; ?>>Never</option>
+                          <option value="self" <?php echo ($p_expire_date ?? 'N')  == "self" ? 'selected' : ''; ?>>View Once</option>
+                          <option value="10M"  <?php echo ($p_expire_date ?? 'N')  == "10M"  ? 'selected' : ''; ?>>10 Minutes</option>
+                          <option value="1H"   <?php echo ($p_expire_date ?? 'N')  == "1H"   ? 'selected' : ''; ?>>1 Hour</option>
+                          <option value="1D"   <?php echo ($p_expire_date ?? 'N')  == "1D"   ? 'selected' : ''; ?>>1 Day</option>
+                          <option value="1W"   <?php echo ($p_expire_date ?? 'N')  == "1W"   ? 'selected' : ''; ?>>1 Week</option>
+                          <option value="2W"   <?php echo ($p_expire_date ?? 'N')  == "2W"   ? 'selected' : ''; ?>>2 Weeks</option>
+                          <option value="1M"   <?php echo ($p_expire_date ?? 'N')  == "1M"   ? 'selected' : ''; ?>>1 Month</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="row mb-3">
+                      <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
+                      <div class="col-sm-10">
+                        <select class="form-select" name="visibility">
+                          <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>>Public</option>
+                          <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>>Unlisted</option>
+                          <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>>Private</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="mb-3">
+                      <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                        <input type="text" class="form-control" name="pass" id="pass" placeholder="<?php echo htmlspecialchars($lang['pwopt'] ?? 'Optional Password'); ?>">
+                      </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                      <input type="hidden" name="paste_id" value="<?php echo htmlspecialchars($paste_id ?? ''); ?>" />
+                      <?php if (isset($_SESSION['username']) && $_SESSION['username'] == ($p_member ?? 'Guest')): ?>
+                        <input class="btn btn-primary paste-button" type="submit" name="edit" id="edit" value="<?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit Paste'); ?>" />
+                      <?php endif; ?>
+                      <input class="btn btn-primary paste-button" type="submit" name="submit" id="submit" value="<?php echo htmlspecialchars($lang['forkpaste'] ?? 'Fork Paste'); ?>" />
+                    </div>
+                  </form>
+                </div>
               </div>
-              <?php endif; ?>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body">
-              <div id="fullscreen-host"></div>
+          <?php endif; ?>
+        </div>
+
+        <!-- Full Screen Modal -->
+        <div class="modal fade" id="fullscreenModal" tabindex="-1" aria-labelledby="fullscreenModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-fullscreen">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="fullscreenModalLabel"><?php echo htmlspecialchars($p_title ?? 'Untitled'); ?></h5>
+                <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
+                <div class="ms-2" style="min-width:180px">
+                  <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
+                    <?php foreach ($hl_theme_options as $opt): 
+                          $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
+                    ?>
+                      <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
+                        <?php echo htmlspecialchars($opt['name']); ?>
+                      </option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <?php endif; ?>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <!-- host where #code-content is moved to -->
+                <div id="fullscreen-host"></div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
-      <!-- Detection Explain Modal (public) -->
-      <div class="modal fade" id="detectedExplainModal" tabindex="-1" aria-labelledby="detectedExplainLabel" aria-hidden="true">
-        <div class="modal-dialog">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title" id="detectedExplainLabel">How we detected the language</h5>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-              <p class="mb-1"><strong>Language:</strong> <?php echo htmlspecialchars($display_code); ?></p>
-              <?php if (!empty($srcLabel)): ?>
-              <p class="mb-2"><strong>Detected from:</strong> <?php echo htmlspecialchars($srcLabel); ?></p>
-              <?php endif; ?>
-              <pre class="small bg-dark p-2 border rounded" style="white-space: pre-wrap;"><?php echo htmlspecialchars($p_code_explain); ?></pre>
-              <hr>
-              <p class="small text-muted mb-0">Tips: Add a file extension to the title or choose a language explicitly.</p>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
+        <!-- Detection Explain Modal -->
+        <div class="modal fade" id="detectedExplainModal" tabindex="-1" aria-labelledby="detectedExplainLabel" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="detectedExplainLabel">How we detected the language</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <p class="mb-1"><strong>Language:</strong> <?php echo htmlspecialchars($display_code); ?></p>
+                <?php if (!empty($srcLabel)): ?>
+                <p class="mb-2"><strong>Detected from:</strong> <?php echo htmlspecialchars($srcLabel); ?></p>
+                <?php endif; ?>
+                <pre class="small bg-dark p-2 border rounded" style="white-space: pre-wrap;"><?php echo htmlspecialchars($p_code_explain); ?></pre>
+                <hr>
+                <p class="small text-muted mb-0">
+                  Tips: Add a file extension to the title (e.g., <code>.php</code>, <code>.py</code>) or choose a language explicitly to override autodetection.
+                </p>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      <?php endif; ?>
+        <?php endif; ?>
 
-      <!-- Comments (Public) -->
+      </div>
+
+      <!-- ===== Comments (Public) ===== -->
       <?php if ($show_comments_ui): ?>
       <div class="mt-5" id="comments">
         <div class="card border-0 shadow-sm">
@@ -911,6 +1049,7 @@ if (!function_exists('render_comment_node')) {
               <div class="alert alert-danger rounded-0 m-0"><?php echo htmlspecialchars($comment_error, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
 
+            <!-- List -->
             <ul class="list-group list-group-flush">
               <?php if (!empty($comments)): ?>
                 <?php
@@ -924,9 +1063,7 @@ if (!function_exists('render_comment_node')) {
                   <li id="c-<?php echo $cid; ?>" class="list-group-item bg-body comment-item" style="--d:0;">
                     <div class="d-flex gap-3">
                       <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 comment-avatar">
-                        <span class="fw-bold">
-                          <?php echo htmlspecialchars(strtoupper(mb_substr($c['username'],0,1,'UTF-8')), ENT_QUOTES, 'UTF-8'); ?>
-                        </span>
+                        <span class="fw-bold"><?php echo htmlspecialchars(strtoupper(mb_substr($c['username'],0,1,'UTF-8')), ENT_QUOTES, 'UTF-8'); ?></span>
                       </div>
 
                       <div class="flex-grow-1 comment-main">
@@ -1014,13 +1151,24 @@ if (!function_exists('render_comment_node')) {
               <?php endif; ?>
             </ul>
 
+            <!-- Composer -->
             <div class="p-3 border-top">
               <?php if ($can_comment): ?>
                 <form method="post" action="<?php echo htmlspecialchars($commentsActionUrl, ENT_QUOTES, 'UTF-8'); ?>">
                   <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                   <input type="hidden" name="action" value="add_comment">
+
                   <div class="mb-2">
-                    <textarea id="comment-body-main" class="form-control" name="comment_body" rows="3" minlength="1" maxlength="4000" placeholder="Write a thoughtful comment…" required></textarea>
+                    <textarea
+                      class="form-control"
+                      id="comment-body-main"
+                      name="comment_body"
+                      rows="3"
+                      minlength="1"
+                      maxlength="4000"
+                      placeholder="Write a thoughtful comment…"
+                      required
+                    ></textarea>
                     <div class="d-flex justify-content-between mt-1">
                       <small class="text-muted">Markdown is not enabled; links will be auto-linked.</small>
                       <small class="text-muted"><span id="c-remaining">4000</span> chars left</small>
@@ -1035,7 +1183,7 @@ if (!function_exists('render_comment_node')) {
               <?php else: ?>
                 <div class="alert alert-info mb-0">
                   <div class="d-flex align-items-center justify-content-between">
-                    <span>Please login or register to post a comment.</span>
+                    <span>Login to post a comment.</span>
                     <a class="btn btn-sm btn-outline-primary"
                        href="<?php echo htmlspecialchars($loginNext('#comments'), ENT_QUOTES, 'UTF-8'); ?>">
                       <i class="bi bi-box-arrow-in-right"></i> Login
@@ -1046,14 +1194,15 @@ if (!function_exists('render_comment_node')) {
             </div>
           </div>
         </div>
-      </div> <!-- /comments card -->
+      </div>
+
       <?php else: ?>
         <div class="mt-5" id="comments">
           <div class="alert alert-secondary">Comments have been disabled.</div>
         </div>
       <?php endif; ?>
 
-    </div> <!-- /col-lg-10 -->
+    </div>
 
     <div class="col-lg-2 mt-4 mt-lg-0">
       <?php require_once('theme/' . ($default_theme ?? 'default') . '/sidebar.php'); ?>
