@@ -4,8 +4,12 @@ In progress: 3.2
 * integration of https://github.com/scrivo/highlight.php
 * theme picker if enabled (see example config)
 * improved the layout for paste views, fixed some line number css bugs
-* added a "we has cookies" footer/just comment it out in /theme/default/footer.php if not required
+* added a cookie footer/just comment it out in /theme/default/footer.php if not required
 * Page navs in header/footer
+* Comments integration
+* Improve "My Pastes" - paginate user pastes - list comments
+* Added a small tool to help client side password generation for user registration
+* Fixed the installer to migrate encrypted pastes from 2.x
 
 New version 3.1
 * Account deletion
