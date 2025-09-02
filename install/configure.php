@@ -227,7 +227,7 @@ define('SECRET', \$sec_key);
 // define('SMTP_DEBUG', true);
 
 // Code highlighting engine for non-Markdown pastes: 'highlight' (highlight.php - default) or 'geshi'
-\$highlighter = \$highlighter ?? 'highlight';
+\$highlighter = \$highlighter ?? 'geshi';
 
 // Style theme for highlighter.php (see includes/Highlight/styles)
 \$hl_style = 'hybrid.css';

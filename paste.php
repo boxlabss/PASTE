@@ -804,7 +804,7 @@ try {
                 // Avoid resubmit on refresh
                 $to = ($mod_rewrite == '1')
                     ? $baseurl . $paste_id . '#comments'
-                    : $baseurl . 'pastes.php?id=' . (int)$paste_id . '#comments';
+                    : $baseurl . 'paste.php?id=' . (int)$paste_id . '#comments';
                 header('Location: ' . $to);
                 exit;
             }
@@ -873,7 +873,7 @@ try {
 		// Redirect back to #comments (PRG). If error, carry as c_err=
 		$to = ($mod_rewrite == '1')
 			? $baseurl . (int)$paste_id . '#comments'
-			: $baseurl . 'pastes.php?id=' . (int)$paste_id . '#comments';
+			: $baseurl . 'paste.php?id=' . (int)$paste_id . '#comments';
         if ($err !== '') {
             $to .= (strpos($to, '?') === false ? '?' : '&') . 'c_err=' . rawurlencode($err);
         }

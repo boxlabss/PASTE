@@ -81,7 +81,7 @@ $srcLabel = $srcMap[$p_code_source ?? ''] ?? null;
 // Common URLs for comment actions + login return
 $basePasteUrl = ($mod_rewrite == '1')
     ? rtrim($baseurl ?? '/', '/') . '/' . (int)($paste_id ?? 0)
-    : rtrim($baseurl ?? '/', '/') . '/pastes.php?id=' . (int)($paste_id ?? 0);
+    : rtrim($baseurl ?? '/', '/') . '/paste.php?id=' . (int)($paste_id ?? 0);
 
 $commentsActionUrl = $basePasteUrl . '#comments';
 
