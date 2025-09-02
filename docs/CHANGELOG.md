@@ -1,4 +1,4 @@
-# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 21/08/2025)
+# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 02/09/2025)
 In progress: 3.2
 * improvements
 * integration of https://github.com/scrivo/highlight.php
