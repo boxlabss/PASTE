@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/21 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -24,7 +24,7 @@ require_once 'config.php';
 if (($highlighter ?? 'geshi') === 'geshi') {
     require_once 'includes/geshi.php';
 } else {
-    require_once __DIR__ . '/includes/Highlight/bootstrap.php';
+    require_once __DIR__ . '/includes/hlbootstrap.php';
 }
 
 require_once 'includes/functions.php';
@@ -63,7 +63,7 @@ if (($highlighter ?? 'geshi') === 'highlight') {
     }
 }
 
-// Map some legacy/GeSHi-style names to highlight.js ids
+// Map some GeSHi-style names to highlight.js ids
 function map_to_hl_lang(string $code): string {
     static $map = [
         'text'        => 'plaintext',
@@ -71,7 +71,7 @@ function map_to_hl_lang(string $code): string {
         'html4strict' => 'xml',
         'php-brief'   => 'php',
         'pycon'       => 'python',
-        'postgresql'  => 'pgsql',   // fallback to sql below if missing
+        'postgresql'  => 'pgsql',
         'dos'         => 'dos',
         'vb'          => 'vbnet',
     ];
@@ -87,7 +87,6 @@ function hl_wrap_with_lines(string $value, string $hlLang, array $highlight_line
 
     $out   = [];
     $out[] = '<pre class="hljs"><code class="hljs language-' . htmlspecialchars($hlLang, ENT_QUOTES, 'UTF-8') . '">';
-    // expose digits to CSS so gutter is fixed (no JS needed)
     $out[] = '<ol class="hljs-ln" style="--ln-digits:' . (int)$digits . '">';
     foreach ($lines as $i => $lineHtml) {
         $ln  = $i + 1;
@@ -115,6 +114,124 @@ function geshi_add_line_highlight_class(string $html, array $highlight_lines, st
         }
         return '<li' . $attrs . '>';
     }, $html) ?? $html;
+}
+
+// ---------- Explain how autodetect made a decision ----------
+function paste_build_explain(string $source, string $title, string $sample, string $lang): string {
+    $sample = (string) $sample;
+    if ($sample !== '') $sample = substr($sample, 0, 2048);
+    $lang   = strtolower($lang);
+    $ext    = strtolower((string) pathinfo((string)$title, PATHINFO_EXTENSION));
+
+    switch ($source) {
+        case 'php-tag':
+            $phpCount  = preg_match_all('/<\?(php|=)/i', $sample, $m1);
+            return "Found PHP opening tag(s) (" . (int)$phpCount . ") such as '<?php' or '<?='. Locked to PHP.";
+        case 'filename':
+            return $ext ? "Paste title ends with .{$ext}. Mapped extension → {$lang}." : "Filename hint used. Mapped to {$lang}.";
+        case 'shebang':
+            if (preg_match('/^#![^\r\n]+/m', $sample, $m)) return "Shebang line detected: {$m[0]} → {$lang}.";
+            return "Shebang detected → {$lang}.";
+        case 'modeline':
+            if (preg_match('/-\*-\s*mode:\s*([a-z0-9#+-]+)\s*;?/i', $sample, $m)) return "Emacs modeline ‘mode: {$m[1]}’ → {$lang}.";
+            if (preg_match('/(?:^|\n)[ \t]*(?:vi|vim):[^\n]*\bfiletype=([a-z0-9#+-]+)/i', $sample, $m)) return "Vim modeline ‘filetype={$m[1]}’ → {$lang}.";
+            return "Editor modeline matched → {$lang}.";
+        case 'fence':
+            if (preg_match('/```([a-z0-9#+._-]{1,32})/i', $sample, $m)) return "Markdown code fence language tag ‘{$m[1]}’ → {$lang}.";
+            return "Markdown code fence language tag → {$lang}.";
+        case 'markdown': {
+            $h = preg_match_all('/^(?:#{1,6}\s|>|-{3,}\s*$|\*\s|\d+\.\s|\[.+?\]\(.+?\))/m', $sample);
+            return "Markdown structure detected (headings/lists/links: ~{$h} signals). Rendered as Markdown.";
+        }
+        case 'heuristic': {
+            if (in_array($lang, ['yaml','yml'], true)) {
+                $kv   = preg_match_all('/^[ \t\-]*[A-Za-z0-9_.-]+:\s/m', $sample);
+                $list = preg_match_all('/^[ \t]*-\s/m', $sample);
+                return "YAML heuristics: key:value pairs (~{$kv}) and list items (~{$list}).";
+            }
+            if (in_array($lang, ['sql','pgsql','mysql','tsql'], true)) {
+                $kw = preg_match_all('/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|FROM|WHERE|JOIN)\b/i', $sample);
+                return "SQL keywords matched (~{$kw}). Guessed {$lang}.";
+            }
+            if ($lang === 'makefile' || $lang === 'make') {
+                $t = preg_match_all('/^[A-Za-z0-9_.-]+:.*$/m', $sample);
+                return "Makefile targets detected (~{$t}).";
+            }
+            if ($lang === 'dos' || $lang === 'batch') {
+                $b = preg_match_all('/^\s*(?:@?echo|rem|set|call|goto)\b/i', $sample);
+                return "Batch/DOS commands matched (~{$b}).";
+            }
+            return "Heuristic rules matched characteristic tokens for {$lang}.";
+        }
+        case 'hljs':
+        case 'hljs-auto':
+            return "highlight.php auto-guess selected ‘{$lang}’ after other hints were inconclusive.";
+        case 'fallback':
+            return "Generic fallback selected a safe default (‘{$lang}’).";
+        case 'explicit':
+            return "Language was explicitly chosen by the author.";
+        default:
+            return ucfirst($source) . " → {$lang}.";
+    }
+}
+
+// ---------- autodetect: filename/extension hint ----------
+function paste_pick_from_filename(?string $title, string $engine = 'highlight', $hl = null): ?string {
+    $title = (string) ($title ?? '');
+    $base  = trim(basename($title));
+    if ($base === '') return null;
+
+    // No extension cases
+    if (strcasecmp($base, 'Makefile') === 0) return ($engine === 'geshi') ? 'make' : 'makefile';
+    if (strcasecmp($base, 'Dockerfile') === 0) return 'dockerfile';
+
+    $ext = strtolower((string) pathinfo($base, PATHINFO_EXTENSION));
+    if ($ext === '') return null;
+
+    static $ext2hl = [
+        'php'=>'php','phtml'=>'php','inc'=>'php',
+        'js'=>'javascript','mjs'=>'javascript','cjs'=>'javascript',
+        'ts'=>'typescript','tsx'=>'typescript','jsx'=>'javascript',
+        'py'=>'python','rb'=>'ruby','pl'=>'perl','pm'=>'perl','raku'=>'perl',
+        'sh'=>'bash','bash'=>'bash','zsh'=>'bash','ksh'=>'bash',
+        'ps1'=>'powershell',
+        'c'=>'c','h'=>'c','i'=>'c',
+        'cpp'=>'cpp','cxx'=>'cpp','cc'=>'cpp','hpp'=>'cpp','hxx'=>'cpp','hh'=>'cpp',
+        'cs'=>'csharp','java'=>'java','go'=>'go','rs'=>'rust','kt'=>'kotlin','kts'=>'kotlin',
+        'm'=>'objectivec','mm'=>'objectivec',
+        'json'=>'json','yml'=>'yaml','yaml'=>'yaml','ini'=>'ini','toml'=>'toml','properties'=>'properties',
+        'xml'=>'xml','xhtml'=>'xml','xq'=>'xquery','xqy'=>'xquery',
+        'html'=>'xml','htm'=>'xml','svg'=>'xml',
+        'md'=>'markdown','markdown'=>'markdown',
+        'sql'=>'sql','psql'=>'pgsql',
+        'bat'=>'dos','cmd'=>'dos','nginx'=>'nginx','conf'=>'ini','cfg'=>'ini','txt'=>'plaintext',
+        'make'=>'makefile','mk'=>'makefile','mak'=>'makefile','gradle'=>'gradle','dockerfile'=>'dockerfile'
+    ];
+
+    $hlId = $ext2hl[$ext] ?? null;
+    if ($hlId === null) return null;
+
+    if ($engine === 'highlight') {
+        if ($hl && method_exists($hl, 'listLanguages')) {
+            $set = array_map('strtolower', (array)$hl->listLanguages());
+            if (in_array($hlId, $set, true)) return $hlId;
+            if ($hlId === 'pgsql' && in_array('sql', $set, true)) return 'sql';
+            if ($hlId === 'plaintext' && in_array('text', $set, true)) return 'text';
+            return null;
+        }
+        return $hlId;
+    }
+
+    // GeSHi: normalize if helper exists
+    if (function_exists('paste_normalize_lang')) {
+        $g = paste_normalize_lang($hlId, 'geshi', null);
+        return $g ?: null;
+    }
+    return null;
+}
+
+function is_probable_php_tag(string $code): bool {
+    return (bool) preg_match('/<\?(php|=)/i', $code);
 }
 
 // --- Safe themed error renderers (header -> errors -> footer) ---
@@ -147,7 +264,7 @@ function render_error_and_exit(string $msg, string $http = '404'): void {
 }
 
 function render_password_required_and_exit(string $msg): void {
-    themed_error_render($msg, 403, true); // 401 invites browser auth dialogs
+    themed_error_render($msg, 403, true);
 }
 
 // --- Inputs ---
@@ -175,7 +292,7 @@ try {
     $ga          = trim($si['ga'] ?? '');
     $additional_scripts = trim($si['additional_scripts'] ?? '');
 
-    // Optional: allow DB to define mod_rewrite
+    // allow DB to define mod_rewrite
     if (isset($si['mod_rewrite']) && $si['mod_rewrite'] !== '') {
         $mod_rewrite = (string) $si['mod_rewrite'];
     }
@@ -264,6 +381,20 @@ try {
     $p_encrypt  = (string) ($row['encrypt'] ?? '0');
     $p_views    = getPasteViewCount($pdo, (int) $paste_id);
 
+    // ---- comments config for view (AFTER $p_password is known) ----
+    // Read site-wide flags from config.php (with safe defaults)
+    $comments_enabled       = isset($comments_enabled) ? (bool)$comments_enabled : true;
+    $comments_require_login = isset($comments_require_login) ? (bool)$comments_require_login : true;
+    $comments_on_protected  = isset($comments_on_protected) ? (bool)$comments_on_protected : false;
+
+    // Should we render the comments section for this paste?
+    $show_comments = $comments_enabled && ($comments_on_protected || $p_password === "NONE");
+    // Is the current user allowed to post a comment?
+    $can_comment   = $show_comments && ( !$comments_require_login || isset($_SESSION['username']) );
+
+    $comment_error   = '';
+    $comment_success = '';
+
     // private?
     if ($p_visible === "2") {
         if (!isset($_SESSION['username']) || $p_member !== (string) ($_SESSION['username'] ?? '')) {
@@ -346,7 +477,9 @@ try {
         $p_content = rtrim($p_content);
     }
 
-    // transform content 
+    // -------------- transform content --------------
+    $p_code_explain = ''; // will be filled when we detect
+
     if ($p_code === "markdown") {
         // ---------- Markdown (keep using Parsedown, safe) ----------
         require_once $parsedown_path;
@@ -370,39 +503,203 @@ try {
         $rendered  = $Parsedown->text($md_input);
         $p_content = '<div class="md-body">'.sanitize_allowlist_html($rendered).'</div>';
 
+        $p_code_effective = 'markdown';
+        $p_code_label     = $geshiformats['markdown'] ?? 'Markdown';
+        $p_code_source    = 'explicit';
+        $p_code_explain   = 'Language was explicitly chosen by the author.';
+
     } else {
         // ---------- Code (choose engine) ----------
         $code_input = htmlspecialchars_decode($p_content);
 
         if (($highlighter ?? 'geshi') === 'highlight') {
-            // ---- Highlight.php (no Composer) ----
-            $hlLang = map_to_hl_lang($p_code);
+            // ---- Highlight.php ----
+            $hlId     = map_to_hl_lang($p_code);          // map geshi -> hljs ids
+            $use_auto = ($hlId === 'auto' || $hlId === 'autodetect' || $hlId === '' || $hlId === 'text');
+
             try {
                 $hl = function_exists('make_highlighter') ? make_highlighter() : null;
                 if (!$hl) { throw new \RuntimeException('Highlighter not available'); }
 
-                try {
-                    $res = $hl->highlight($hlLang, $code_input);
-                } catch (\Throwable $e) {
-                    // Fallback: autodetect + generic SQL if pgsql missing, etc.
-                    if ($hlLang === 'pgsql') {
-                        $res = $hl->highlight('sql', $code_input);
-                    } else {
-                        $res = $hl->highlightAuto($code_input);
+                // 1) Filename strong hint if auto
+                if ($use_auto) {
+                    $fname = paste_pick_from_filename($p_title ?? '', 'highlight', $hl);
+                    if ($fname) {
+                        $langTry          = $fname;
+                        $p_code_source    = 'filename';
+                        $p_code_explain   = paste_build_explain('filename', $p_title ?? '', $code_input, $langTry);
+                        $res              = $hl->highlight($langTry, $code_input);
+                        $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+                        $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
+                        $p_code_effective = $langTry;
+                        $p_code_label     = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
+                        goto HL_DONE;
                     }
                 }
-                $inner = $res->value;                 // HTML with <span> tokens, content escaped
-                $detectedLang = $res->language ?? $hlLang;     // whatever highlight chose
-                $p_content = hl_wrap_with_lines($inner, $detectedLang, $highlight);
+
+                // 2) PHP tag hard rule if auto
+                if ($use_auto && is_probable_php_tag($code_input)) {
+                    $langTry          = 'php';
+                    $p_code_source    = 'php-tag';
+                    $p_code_explain   = paste_build_explain('php-tag', $p_title ?? '', $code_input, $langTry);
+                    $res              = $hl->highlight($langTry, $code_input);
+                    $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+                    $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
+                    $p_code_effective = $langTry;
+                    $p_code_label     = $geshiformats[$langTry] ?? 'PHP';
+                    goto HL_DONE;
+                }
+
+                if ($use_auto && function_exists('paste_autodetect_language')) {
+                    // Unified autodetect
+                    $det = paste_autodetect_language($code_input, 'highlight', $hl);
+                    $langTry          = $det['id'];
+                    $p_code_effective = $langTry;
+                    $p_code_label     = $geshiformats[$langTry] ?? $det['label'];
+                    $p_code_source    = $det['source'];
+                    $p_code_explain   = $det['explain'] ?? '';
+                    if ($p_code_explain === '') {
+                        $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
+                    }
+
+                    if ($langTry === 'markdown') {
+                        // Render Markdown via Parsedown
+                        require_once $parsedown_path;
+                        $Parsedown = new Parsedown();
+                        if (method_exists($Parsedown, 'setSafeMode')) {
+                            $Parsedown->setSafeMode(true);
+                            if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+                        }
+                        $rendered  = $Parsedown->text($code_input);
+                        $p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+                    } else {
+                        $res   = $hl->highlight($langTry, $code_input);
+                        $inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+                        $p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
+                    }
+                } else {
+                    // Explicit language requested OR fallback to built-in auto
+                    $langTry = function_exists('paste_normalize_lang') ? paste_normalize_lang($hlId, 'highlight', $hl) : $hlId;
+                    $p_code_source = 'explicit';
+                    try {
+                        $res = $hl->highlight($langTry, $code_input);
+                    } catch (\Throwable $e) {
+                        // Fallbacks: pgsql -> sql, otherwise shared autodetect
+                        if ($langTry === 'pgsql') {
+                            $res = $hl->highlight('sql', $code_input);
+                        } elseif (function_exists('paste_autodetect_language')) {
+                            $det = paste_autodetect_language($code_input, 'highlight', $hl);
+                            $langTry          = $det['id'];
+                            $p_code_label     = $geshiformats[$langTry] ?? $det['label'];
+                            $p_code_source    = $det['source'];
+                            $p_code_explain   = $det['explain'] ?? '';
+                            if ($p_code_explain === '') {
+                                $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
+                            }
+
+                            if ($langTry === 'markdown') {
+                                require_once $parsedown_path;
+                                $Parsedown = new Parsedown();
+                                if (method_exists($Parsedown, 'setSafeMode')) {
+                                    $Parsedown->setSafeMode(true);
+                                    if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+                                }
+                                $rendered         = $Parsedown->text($code_input);
+                                $p_content        = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+                                $p_code_effective = 'markdown';
+                                goto HL_DONE;
+                            } else {
+                                $res = $hl->highlight($langTry, $code_input);
+                            }
+                        } else {
+                            // last resort: hljs auto
+                            $p_code_source = 'hljs';
+                            $res    = $hl->highlightAuto($code_input);
+                            $langTry = strtolower((string)($res->language ?? $langTry));
+                            $p_code_explain = paste_build_explain('hljs', $p_title ?? '', $code_input, $langTry ?: 'plaintext');
+                        }
+                    }
+                    $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+                    $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
+                    $p_code_effective = $langTry;
+                    $p_code_label     = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
+                }
+                HL_DONE: ;
             } catch (\Throwable $t) {
                 // Last resort: plain escaped
-                $esc = htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                $p_content = hl_wrap_with_lines($esc, 'plaintext', $highlight);
+                $esc              = htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+                $p_content        = hl_wrap_with_lines($esc, 'plaintext', $highlight);
+                $p_code_effective = 'plaintext';
+                $p_code_label     = $geshiformats['plaintext'] ?? 'Plain Text';
+                $p_code_source    = $p_code_source ?? 'fallback';
+                $p_code_explain   = $p_code_explain ?: paste_build_explain('fallback', $p_title ?? '', $code_input, 'plaintext');
             }
 
         } else {
-            // ---- GeSHi (legacy) ----
-            $geshi = new GeSHi($code_input, $p_code, $path);
+            // ---- GeSHi ----
+            $use_auto = ($p_code === 'auto' || $p_code === 'autodetect' || $p_code === '' || $p_code === 'text');
+            $lang_for_geshi = $p_code;
+
+            // 1) Filename hint if auto
+            if ($use_auto) {
+                $fname = paste_pick_from_filename($p_title ?? '', 'geshi', null);
+                if ($fname) {
+                    $lang_for_geshi   = $fname;
+                    $p_code_effective = $lang_for_geshi;
+                    $p_code_label     = $geshiformats[$lang_for_geshi] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($lang_for_geshi) : strtoupper($lang_for_geshi));
+                    $p_code_source    = 'filename';
+                    $p_code_explain   = paste_build_explain('filename', $p_title ?? '', $code_input, $lang_for_geshi);
+                }
+            }
+            // 2) PHP tag hard rule if auto and not already set by filename
+            if ($use_auto && empty($p_code_source) && is_probable_php_tag($code_input)) {
+                $lang_for_geshi   = function_exists('paste_normalize_lang') ? paste_normalize_lang('php', 'geshi', null) : 'php';
+                $p_code_effective = $lang_for_geshi;
+                $p_code_label     = $geshiformats[$lang_for_geshi] ?? 'PHP';
+                $p_code_source    = 'php-tag';
+                $p_code_explain   = paste_build_explain('php-tag', $p_title ?? '', $code_input, $lang_for_geshi);
+            }
+
+            if ($use_auto && empty($p_code_source) && function_exists('paste_autodetect_language')) {
+                $det = paste_autodetect_language($code_input, 'geshi', null);
+                $lang_for_geshi   = $det['id'];                // GeSHi id (mapped)
+                $p_code_effective = $lang_for_geshi;
+                $p_code_label     = $det['label'];
+                $p_code_source    = $det['source'];
+                $p_code_explain   = $det['explain'] ?? '';
+                if ($p_code_explain === '') {
+                    $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $lang_for_geshi);
+                }
+                if ($lang_for_geshi === 'markdown') {
+                    // For Markdown, keep Parsedown path for consistent rendering
+                    require_once $parsedown_path;
+                    $Parsedown = new Parsedown();
+                    if (method_exists($Parsedown, 'setSafeMode')) {
+                        $Parsedown->setSafeMode(true);
+                        if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+                    }
+                    $rendered  = $Parsedown->text($code_input);
+                    $p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+                    goto GESHI_DONE;
+                }
+            } elseif ($use_auto && empty($p_code_source) && function_exists('paste_probable_markdown') && paste_probable_markdown($code_input)) {
+                // Minimal fallback
+                require_once $parsedown_path;
+                $Parsedown = new Parsedown();
+                if (method_exists($Parsedown, 'setSafeMode')) {
+                    $Parsedown->setSafeMode(true);
+                    if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+                }
+                $rendered         = $Parsedown->text($code_input);
+                $p_content        = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+                $p_code_effective = 'markdown';
+                $p_code_label     = 'Markdown';
+                $p_code_source    = 'markdown';
+                $p_code_explain   = "Markdown probability based on headings/lists/links; rendering as Markdown.";
+                goto GESHI_DONE;
+            }
+
+            $geshi = new GeSHi($code_input, $lang_for_geshi, $path);
 
             // Use classes, not inline CSS; let theme CSS style everything
             if (method_exists($geshi, 'enable_classes')) $geshi->enable_classes();
@@ -411,7 +708,6 @@ try {
             // Line numbers (NORMAL to avoid rollovers). No inline style.
             if (method_exists($geshi, 'enable_line_numbers')) $geshi->enable_line_numbers(GESHI_NORMAL_LINE_NUMBERS);
             if (!empty($highlight) && method_exists($geshi, 'highlight_lines_extra')) {
-                // We only mark lines via an extra pass to add a class; no inline style.
                 $geshi->highlight_lines_extra($highlight);
             }
 
@@ -430,12 +726,209 @@ try {
 
             // No stylesheet injection here; theme CSS handles it.
             $ges_style = '';
+
+            // Effective values for UI
+            $p_code_effective = $lang_for_geshi;
+            if (!isset($p_code_label)) {
+                $p_code_label = $geshiformats[$p_code_effective] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($p_code_effective) : strtoupper($p_code_effective));
+            }
+
+            GESHI_DONE: ;
         }
     }
+
+    // ======= New comment submit (PRG) — supports parent_id for replies =======
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_comment') {
+        if (!$paste_id) {
+            $comment_error = 'Invalid paste.';
+        } elseif (!$comments_enabled) {
+            $comment_error = $lang['comments_off'] ?? 'Comments are disabled.';
+        } elseif (!$show_comments) {
+            $comment_error = $lang['comments_blocked_here'] ?? 'Comments are not available for this paste.';
+        } elseif ($comments_require_login && !isset($_SESSION['username'])) {
+            $comment_error = $lang['commentlogin'] ?? 'You must be logged in to comment.';
+        } elseif (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string)$_POST['csrf_token'])) {
+            $comment_error = $lang['invalidtoken'] ?? 'Invalid CSRF token.';
+        } else {
+            $uid = 0;
+            $uname = 'Guest';
+            if (isset($_SESSION['username'])) {
+                $uname = (string)$_SESSION['username'];
+                // fetch id to store as FK
+                try {
+                    $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+                    $q->execute([$uname]);
+                    $uid = (int)($q->fetchColumn() ?: 0);
+                } catch (Throwable $e) { $uid = 0; }
+            }
+
+            $parent_id = null;
+            if (isset($_POST['parent_id']) && $_POST['parent_id'] !== '') {
+                $parent_id = (int)$_POST['parent_id'];
+            }
+
+            // Backward/forward compatible call to addPasteComment()
+            $okId = null;
+            try {
+                if (function_exists('addPasteComment')) {
+                    $rf = new ReflectionFunction('addPasteComment');
+                    if ($rf->getNumberOfParameters() >= 7) {
+                        // Signature with parent_id
+                        $okId = addPasteComment(
+                            $pdo,
+                            (int)$paste_id,
+                            $uid ?: null,
+                            $uname,
+                            $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
+                            (string)($_POST['comment_body'] ?? ''),
+                            $parent_id
+                        );
+                    } else {
+                        // no parent support
+                        $okId = addPasteComment(
+                            $pdo,
+                            (int)$paste_id,
+                            $uid ?: null,
+                            $uname,
+                            $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
+                            (string)($_POST['comment_body'] ?? '')
+                        );
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('add_comment error: ' . $e->getMessage());
+                $okId = null;
+            }
+
+            if ($okId) {
+                // Avoid resubmit on refresh
+                $to = ($mod_rewrite == '1')
+                    ? $baseurl . $paste_id . '#comments'
+                    : $baseurl . 'pastes.php?id=' . (int)$paste_id . '#comments';
+                header('Location: ' . $to);
+                exit;
+            }
+            $comment_error = 'Could not add comment.';
+        }
+    }
+
+    // ======= Delete comment (PRG) — hard delete; replies removed via FK CASCADE) =======
+    // (Allowed even if comments are currently disabled — so users can still remove their content.)
+	if ($_SERVER['REQUEST_METHOD'] === 'POST'
+		&& isset($_POST['action']) && $_POST['action'] === 'delete_comment') {
+
+		$isAjax = (
+			(isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')
+			|| (isset($_POST['ajax']) && $_POST['ajax'] === '1')
+		);
+
+		$err = '';
+		do {
+			if (empty($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string)$_POST['csrf_token'])) {
+				$err = $lang['invalidtoken'] ?? 'Invalid CSRF token.'; break;
+			}
+			if (!isset($_SESSION['username'])) {
+				$err = $lang['commentlogin'] ?? 'Log in required.'; break;
+			}
+
+			// Ensure current paste context (accept id from GET OR POST for robustness)
+			if (!$paste_id) {
+				$paste_id = (isset($_POST['id']) && $_POST['id'] !== '') ? (int)$_POST['id'] : $paste_id;
+			}
+			$cid = isset($_POST['comment_id']) ? (int)$_POST['comment_id'] : 0;
+			if ($cid <= 0 || !$paste_id) { $err = 'Invalid comment.'; break; }
+
+			// Resolve current user id
+			$uid = 0;
+			try {
+				$q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+				$q->execute([$_SESSION['username']]);
+				$uid = (int)($q->fetchColumn() ?: 0);
+			} catch (Throwable $e) {}
+
+			if (!userOwnsComment($pdo, $cid, $uid, (string)$_SESSION['username'])) {
+				$err = $lang['forbidden'] ?? 'Not allowed.'; break;
+			}
+
+			$ok = false;
+			if (function_exists('deleteComment')) {
+				$ok = (bool) deleteComment($pdo, $cid);
+			} else {
+				// Guard by paste_id to avoid cross-paste deletes
+				$stmt = $pdo->prepare("DELETE FROM paste_comments WHERE id = ? AND paste_id = ?");
+				$ok = $stmt->execute([$cid, (int)$paste_id]);
+			}
+			if (!$ok) { $err = $lang['error'] ?? 'Delete failed.'; }
+		} while (false);
+
+		if ($isAjax) {
+			header('Content-Type: application/json; charset=utf-8');
+			echo json_encode([
+				'success' => ($err === ''),
+				'message' => $err,
+			]);
+			exit;
+		}
+
+		// Redirect back to #comments (PRG). If error, carry as c_err=
+		$to = ($mod_rewrite == '1')
+			? $baseurl . (int)$paste_id . '#comments'
+			: $baseurl . 'pastes.php?id=' . (int)$paste_id . '#comments';
+        if ($err !== '') {
+            $to .= (strpos($to, '?') === false ? '?' : '&') . 'c_err=' . rawurlencode($err);
+        }
+		header('Location: ' . $to);
+		exit;
+	}
 
     // header
     $theme = 'theme/' . htmlspecialchars($default_theme, ENT_QUOTES, 'UTF-8');
     require_once $theme . '/header.php';
+
+    // Fetch comments (tree if available), then decorate
+    if (function_exists('getPasteCommentsTree')) {
+        $comments = getPasteCommentsTree($pdo, (int)$paste_id);
+        // decorate recursively
+        $decorate = function (&$node) use (&$decorate, $pdo) {
+            $node['body_html'] = render_comment_html((string)($node['body'] ?? ''));
+            $node['can_delete'] = isset($_SESSION['username']) && isset($_SESSION['csrf_token']) && (function() use ($pdo, $node) {
+                $uid = 0;
+                try {
+                    $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+                    $q->execute([$_SESSION['username']]);
+                    $uid = (int)($q->fetchColumn() ?: 0);
+                } catch (Throwable $e) { $uid = 0; }
+                return userOwnsComment($pdo, (int)$node['id'], $uid, (string)$_SESSION['username']);
+            })();
+            if (!empty($node['children'])) {
+                foreach ($node['children'] as &$ch) $decorate($ch);
+                unset($ch);
+            }
+        };
+        foreach ($comments as &$c) $decorate($c);
+        unset($c);
+    } else {
+        // flat fetch
+        $comments = getPasteComments($pdo, (int)$paste_id, 200, 0);
+        foreach ($comments as &$c) {
+            $c['body_html'] = render_comment_html((string)$c['body']);
+            $c['can_delete'] = isset($_SESSION['username']) && isset($_SESSION['csrf_token']) && (function() use ($pdo, $c) {
+                $uid = 0;
+                try {
+                    $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+                    $q->execute([$_SESSION['username']]);
+                    $uid = (int)($q->fetchColumn() ?: 0);
+                } catch (Throwable $e) { $uid = 0; }
+                return userOwnsComment($pdo, (int)$c['id'], $uid, (string)$_SESSION['username']);
+            })();
+        }
+        unset($c);
+    }
+
+    // Carry any error from PRG redirect
+    if ($comment_error === '' && isset($_GET['c_err']) && $_GET['c_err'] !== '') {
+        $comment_error = (string)$_GET['c_err'];
+    }
 
     // view OR password prompt
     if ($p_password === "NONE") {
@@ -453,7 +946,7 @@ try {
             deleteMyPaste($pdo, (int) $paste_id);
         }
     } else {
-        // Password-protected flow shows the prompt via errors.php (partial)
+        // Password-protected flow shows the prompt via errors.php
         $require_password = true;
 
         $p_password_input = isset($_POST['mypass'])
@@ -506,3 +999,4 @@ try {
     require_once $theme . '/errors.php';
     require_once $theme . '/footer.php';
 }
+?>

@@ -229,6 +229,59 @@ CREATE TABLE `site_info` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
+--
+-- Table structure for table `paste_comments`
+--
+
+CREATE TABLE `paste_comments` (
+  `id` int NOT NULL,
+  `paste_id` int NOT NULL,
+  `parent_id` int DEFAULT NULL,
+  `user_id` int DEFAULT NULL,
+  `username` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `body` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime NOT NULL,
+  `ip` varchar(45) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  `body_html_cached` text COLLATE utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Indexes for table `paste_comments`
+--
+ALTER TABLE `paste_comments`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_paste_time` (`paste_id`,`created_at`),
+  ADD KEY `fk_comments_user` (`user_id`),
+  ADD KEY `idx_parent` (`paste_id`,`parent_id`,`created_at`),
+  ADD KEY `fk_comments_parent` (`parent_id`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `paste_comments`
+--
+ALTER TABLE `paste_comments`
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=38;
+
+--
+-- Constraints for dumped tables
+--
+
+--
+-- Constraints for table `paste_comments`
+--
+ALTER TABLE `paste_comments`
+  ADD CONSTRAINT `fk_comments_parent` FOREIGN KEY (`parent_id`) REFERENCES `paste_comments` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_comments_paste` FOREIGN KEY (`paste_id`) REFERENCES `pastes` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_comments_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 
 --
 -- Table structure for table `site_permissions`

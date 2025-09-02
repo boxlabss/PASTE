@@ -59,24 +59,23 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
                   </div>
                   <div class="col-sm-4">
                     <select class="form-select" name="format" id="format">
-                      <option value="markdown" <?php echo ($format ?? 'markdown') == 'markdown' ? 'selected' : ''; ?>>Markdown</option>
-                      <?php
-                      $geshiformats    = $geshiformats ?? [];
-                      $popular_formats = $popular_formats ?? [];
-                      foreach ($geshiformats as $code => $name) {
-                        if ($code !== 'markdown' && in_array($code, $popular_formats)) {
-                          $sel = ($format ?? 'markdown') == $code ? 'selected' : '';
-                          echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
-                        }
-                      }
-                      echo '<option value="text">-------------------------------------</option>';
-                      foreach ($geshiformats as $code => $name) {
-                        if ($code !== 'markdown' && !in_array($code, $popular_formats)) {
-                          $sel = ($format ?? 'markdown') == $code ? 'selected' : '';
-                          echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
-                        }
-                      }
-                      ?>
+					  <?php
+						$geshiformats     = $geshiformats ?? [];
+						$popular_formats  = $popular_formats ?? [];
+						foreach ($geshiformats as $code => $name) {
+							if (in_array($code, $popular_formats)) {
+								$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+								echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+							}
+						}
+						echo '<option value="text">-------------------------------------</option>';
+						foreach ($geshiformats as $code => $name) {
+							if (!in_array($code, $popular_formats)) {
+								$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+								echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+							}
+						}
+					  ?>
                     </select>
                   </div>
                   <div class="col-sm-2 ms-auto">
@@ -212,24 +211,23 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
                   </div>
                   <div class="col-sm-4">
                     <select class="form-select" name="format" id="format">
-                      <option value="markdown" <?php echo ($format ?? 'markdown') == 'markdown' ? 'selected' : ''; ?>>Markdown</option>
-                      <?php
-                      $geshiformats    = $geshiformats ?? [];
-                      $popular_formats = $popular_formats ?? [];
-                      foreach ($geshiformats as $code => $name) {
-                        if ($code !== 'markdown' && in_array($code, $popular_formats)) {
-                          $sel = ($format ?? 'markdown') == $code ? 'selected' : '';
-                          echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
-                        }
-                      }
-                      echo '<option value="text">-------------------------------------</option>';
-                      foreach ($geshiformats as $code => $name) {
-                        if ($code !== 'markdown' && !in_array($code, $popular_formats)) {
-                          $sel = ($format ?? 'markdown') == $code ? 'selected' : '';
-                          echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
-                        }
-                      }
-                      ?>
+					  <?php
+						$geshiformats     = $geshiformats ?? [];
+						$popular_formats  = $popular_formats ?? [];
+						foreach ($geshiformats as $code => $name) {
+							if (in_array($code, $popular_formats)) {
+								$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+								echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+							}
+						}
+						echo '<option value="text">-------------------------------------</option>';
+						foreach ($geshiformats as $code => $name) {
+							if (!in_array($code, $popular_formats)) {
+								$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+								echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+							}
+						}
+					  ?>
                     </select>
                   </div>
                   <div class="col-sm-2 ms-auto">

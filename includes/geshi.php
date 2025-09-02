@@ -63,7 +63,7 @@ define('GESHI_NO_LINE_NUMBERS', 0);
 /** Use normal line numbers when building the result */
 define('GESHI_NORMAL_LINE_NUMBERS', 1);
 /** Use fancy line numbers when building the result */
-define('GESHI_FANCY_LINE_NUMBERS', 2);
+define('GESHI_FANCY_LINE_NUMBERS', 1);
 
 // Container HTML type
 /** Use nothing to surround the source */

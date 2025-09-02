@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/02 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -12,9 +12,9 @@
  * 
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See LICENCE for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License in LICENCE for more details.
  */
-
 $date = date('jS F Y');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '';
 
@@ -122,6 +122,7 @@ $web_user = $_SERVER['USER']
                 <div class="card mb-4">
                     <div class="card-body">
                         <h5 class="card-title">Database and Configuration</h5>
+						<small class="text-danger">If upgrading from Paste 2.x - backup your database.</small>
                         <div class="alert alert-danger" id="alertfailed" role="alert" style="display: none;">
                             Configuration failed. <span id="error-details"></span>
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -193,6 +194,17 @@ $web_user = $_SERVER['USER']
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
                         <form id="admin-form" class="row g-3">
+							<div class="col-12">
+							  <hr>
+							  <h6 class="mb-2">Re-key old encrypted pastes (optional)</h6>
+							  <label for="old_sec_key" class="form-label">Old <code>$sec_key</code> from v2.x</label>
+							  <input type="text" class="form-control" id="old_sec_key" name="old_sec_key"
+									 placeholder="Paste the old $sec_key (hex or plain string)">
+							  <small class="text-muted">
+								If provided, the installer will decrypt all pastes with <code>encrypt='1'</code> using the old key and
+								re-encrypt them with your new key (secure IV+HMAC format).
+							  </small>
+							</div>
                             <div class="col-md-6">
                                 <label for="admin_user" class="form-label">Username</label>
                                 <input type="text" class="form-control" id="admin_user" name="admin_user" required>
@@ -235,7 +247,7 @@ $web_user = $_SERVER['USER']
             <a href="https://github.com/boxlabss/PASTE">Updates</a> &mdash; <a href="https://github.com/boxlabss/PASTE/issues">Bugs</a>
         </div>
         <div class="col-md-6 text-end">
-            Powered by <a href="https://phpaste.sourceforge.io/" target="_blank">Paste 3</a>
+            Powered by <a href="https://phpaste.sourceforge.io/" target="_blank">Paste 3.2</a>
         </div>
     </div>
 </div>

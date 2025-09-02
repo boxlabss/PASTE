@@ -62,7 +62,6 @@ try {
 
 /** Helpers **/
 function banIpAndDeletePaste(PDO $pdo, int $pasteId, string $nowDate): void {
-    // get paste IP
     $st = $pdo->prepare("SELECT ip FROM pastes WHERE id = ?");
     $st->execute([$pasteId]);
     $row = $st->fetch();
@@ -70,13 +69,10 @@ function banIpAndDeletePaste(PDO $pdo, int $pasteId, string $nowDate): void {
     $pasteIp = trim((string)$row['ip']);
 
     if ($pasteIp !== '') {
-        // ensure row exists in ban_user; handle last_date not null
-        // try insert; if duplicates/exists, update last_date
         try {
             $ins = $pdo->prepare("INSERT INTO ban_user (ip, last_date) VALUES (?, ?)");
             $ins->execute([$pasteIp, $nowDate]);
         } catch (PDOException $ex) {
-            // if unique constraint on ip, update last_date
             $upd = $pdo->prepare("UPDATE ban_user SET last_date = ? WHERE ip = ?");
             $upd->execute([$nowDate, $pasteIp]);
         }
@@ -84,7 +80,26 @@ function banIpAndDeletePaste(PDO $pdo, int $pasteId, string $nowDate): void {
 
     // delete dependent rows then paste
     $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$pasteId]);
+    $pdo->prepare("DELETE FROM paste_comments WHERE paste_id = ?")->execute([$pasteId]);
     $pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$pasteId]);
+}
+
+function banIpAndDeleteComment(PDO $pdo, int $commentId, string $nowDate): void {
+    // Pull the comment IP then ban & delete the comment
+    $st = $pdo->prepare("SELECT ip FROM paste_comments WHERE id = ?");
+    $st->execute([$commentId]);
+    $row = $st->fetch();
+    if ($row && trim((string)$row['ip']) !== '') {
+        $cIp = trim((string)$row['ip']);
+        try {
+            $ins = $pdo->prepare("INSERT INTO ban_user (ip, last_date) VALUES (?, ?)");
+            $ins->execute([$cIp, $nowDate]);
+        } catch (PDOException) {
+            $upd = $pdo->prepare("UPDATE ban_user SET last_date = ? WHERE ip = ?");
+            $upd->execute([$nowDate, $cIp]);
+        }
+    }
+    $pdo->prepare("DELETE FROM paste_comments WHERE id = ?")->execute([$commentId]);
 }
 
 function getPasteDetails(PDO $pdo, int $id): ?array {
@@ -113,7 +128,15 @@ function getPasteDetails(PDO $pdo, int $id): ?array {
 
     $vs = $pdo->prepare("SELECT COUNT(*) AS c FROM paste_views WHERE paste_id = ?");
     $vs->execute([$id]);
-    $views = (int)$vs->fetch()['c'];
+    $views = (int)($vs->fetch()['c'] ?? 0);
+
+    // comment count
+    $cs = $pdo->prepare("SELECT COUNT(*) AS c FROM paste_comments WHERE paste_id = ?");
+    $cs->execute([$id]);
+    $comments = (int)($cs->fetch()['c'] ?? 0);
+
+    $posted_at = $row['date'] ?? null;
+    $posted_ts = $posted_at ? strtotime((string)$posted_at) : null;
 
     return [
         'id'       => $id,
@@ -122,22 +145,72 @@ function getPasteDetails(PDO $pdo, int $id): ?array {
         'visible'  => $visible,
         'password' => $pass,
         'views'    => $views,
+        'comments' => $comments,
         'ip'       => $row['ip'] ?? '',
         'code'     => $row['code'] ?? '',
         'expiry'   => $expiry,
         'encrypt'  => $encrypt,
+        'posted_at'=> $posted_at,
+        'posted_ts'=> $posted_ts,
     ];
+}
+
+/** Human “x ago” (1 unit) */
+function ago_from_ts(?int $ts): string {
+    if (!$ts) return '';
+    $diff = max(0, time() - $ts);
+    $units = [
+        ['year',   31536000],
+        ['month',   2592000],
+        ['day',       86400],
+        ['hour',       3600],
+        ['minute',       60],
+        ['second',        1],
+    ];
+    foreach ($units as [$name, $sec]) {
+        if ($diff >= $sec) {
+            $n = (int) floor($diff / $sec);
+            return $n . ' ' . $name . ($n > 1 ? 's' : '') . ' ago';
+        }
+    }
+    return 'just now';
+}
+
+/** Format DB datetime (assumed UTC) as “YYYY-MM-DD HH:MM UTC” */
+function format_db_datetime(?string $dt): string {
+    if (!$dt) return '—';
+    try {
+        $d = new DateTime($dt, new DateTimeZone('UTC'));
+        return $d->format('Y-m-d H:i') . ' UTC';
+    } catch (Throwable) {
+        return htmlspecialchars($dt, ENT_QUOTES, 'UTF-8');
+    }
+}
+
+/** Friendly language label */
+function friendly_lang(?string $id): string {
+    $id = strtolower(trim((string)$id));
+    if ($id === '') return 'Text';
+    $label = str_replace(['-','_'], ' ', $id);
+    $label = ucwords($label);
+    $label = preg_replace('/\bJson\b/','JSON',$label);
+    $label = preg_replace('/\bYaml\b/','YAML',$label);
+    $label = preg_replace('/\bSql\b/','SQL',$label);
+    $label = preg_replace('/\bXml\b/','XML',$label);
+    return $label;
 }
 
 /** Messages **/
 $msg = '';
-// Single actions
+
+// Single paste actions
 if (isset($_GET['delete'])) {
     $delid = (int)filter_var($_GET['delete'], FILTER_SANITIZE_NUMBER_INT);
     try {
         $pdo->beginTransaction();
         $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$delid]);
-        $pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$delid]);
+        $pdo->prepare("DELETE FROM paste_comments WHERE paste_id = ?")->execute([$delid]); // keep DB tidy (also has FK)
+        $pdo->prepare("DELETE FROM pastes      WHERE id = ?")->execute([$delid]);
         $pdo->commit();
         $msg = '<div class="alert alert-success text-center">Paste deleted successfully.</div>';
     } catch (PDOException $e) {
@@ -159,7 +232,31 @@ if (isset($_GET['ban'])) {
     }
 }
 
-// Bulk actions
+// Single comment actions
+if (isset($_GET['del_comment'])) {
+    $cid = (int)filter_var($_GET['del_comment'], FILTER_SANITIZE_NUMBER_INT);
+    try {
+        $pdo->prepare("DELETE FROM paste_comments WHERE id = ?")->execute([$cid]);
+        $msg = '<div class="alert alert-success text-center">Comment deleted.</div>';
+    } catch (PDOException $e) {
+        $msg = '<div class="alert alert-danger text-center">Error deleting comment: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+}
+
+if (isset($_GET['ban_comment'])) {
+    $cid = (int)filter_var($_GET['ban_comment'], FILTER_SANITIZE_NUMBER_INT);
+    try {
+        $pdo->beginTransaction();
+        banIpAndDeleteComment($pdo, $cid, $date);
+        $pdo->commit();
+        $msg = '<div class="alert alert-warning text-center">Commenter IP banned and comment deleted.</div>';
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $msg = '<div class="alert alert-danger text-center">Error banning IP/deleting comment: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+}
+
+// Bulk paste actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action']) && !empty($_POST['selected_ids'])) {
     $bulk = $_POST['bulk_action'];
     $ids = array_map('intval', (array)$_POST['selected_ids']);
@@ -172,7 +269,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action']) && !em
                     banIpAndDeletePaste($pdo, $pid, $date);
                 } else {
                     $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$pid]);
-                    $pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$pid]);
+                    $pdo->prepare("DELETE FROM paste_comments WHERE paste_id = ?")->execute([$pid]);
+                    $pdo->prepare("DELETE FROM pastes      WHERE id = ?")->execute([$pid]);
                 }
             }
             $pdo->commit();
@@ -217,23 +315,38 @@ $total_pages  = max(1, (int)ceil($total_pastes / $per_page));
 $per_page_safe = (int)$per_page;
 $offset_safe   = (int)$offset;
 
+// NOTE: join in comment counts
 $sql = "
 SELECT 
-    p.id, p.member, p.ip, p.visible, p.title, p.now_time,
-    COALESCE(v.view_count, 0) AS views
+    p.id, p.member, p.ip, p.visible, p.title,
+    p.code,
+    p.date AS posted_at,
+    UNIX_TIMESTAMP(p.date) AS posted_ts,
+    COALESCE(v.view_count, 0) AS views,
+    COALESCE(cmt.c, 0) AS comments_count
 FROM pastes p
 LEFT JOIN (
     SELECT paste_id, COUNT(*) AS view_count
     FROM paste_views
     GROUP BY paste_id
 ) v ON v.paste_id = p.id
+LEFT JOIN (
+    SELECT paste_id, COUNT(*) AS c
+    FROM paste_comments
+    GROUP BY paste_id
+) cmt ON cmt.paste_id = p.id
 $where
-ORDER BY p.now_time DESC
+ORDER BY p.date DESC
 LIMIT $per_page_safe OFFSET $offset_safe
 ";
 $st = $pdo->prepare($sql);
 $st->execute($params);
 $pastes = $st->fetchAll();
+
+// comments view pagination (when inspecting a single paste's comments)
+$c_per_page = 20;
+$c_page     = isset($_GET['cpage']) ? max(1, (int)$_GET['cpage']) : 1;
+$c_offset   = ($c_page - 1) * $c_per_page;
 
 ?>
 <!DOCTYPE html>
@@ -284,6 +397,34 @@ $pastes = $st->fetchAll();
   .offcanvas-nav{width:280px;background:#0f1523;color:#dbe5f5}
   .offcanvas-nav .list-group-item{background:transparent;border:0;color:#dbe5f5}
   .offcanvas-nav .list-group-item:hover{background:#0e1422}
+
+  /* Copy UX + time toggle */
+  .copyable{cursor:pointer; position:relative;}
+  .copyable:hover{filter:brightness(1.1)}
+  .copyable.copied::after{
+    content:'Copied!';
+    position:absolute; top:-1.6rem; left:50%; transform:translateX(-50%);
+    background:#198754; color:#fff; padding:2px 6px; border-radius:6px;
+    font-size:12px; white-space:nowrap; opacity:0; animation:fadePop 1.6s ease-out 1;
+  }
+  @keyframes fadePop{
+    0%{opacity:0; transform:translate(-50%,-2px)}
+    10%{opacity:1; transform:translate(-50%,-6px)}
+    80%{opacity:1;}
+    100%{opacity:0; transform:translate(-50%,-10px)}
+  }
+  .time-toggle{cursor:pointer}
+  .filter-chips .btn{border-radius:999px; padding:.35rem .75rem;}
+
+  .comment-snippet{
+    max-width: 520px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge-count{
+    background:#0b1220;border:1px solid var(--border);color:#cfe1ff
+  }
 </style>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -291,7 +432,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.delete-paste').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      if (confirm('Delete this paste? This also clears its view logs.')) {
+      if (confirm('Delete this paste? This also clears its view logs and comments.')) {
         window.location.href = a.getAttribute('href');
       }
     });
@@ -300,11 +441,29 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.ban-paste').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      if (confirm('Ban this paste’s IP and delete the paste?')) {
+      if (confirm('Ban this paste’s IP and delete the paste (views + comments will be removed)?')) {
         window.location.href = a.getAttribute('href');
       }
     });
   });
+  // Comment deletes
+  document.querySelectorAll('.delete-comment').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (confirm('Delete this comment?')) {
+        window.location.href = a.getAttribute('href');
+      }
+    });
+  });
+  document.querySelectorAll('.ban-comment').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (confirm('Ban this commenter IP and delete the comment?')) {
+        window.location.href = a.getAttribute('href');
+      }
+    });
+  });
+
   // Select all
   const checkAll = document.getElementById('select-all');
   if (checkAll){
@@ -324,11 +483,48 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       let msg = 'Proceed with bulk action?';
-      if (action === 'bulk_ban_delete') msg = 'Ban IPs for selected pastes and delete them?';
-      if (action === 'bulk_delete') msg = 'Delete selected pastes (and their view logs)?';
+      if (action === 'bulk_ban_delete') msg = 'Ban IPs for selected pastes and delete them (including comments and view logs)?';
+      if (action === 'bulk_delete') msg = 'Delete selected pastes (including comments and view logs)?';
       if (!confirm(msg)) e.preventDefault();
     });
   }
+
+  // Click-to-copy (ID / IP)
+  document.querySelectorAll('.copyable').forEach(el => {
+    el.addEventListener('click', async () => {
+      const text = el.getAttribute('data-copy') || el.textContent.trim();
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta);
+          ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        el.classList.add('copied');
+        setTimeout(() => el.classList.remove('copied'), 1200);
+      } catch(e) { /* ignore */ }
+    });
+  });
+
+  // Posted cell toggle (abs <-> rel <-> both)
+  document.querySelectorAll('.time-toggle').forEach(cell => {
+    const abs = cell.querySelector('.time-abs');
+    const rel = cell.querySelector('.time-rel');
+    if (!abs || !rel) return;
+    cell.dataset.mode = 'both';
+    cell.title = 'Click to toggle absolute/relative';
+    cell.addEventListener('click', () => {
+      const m = cell.dataset.mode;
+      if (m === 'both') {
+        rel.style.display = 'none'; abs.style.display = 'block'; cell.dataset.mode = 'abs';
+      } else if (m === 'abs') {
+        abs.style.display = 'none'; rel.style.display = 'block'; cell.dataset.mode = 'rel';
+      } else {
+        abs.style.display = 'block'; rel.style.display = 'block'; cell.dataset.mode = 'both';
+      }
+    });
+  });
 });
 </script>
 </head>
@@ -337,7 +533,6 @@ document.addEventListener('DOMContentLoaded', function() {
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
     <div class="d-flex align-items-center gap-2">
-      <!-- Mobile: open offcanvas -->
       <button class="btn btn-soft d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#navOffcanvas" aria-controls="navOffcanvas">
         <i class="bi bi-list"></i>
       </button>
@@ -427,24 +622,175 @@ document.addEventListener('DOMContentLoaded', function() {
                   <tr><td>Visibility</td><td><?php echo htmlspecialchars($detail['visible']); ?></td></tr>
                   <tr><td>Password</td><td><?php echo htmlspecialchars($detail['password']); ?></td></tr>
                   <tr><td>Views</td><td><?php echo number_format((int)$detail['views']); ?></td></tr>
+                  <tr><td>Comments</td><td><?php echo number_format((int)$detail['comments']); ?></td></tr>
                   <tr><td>IP</td><td><?php echo htmlspecialchars($detail['ip']); ?></td></tr>
                   <tr><td>Syntax Highlighting</td><td><?php echo htmlspecialchars($detail['code']); ?></td></tr>
                   <tr><td>Expiration</td><td><?php echo htmlspecialchars($detail['expiry']); ?></td></tr>
                   <tr><td>Encrypted Paste</td><td><?php echo htmlspecialchars($detail['encrypt']); ?></td></tr>
+                  <tr>
+                    <td>Posted</td>
+                    <td>
+                      <?php echo format_db_datetime($detail['posted_at'] ?? null); ?>
+                      <span class="text-muted small">(<?php echo htmlspecialchars(ago_from_ts((int)($detail['posted_ts'] ?? 0))); ?>)</span>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
               <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="btn btn-soft">Back</a>
+              <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF'].'?comments='.$detail['id']); ?>" class="btn btn-primary">View Comments</a>
             </div>
           </div>
         <?php else: ?>
           <div class="card mb-3"><div class="card-body"><h4 class="card-title">No paste found</h4></div></div>
         <?php endif; ?>
 
+      <?php elseif (isset($_GET['comments'])): ?>
+        <?php
+          $pid = (int)filter_var($_GET['comments'], FILTER_SANITIZE_NUMBER_INT);
+
+          // Fetch paste title/member for header
+          $pinfo = $pdo->prepare("SELECT title, member FROM pastes WHERE id=?");
+          $pinfo->execute([$pid]);
+          $pmeta = $pinfo->fetch();
+
+          // Count comments
+          $ct = $pdo->prepare("SELECT COUNT(*) AS c FROM paste_comments WHERE paste_id=:pid");
+          $ct->execute([':pid' => $pid]);
+          $total_comments = (int)($ct->fetch()['c'] ?? 0);
+          $total_c_pages  = max(1, (int)ceil($total_comments / $c_per_page));
+
+          // Fetch paginated comments (all NAMED params to avoid HY093)
+          $csql = "
+            SELECT id, paste_id, user_id, username, body, created_at, ip
+            FROM paste_comments
+            WHERE paste_id = :pid
+            ORDER BY created_at DESC, id DESC
+            LIMIT :lim OFFSET :off
+          ";
+          $cst = $pdo->prepare($csql);
+          $cst->bindValue(':pid', $pid, PDO::PARAM_INT);
+          $cst->bindValue(':lim', $c_per_page, PDO::PARAM_INT);
+          $cst->bindValue(':off', $c_offset, PDO::PARAM_INT);
+          $cst->execute();
+          $comments = $cst->fetchAll();
+        ?>
+        <div class="card mb-3">
+          <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center justify-content-between mb-2">
+              <div>
+                <h4 class="card-title mb-1">Comments for Paste #<?php echo (int)$pid; ?></h4>
+                <div class="text-muted small">
+                  <?php
+                  $t = $pmeta['title'] ?? '';
+                  $m = $pmeta['member'] ?? '';
+                  echo htmlspecialchars($t !== '' ? $t : 'Untitled');
+                  if ($m !== '') echo ' &middot; by '.htmlspecialchars($m);
+                  ?>
+                </div>
+              </div>
+              <div>
+                <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="btn btn-soft">Back to Pastes</a>
+                <a href="<?php echo htmlspecialchars('../paste.php?id='.$pid); ?>" class="btn btn-soft" target="_blank">Open Paste</a>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-hover table-bordered align-middle">
+                <thead>
+                  <tr>
+                    <th style="width:80px">ID</th>
+                    <th style="width:160px">User</th>
+                    <th>Comment</th>
+                    <th style="width:220px">Posted</th>
+                    <th style="width:140px">IP</th>
+                    <th style="width:220px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <?php if ($comments): ?>
+                    <?php foreach ($comments as $c): ?>
+                      <tr>
+                        <td><?php echo (int)$c['id']; ?></td>
+                        <td>
+                          <?php
+                            $u = trim((string)($c['username'] ?? ''));
+                            $uid = (int)($c['user_id'] ?? 0);
+                            echo $u !== '' ? htmlspecialchars($u) : '<span class="text-muted">—</span>';
+                            if ($uid > 0) echo '<br><span class="badge bg-success mt-1">User #'.(int)$uid.'</span>';
+                            else echo '<br><span class="badge bg-secondary mt-1">Guest</span>';
+                          ?>
+                        </td>
+                        <td><div class="comment-snippet" title="<?php echo htmlspecialchars($c['body'] ?? ''); ?>"><?php echo htmlspecialchars($c['body'] ?? ''); ?></div></td>
+                        <td>
+                          <?php
+                            $ts = $c['created_at'] ? strtotime((string)$c['created_at']) : null;
+                            echo format_db_datetime($c['created_at'] ?? null);
+                            echo ' <span class="text-muted small">(' . htmlspecialchars(ago_from_ts($ts)) . ')</span>';
+                          ?>
+                        </td>
+                        <td><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($c['ip'] ?? ''); ?>" title="Click to copy IP"><?php echo htmlspecialchars($c['ip'] ?? ''); ?></span></td>
+                        <td>
+                          <a class="btn btn-warning btn-sm ban-comment" href="?comments=<?php echo (int)$pid; ?>&ban_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?>">Ban IP + Delete</a>
+                          <a class="btn btn-danger btn-sm delete-comment" href="?comments=<?php echo (int)$pid; ?>&del_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?>">Delete</a>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  <?php else: ?>
+                    <tr><td colspan="6" class="text-center">No comments for this paste.</td></tr>
+                  <?php endif; ?>
+                </tbody>
+              </table>
+            </div>
+
+            <nav aria-label="Comments pagination">
+              <ul class="pagination justify-content-center">
+                <?php
+                $base = $_SERVER['PHP_SELF'].'?comments='.$pid;
+                if ($c_page > 1) {
+                  echo '<li class="page-item"><a class="page-link" href="'.htmlspecialchars($base.'&cpage='.($c_page-1)).'">&laquo;</a></li>';
+                } else {
+                  echo '<li class="page-item disabled"><span class="page-link">&laquo;</span></li>';
+                }
+                $c_start = max(1, $c_page-3); $c_end = min($total_c_pages, $c_page+3);
+                for ($i=$c_start; $i<=$c_end; $i++){
+                  echo '<li class="page-item'.($i==$c_page?' active':'').'"><a class="page-link" href="'.htmlspecialchars($base.'&cpage='.$i).'">'.$i.'</a></li>';
+                }
+                if ($c_page < $total_c_pages) {
+                  echo '<li class="page-item"><a class="page-link" href="'.htmlspecialchars($base.'&cpage='.($c_page+1)).'">&raquo;</a></li>';
+                } else {
+                  echo '<li class="page-item disabled"><span class="page-link">&raquo;</span></li>';
+                }
+                ?>
+              </ul>
+            </nav>
+          </div>
+        </div>
+
       <?php else: ?>
         <div class="card mb-3">
           <div class="card-body">
             <div class="d-flex flex-wrap align-items-center justify-content-between">
               <h4 class="card-title mb-3">Manage Pastes</h4>
+
+              <!-- Quick filter chips -->
+              <div class="filter-chips mb-3">
+                <?php
+                  $chip = function(string $val, string $label) use ($visibility_filter, $q) {
+                      $p = [];
+                      if ($val !== 'all') $p['visibility'] = $val; else $p['visibility'] = 'all';
+                      if ($q !== '') $p['q'] = $q;
+                      $href = '?'.http_build_query($p);
+                      $active = ($visibility_filter === $val) || ($val==='all' && $visibility_filter==='all');
+                      echo '<a class="btn '.($active?'btn-primary':'btn-soft').'" href="'.htmlspecialchars($href).'">'.$label.'</a> ';
+                  };
+                  $chip('all','All');
+                  $chip('0','Public');
+                  $chip('1','Unlisted');
+                  $chip('2','Private');
+                  $chip('3','Banned');
+                ?>
+              </div>
+
               <form method="GET" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="row g-2 mb-3">
                 <div class="col-auto">
                   <label class="visually-hidden" for="visibility">Visibility</label>
@@ -453,6 +799,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <option value="0"   <?php echo $visibility_filter==='0'?'selected':''; ?>>Public</option>
                     <option value="1"   <?php echo $visibility_filter==='1'?'selected':''; ?>>Unlisted</option>
                     <option value="2"   <?php echo $visibility_filter==='2'?'selected':''; ?>>Private</option>
+                    <option value="3"   <?php echo $visibility_filter==='3'?'selected':''; ?>>Banned</option>
                   </select>
                 </div>
                 <div class="col-auto">
@@ -485,8 +832,11 @@ document.addEventListener('DOMContentLoaded', function() {
                       <th>ID</th>
                       <th>Username</th>
                       <th>Title</th>
+                      <th>Lang</th>
+                      <th>Posted</th>
                       <th>IP</th>
                       <th>Views</th>
+                      <th>Comments</th>
                       <th>Visibility</th>
                       <th>Ban IP + Delete</th>
                       <th>Details</th>
@@ -512,11 +862,20 @@ document.addEventListener('DOMContentLoaded', function() {
                         ?>
                         <tr>
                           <td><input type="checkbox" class="row-select" name="selected_ids[]" value="<?php echo (int)$row['id']; ?>"></td>
-                          <td><?php echo (int)$row['id']; ?></td>
+                          <td><span class="copyable" data-copy="<?php echo (int)$row['id']; ?>" title="Click to copy ID"><?php echo (int)$row['id']; ?></span></td>
                           <td><?php echo htmlspecialchars($row['member']); ?></td>
                           <td><?php echo htmlspecialchars($row['title']); ?></td>
-                          <td><span class="badge bg-primary"><?php echo htmlspecialchars($row['ip']); ?></span></td>
+                          <td><?php echo htmlspecialchars(friendly_lang($row['code'] ?? '')); ?></td>
+                          <td class="time-toggle">
+                            <div class="time-abs"><?php echo format_db_datetime($row['posted_at'] ?? null); ?></div>
+                            <div class="time-rel text-muted small"><?php echo htmlspecialchars(ago_from_ts((int)($row['posted_ts'] ?? 0))); ?></div>
+                          </td>
+                          <td><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($row['ip']); ?>" title="Click to copy IP"><?php echo htmlspecialchars($row['ip']); ?></span></td>
                           <td><?php echo number_format((int)$row['views']); ?></td>
+                          <td>
+                            <span class="badge badge-count"><?php echo number_format((int)($row['comments_count'] ?? 0)); ?></span>
+                            <a class="btn btn-soft btn-sm ms-1" href="?comments=<?php echo (int)$row['id']; ?>">View</a>
+                          </td>
                           <td><?php echo htmlspecialchars($visibility); ?></td>
                           <td><a href="?ban=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . $qsBase; ?>" class="btn btn-warning btn-sm ban-paste">Ban IP + Delete</a></td>
                           <td><a href="?details=<?php echo (int)$row['id']; ?>" class="btn btn-soft btn-sm">Details</a></td>
@@ -525,7 +884,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         </tr>
                       <?php endforeach; ?>
                     <?php else: ?>
-                      <tr><td colspan="11" class="text-center">No pastes found</td></tr>
+                      <tr><td colspan="14" class="text-center">No pastes found</td></tr>
                     <?php endif; ?>
                   </tbody>
                 </table>

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,6 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
+ 
 declare(strict_types=1);
 
 ob_start();
@@ -99,6 +100,52 @@ $admin_mail  = $email;
 $admin_name  = $site_name;
 $mod_rewrite = (string)($site['mod_rewrite'] ?? ($mod_rewrite ?? '1')); // avoid undefined in header
 
+// next resolver
+function safe_next_url(string $baseurl): string {
+    $rawNext = (string)($_GET['next'] ?? $_POST['next'] ?? $_SESSION['login_next'] ?? '');
+    $next = trim(html_entity_decode($rawNext, ENT_QUOTES, 'UTF-8'));
+    if ($next === '') return '';
+
+    $base = rtrim($baseurl ?: './', '/');
+    $pBase = parse_url($base);
+    if (!$pBase || empty($pBase['host']) || empty($pBase['scheme'])) return '';
+
+    // protocol-relative > force site scheme
+    if (strpos($next, '//') === 0) {
+        $next = $pBase['scheme'] . ':' . $next;
+    }
+
+    // absolute URL → must be same host; force site scheme
+    if (preg_match('~^[a-z][a-z0-9+.-]*://~i', $next)) {
+        $pNext = parse_url($next);
+        if (!$pNext) return '';
+        if (strcasecmp($pNext['host'] ?? '', $pBase['host']) !== 0) return '';
+        // normalize scheme to site scheme, keep path/query/fragment
+        $scheme = $pBase['scheme'];
+        $host   = $pBase['host'];
+        $path   = $pNext['path'] ?? '/';
+        $query  = isset($pNext['query']) ? ('?' . $pNext['query']) : '';
+        $frag   = isset($pNext['fragment']) ? ('#' . $pNext['fragment']) : '';
+        return "{$scheme}://{$host}{$path}{$query}{$frag}";
+    }
+
+    // site-absolute path
+    if ($next[0] === '/') return $next;
+
+    // fragment-only → apply to base
+    if ($next[0] === '#') return $base . '/' . ltrim($next, '#');
+
+    // relative path
+    return $base . '/' . ltrim($next, '/');
+}
+
+// capture ?next= on arrival (sanitized) so it survives POST
+if (isset($_GET['next']) && $_GET['next'] !== '') {
+    $tmp = safe_next_url($baseurl);
+    if ($tmp !== '') $_SESSION['login_next'] = $tmp;
+}
+$next_url = safe_next_url($baseurl);
+
 // UI: language & theme
 try {
     $iface = $pdo->query("SELECT * FROM interface WHERE id = 1")->fetch() ?: [];
@@ -110,7 +157,7 @@ require_once("langs/$default_lang");
 // Page title (avoid undefined in header)
 $p_title = $lang['login/register'] ?? 'Login / Register';
 
-// Ads (optional)
+// Ads
 try {
     $ads = $pdo->query("SELECT * FROM ads WHERE id = 1")->fetch() ?: [];
 } catch (Throwable $e) { $ads = []; }
@@ -129,7 +176,7 @@ if (isset($pdo) && is_banned($pdo, $ip)) { $error = $lang['banned'] ?? 'You are 
 // Logout
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
     $_SESSION = [];
-    unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username'], $_SESSION['platform'], $_SESSION['id'], $_SESSION['oauth2state']);
+    unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username'], $_SESSION['platform'], $_SESSION['id'], $_SESSION['oauth2state'], $_SESSION['login_next']);
     @session_regenerate_id(true);
     @session_destroy();
     $__clean();
@@ -140,7 +187,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'logout') {
 // Already logged in? 
 if (isset($_SESSION['token']) && !(isset($_GET['action']) && $_GET['action'] === 'logout')) {
     $__clean();
-    header('Location: ./');
+    $dest = $next_url ?: ($baseurl ?: './');
+    unset($_SESSION['login_next']);
+    header('Location: ' . $dest);
     exit;
 }
 
@@ -150,7 +199,7 @@ try {
 } catch (Throwable $e) { $mail = []; }
 $verification = trim($mail['verification'] ?? 'disabled');
 
-// Page views (best effort)
+// Page views
 try {
     $today = date('Y-m-d');
     $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
@@ -272,8 +321,15 @@ if ($valid_post) {
                         $_SESSION['token']     = $new_token;
                         $_SESSION['oauth_uid'] = $user['oauth_uid'];
                         $_SESSION['username']  = $u;
+
+                        $redir = safe_next_url($baseurl);
+                        if ($redir === '') {
+                            $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
+                            $redir = (stripos($ref, 'login.php') === false && $ref !== '') ? $ref : ($baseurl ?: './');
+                        }
+                        unset($_SESSION['login_next']); // one-shot
                         $__clean();
-                        header('Location: ' . ($_SERVER['HTTP_REFERER'] ?? $baseurl ?: './'));
+                        header('Location: ' . $redir);
                         exit;
                     }
                     $error = ((string)$user['verified'] === '2')
@@ -339,19 +395,22 @@ if ($valid_post) {
 // Mirror messages for theme (which reads $_GET) 
 if (!empty($error))   { $_GET['error']   = $error; }
 if (!empty($success)) { $_GET['success'] = $success; }
+if ($next_url !== '') { $_GET['next']    = $next_url; } // expose next to theme/forms
 
 // OAuth launch (only if enabled & deps ok) -----
 if ($oauth_ready && isset($_GET['login']) && ($enablegoog === 'yes' || $enablefb === 'yes')) {
+    $n = safe_next_url($baseurl);
+    $qnext = $n ? '&next=' . rawurlencode($n) : '';
     if ($_GET['login'] === 'google' && $enablegoog === 'yes') {
-        $__clean(); header("Location: oauth/google.php?login=1"); exit;
+        $__clean(); header("Location: oauth/google.php?login=1{$qnext}"); exit;
     }
     if ($_GET['login'] === 'facebook' && $enablefb === 'yes') {
-        $__clean(); header("Location: oauth/facebook.php?login=1"); exit;
+        $__clean(); header("Location: oauth/facebook.php?login=1{$qnext}"); exit;
     }
     $_GET['error'] = "Invalid OAuth provider or disabled in config.";
 }
 
-// Render--
+// Render
 $__clean();
 header('Content-Type: text/html; charset=utf-8');
 require_once("theme/$default_theme/header.php");

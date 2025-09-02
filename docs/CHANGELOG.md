@@ -5,6 +5,7 @@ In progress: 3.2
 * theme picker if enabled (see example config)
 * improved the layout for paste views, fixed some line number css bugs
 * added a "we has cookies" footer/just comment it out in /theme/default/footer.php if not required
+* Page navs in header/footer
 
 New version 3.1
 * Account deletion

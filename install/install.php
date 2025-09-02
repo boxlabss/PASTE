@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -12,8 +12,7 @@
  * 
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License in LICENCE for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See LICENCE for more details.
  */
 
 // Set default timezone
@@ -25,11 +24,26 @@ ob_start();
 // Ensure JSON content type
 header('Content-Type: application/json; charset=utf-8');
 
-// Disable display errors
+// Convert fatals to JSON so the UI shows a useful message
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Fatal error: ' . htmlspecialchars($e['message'], ENT_QUOTES, 'UTF-8') .
+                        ' in ' . htmlspecialchars(basename($e['file']), ENT_QUOTES, 'UTF-8') .
+                        ':' . (int)$e['line']
+        ]);
+    }
+});
+
+// Disable display errors (log instead)
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
-// Check required files
+// Check required config
 $config_file = '../config.php';
 if (!file_exists($config_file)) {
     ob_end_clean();
@@ -39,7 +53,7 @@ if (!file_exists($config_file)) {
 }
 
 try {
-    require_once $config_file;
+    require_once $config_file; // provides: $dbhost,$dbname,$dbuser,$dbpassword,$enablegoog,$enablefb,$enablesmtp,$sec_key
 } catch (Exception $e) {
     ob_end_clean();
     error_log("install.php: Error including config.php: " . $e->getMessage());
@@ -47,51 +61,55 @@ try {
     exit;
 }
 
-// Check critical files
-$required_files = [
-    '../oauth/vendor/autoload.php',
-    '../mail/vendor/autoload.php',
-    '../theme/default/login.php',
-    '../oauth/google.php',
-    '../oauth/google_smtp.php',
-    '../mail/mail.php'
-];
-foreach ($required_files as $file) {
-    if (!file_exists($file)) {
-        ob_end_clean();
-        $message = "Missing required file: $file";
-        error_log("install.php: $message");
-        echo json_encode(['status' => 'error', 'message' => $message]);
-        exit;
+/**
+ * Optional/conditional file checks (do NOT hard fail unless truly critical)
+ * theme/default/login.php is considered critical; OAuth/SMTP are conditional
+ */
+$critical_errors = [];
+$warnings = [];
+
+if (!file_exists('../theme/default/login.php')) {
+    $critical_errors[] = "Missing required file: ../theme/default/login.php";
+}
+
+$needsOAuth = (isset($enablegoog) && $enablegoog === 'yes') || (isset($enablefb) && $enablefb === 'yes');
+if ($needsOAuth) {
+    if (!file_exists('../oauth/google.php')) {
+        $warnings[] = "OAuth enabled but missing ../oauth/google.php";
+    }
+    if (!file_exists('../oauth/vendor/autoload.php')) {
+        $warnings[] = "OAuth enabled: Composer autoload missing in /oauth. Run: <code>cd oauth && composer require google/apiclient:^2.12 league/oauth2-client</code>";
     }
 }
 
-//
-// Check critical files and Composer autoload
-//$required_files = [
-//    '../oauth/vendor/autoload.php' => ['google/apiclient:^2.12', 'league/oauth2-client:^2.6'],
-//    '../mail/vendor/autoload.php'  => ['phpmailer/phpmailer:^6.9'],
-//    '../theme/default/login.php'   => [],
-//    '../oauth/google.php'          => [],
-//    '../oauth/google_smtp.php'     => [],
-//    '../mail/mail.php'             => []
-//];
-//foreach ($required_files as $file => $packages) {
-//    if (!file_exists($file)) {
-//        ob_end_clean();
-//        $message = empty($packages)
-//            ? "Missing required file: $file"
-//            : "Missing Composer dependencies in " . dirname($file) . ". Run: <code>cd " . dirname($file) . " && composer require " . implode(' ', $packages) . "</code>";
-//        error_log("install.php: $message");
-//        echo json_encode(['status' => 'error', 'message' => $message]);
-//        exit;
-//    }
-//}
+if (isset($enablesmtp) && $enablesmtp === 'yes') {
+    if (!file_exists('../mail/mail.php')) {
+        $warnings[] = "SMTP enabled but missing ../mail/mail.php";
+    }
+    if (!file_exists('../mail/vendor/autoload.php')) {
+        $warnings[] = "SMTP enabled: Composer autoload missing in /mail. Run: <code>cd mail && composer require phpmailer/phpmailer</code>";
+    }
+}
 
-// Sanitize input
-$admin_user = isset($_POST['admin_user']) ? filter_var(trim($_POST['admin_user']), FILTER_SANITIZE_STRING) : '';
+if (!empty($critical_errors)) {
+    ob_end_clean();
+    error_log("install.php: " . implode(' | ', $critical_errors));
+    echo json_encode(['status' => 'error', 'message' => implode('<br>', $critical_errors)]);
+    exit;
+}
+
+// Sanitize input (avoid deprecated FILTER_SANITIZE_STRING)
+$admin_user = isset($_POST['admin_user']) ? trim($_POST['admin_user']) : '';
 $admin_pass = isset($_POST['admin_pass']) ? password_hash($_POST['admin_pass'], PASSWORD_DEFAULT) : '';
 $date       = date('Y-m-d H:i:s');
+
+// Basic username policy (optional)
+if ($admin_user !== '' && !preg_match('/^[A-Za-z0-9_.-]{3,50}$/', $admin_user)) {
+    ob_end_clean();
+    error_log("install.php: Invalid admin username");
+    echo json_encode(['status' => 'error', 'message' => 'Username must be 3–50 chars: letters, digits, dot, underscore, dash.']);
+    exit;
+}
 
 // Validate admin credentials
 if (empty($admin_user) || empty($_POST['admin_pass'])) {
@@ -118,7 +136,7 @@ try {
 $base_path = rtrim(dirname($_SERVER['PHP_SELF'], 2), '/') . '/';
 $baseurl   = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://') . $_SERVER['SERVER_NAME'] . $base_path;
 
-// Helpers
+// ---------- Helpers ----------
 function tableExists($pdo, $table) {
     try {
         $stmt = $pdo->query("SHOW TABLES LIKE " . $pdo->quote($table));
@@ -154,12 +172,10 @@ function ensureColumn($pdo, $table, $column, $expected_def, &$output, &$errors) 
         }
         return;
     }
-    // Best-effort modify (skip AUTO_INCREMENT & KEY nuances)
     try {
         $pdo->exec("ALTER TABLE `$table` MODIFY `$column` $expected_def");
         $output[] = "Aligned column $table.$column.";
     } catch (PDOException $e) {
-        // Not fatal—types (ENUM sizes etc.) may differ; log only.
         error_log("install.php: Skipped modify for $table.$column: " . $e->getMessage());
     }
 }
@@ -185,6 +201,155 @@ function fkExists(PDO $pdo, string $table, string $fk): bool {
         error_log("install.php: fkExists($table,$fk): " . $e->getMessage());
         return false;
     }
+}
+
+// ===== Rekey helpers (legacy v2.2 -> new v3.1) =====
+function hex_or_raw_key(string $input): string {
+    $t = trim($input);
+    if ($t === '') return '';
+    if (ctype_xdigit($t) && (strlen($t) % 2 === 0)) {
+        $bin = @hex2bin($t);
+        if ($bin !== false) return $bin;   // treat hex as bytes if valid
+    }
+    return $t; // otherwise use as raw passphrase
+}
+
+/**
+ * v2.2 decryption attempts strictly matching the old code:
+ * - Primary: openssl_decrypt($base64, AES-256-CBC, $key)  (PHP auto-base64, empty IV)
+ * - Fallbacks:
+ *    - base64_decode + RAW_DATA + zero IV (some PHP/OS combos)
+ *    - key = md5($key, true)  (if someone mistakenly used SECRET as the key)
+ *    - key = md5($key)        (hex string variant)
+ */
+function decrypt_v22_strict(string $value, string $oldKeyRaw): ?string {
+    $cipher = 'AES-256-CBC';
+    $ivlen  = openssl_cipher_iv_length($cipher);
+    $zeroIv = str_repeat("\0", $ivlen);
+
+    // 1) Exact legacy style (PHP auto-decoding base64, empty IV)
+    $pt = @openssl_decrypt($value, $cipher, $oldKeyRaw);
+    if ($pt !== false && $pt !== '') return $pt;
+
+    // 2) base64 -> raw + zero IV
+    $decoded = base64_decode($value, true);
+    if ($decoded !== false) {
+        $pt = @openssl_decrypt($decoded, $cipher, $oldKeyRaw, OPENSSL_RAW_DATA, $zeroIv);
+        if ($pt !== false && $pt !== '') return $pt;
+    }
+
+    // 3) Try md5(key) as *binary* (SECRET behavior)
+    $md5bin = md5($oldKeyRaw, true);
+    $pt = @openssl_decrypt($value, $cipher, $md5bin);
+    if ($pt !== false && $pt !== '') return $pt;
+    if ($decoded !== false) {
+        $pt = @openssl_decrypt($decoded, $cipher, $md5bin, OPENSSL_RAW_DATA, $zeroIv);
+        if ($pt !== false && $pt !== '') return $pt;
+    }
+
+    // 4) Try md5(key) as *hex string* (just in case)
+    $md5hex = md5($oldKeyRaw, false);
+    $pt = @openssl_decrypt($value, $cipher, $md5hex);
+    if ($pt !== false && $pt !== '') return $pt;
+    if ($decoded !== false) {
+        $pt = @openssl_decrypt($decoded, $cipher, $md5hex, OPENSSL_RAW_DATA, $zeroIv);
+        if ($pt !== false && $pt !== '') return $pt;
+    }
+
+    return null;
+}
+
+function decrypt_v31_with_key(string $value, string $keyBin): ?string {
+    $decoded = base64_decode($value, true);
+    if ($decoded === false) return null;
+    $cipher = 'AES-256-CBC';
+    $ivlen  = openssl_cipher_iv_length($cipher);
+    $hmacLen = 32;
+    if (strlen($decoded) < $ivlen + $hmacLen) return null;
+    $iv  = substr($decoded, 0, $ivlen);
+    $hmc = substr($decoded, $ivlen, $hmacLen);
+    $ct  = substr($decoded, $ivlen + $hmacLen);
+    $calc = hash_hmac('sha256', $ct, $keyBin, true);
+    if (!hash_equals($hmc, $calc)) return null;
+    $pt = openssl_decrypt($ct, $cipher, $keyBin, OPENSSL_RAW_DATA, $iv);
+    return ($pt !== false) ? $pt : null;
+}
+
+function encrypt_v31_with_key(string $plaintext, string $keyBin): string {
+    $cipher = 'AES-256-CBC';
+    $ivlen  = openssl_cipher_iv_length($cipher);
+    $iv = random_bytes($ivlen);
+    $ct = openssl_encrypt($plaintext, $cipher, $keyBin, OPENSSL_RAW_DATA, $iv);
+    $h = hash_hmac('sha256', $ct, $keyBin, true);
+    return base64_encode($iv . $h . $ct);
+}
+
+/**
+ * Re-key all rows with encrypt='1':
+ * - Skip if already decryptable with the NEW key (means already v3.1/new-key)
+ * - Else decrypt with *old* key (v2.2 strict), then re-encrypt with NEW key (v3.1)
+ */
+function migrate_encrypted_pastes(PDO $pdo, string $oldKeyInput, string $newKeyHex): array {
+    $res = ['checked'=>0,'converted'=>0,'skipped'=>0,'failed'=>0,'errors'=>[]];
+
+    if (!extension_loaded('openssl')) {
+        $res['errors'][] = 'OpenSSL extension not available.';
+        return $res;
+    }
+    $oldKeyRaw = hex_or_raw_key($oldKeyInput);
+    if ($oldKeyRaw === '') {
+        $res['errors'][] = 'Old $sec_key not provided.';
+        return $res;
+    }
+    $newKeyBin = @hex2bin(trim($newKeyHex));
+    if ($newKeyBin === false) {
+        $res['errors'][] = 'New $sec_key is not valid hex.';
+        return $res;
+    }
+
+    // Any encrypted rows?
+    $total = (int)$pdo->query("SELECT COUNT(*) FROM pastes WHERE encrypt='1'")->fetchColumn();
+    if ($total === 0) return $res;
+
+    $batch = 500;
+    for ($offset=0; $offset < $total; $offset += $batch) {
+        $q = $pdo->prepare("SELECT id, content FROM pastes WHERE encrypt='1' ORDER BY id ASC LIMIT :lim OFFSET :off");
+        $q->bindValue(':lim', $batch, PDO::PARAM_INT);
+        $q->bindValue(':off', $offset, PDO::PARAM_INT);
+        $q->execute();
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        if (!$rows) break;
+
+        $pdo->beginTransaction();
+        foreach ($rows as $r) {
+            $res['checked']++;
+            $id  = (int)$r['id'];
+            $enc = (string)$r['content'];
+
+            // Already new-format under new key? skip.
+            if (decrypt_v31_with_key($enc, $newKeyBin) !== null) {
+                $res['skipped']++;
+                continue;
+            }
+
+            // Legacy decrypt (strict to v2.2 behavior)
+            $plain = decrypt_v22_strict($enc, $oldKeyRaw);
+            if ($plain === null) {
+                $res['failed']++;
+                $res['errors'][] = "ID {$id}: could not decrypt with old key.";
+                continue;
+            }
+
+            // Re-encrypt with new key
+            $reb = encrypt_v31_with_key($plain, $newKeyBin);
+            $u = $pdo->prepare("UPDATE pastes SET content=:c WHERE id=:id");
+            $u->execute([':c'=>$reb, ':id'=>$id]);
+            $res['converted']++;
+        }
+        $pdo->commit();
+    }
+
+    return $res;
 }
 
 // Initialize output array
@@ -355,14 +520,14 @@ try {
         ensureColumn($pdo, 'pastes', 'content',  "LONGTEXT NOT NULL",                           $output, $errors);
         ensureColumn($pdo, 'pastes', 'visible',  "VARCHAR(10) NOT NULL DEFAULT '0'",            $output, $errors);
         ensureColumn($pdo, 'pastes', 'code',     "VARCHAR(50) NOT NULL DEFAULT 'text'",         $output, $errors);
-        ensureColumn($pdo, 'pastes', 'expiry',   "VARCHAR(50)",                                  $output, $errors);
+        ensureColumn($pdo, 'pastes', 'expiry',   "VARCHAR(50)",                                 $output, $errors);
         ensureColumn($pdo, 'pastes', 'password', "VARCHAR(255) NOT NULL DEFAULT 'NONE'",        $output, $errors);
         ensureColumn($pdo, 'pastes', 'encrypt',  "VARCHAR(1) NOT NULL DEFAULT '0'",             $output, $errors);
         ensureColumn($pdo, 'pastes', 'member',   "VARCHAR(255) NOT NULL DEFAULT 'Guest'",       $output, $errors);
         ensureColumn($pdo, 'pastes', 'date',     "DATETIME NOT NULL",                           $output, $errors);
         ensureColumn($pdo, 'pastes', 'ip',       "VARCHAR(45) NOT NULL",                        $output, $errors);
-        ensureColumn($pdo, 'pastes', 'now_time', "VARCHAR(50)",                                  $output, $errors);
-        ensureColumn($pdo, 'pastes', 's_date',   "DATE",                                         $output, $errors);
+        ensureColumn($pdo, 'pastes', 'now_time', "VARCHAR(50)",                                 $output, $errors);
+        ensureColumn($pdo, 'pastes', 's_date',   "DATE",                                        $output, $errors);
         if (getColumnDefinition($pdo, 'pastes', 'views')) {
             $output[] = "Note: 'views' column in pastes is deprecated. Using paste_views table.";
         }
@@ -398,6 +563,41 @@ try {
         }
         if (!fkExists($pdo, 'paste_views', 'paste_views_ibfk_1')) {
             try { $pdo->exec("ALTER TABLE paste_views ADD CONSTRAINT paste_views_ibfk_1 FOREIGN KEY (paste_id) REFERENCES pastes(id) ON DELETE CASCADE"); } catch (PDOException $e) { error_log($e->getMessage()); }
+        }
+    }
+
+    // --- paste_comments ---
+    if (!tableExists($pdo, 'paste_comments')) {
+        $pdo->exec("CREATE TABLE paste_comments (
+            id INT NOT NULL AUTO_INCREMENT,
+            paste_id INT NOT NULL,
+            user_id INT DEFAULT NULL,
+            username VARCHAR(50) NOT NULL,
+            body TEXT NOT NULL,
+            created_at DATETIME NOT NULL,
+            ip VARCHAR(45) NOT NULL,
+            PRIMARY KEY(id),
+            KEY idx_paste_time (paste_id, created_at),
+            CONSTRAINT fk_comments_paste FOREIGN KEY (paste_id) REFERENCES pastes(id) ON DELETE CASCADE,
+            CONSTRAINT fk_comments_user  FOREIGN KEY (user_id) REFERENCES users(id)  ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $output[] = "paste_comments table created.";
+    } else {
+        ensureColumn($pdo, 'paste_comments', 'id',         "INT NOT NULL AUTO_INCREMENT", $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'paste_id',   "INT NOT NULL",                $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'user_id',    "INT DEFAULT NULL",            $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'username',   "VARCHAR(50) NOT NULL",        $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'body',       "TEXT NOT NULL",               $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'created_at', "DATETIME NOT NULL",           $output, $errors);
+        ensureColumn($pdo, 'paste_comments', 'ip',         "VARCHAR(45) NOT NULL",        $output, $errors);
+        if (!indexExists($pdo, 'paste_comments', 'idx_paste_time')) {
+            try { $pdo->exec("ALTER TABLE paste_comments ADD KEY idx_paste_time (paste_id, created_at)"); } catch (PDOException $e) { error_log($e->getMessage()); }
+        }
+        if (!fkExists($pdo, 'paste_comments', 'fk_comments_paste')) {
+            try { $pdo->exec("ALTER TABLE paste_comments ADD CONSTRAINT fk_comments_paste FOREIGN KEY (paste_id) REFERENCES pastes(id) ON DELETE CASCADE"); } catch (PDOException $e) { error_log($e->getMessage()); }
+        }
+        if (!fkExists($pdo, 'paste_comments', 'fk_comments_user')) {
+            try { $pdo->exec("ALTER TABLE paste_comments ADD CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"); } catch (PDOException $e) { error_log($e->getMessage()); }
         }
     }
 
@@ -663,7 +863,7 @@ try {
         ensureColumn($pdo, 'sitemap_options', 'changefreq',"VARCHAR(20) NOT NULL DEFAULT 'daily'", $output, $errors);
     }
 
-    // --- captcha (add recaptcha_version enum) ---
+    // captcha
     if (!tableExists($pdo, 'captcha')) {
         $pdo->exec("CREATE TABLE captcha (
             id INT NOT NULL AUTO_INCREMENT,
@@ -692,6 +892,26 @@ try {
         ensureColumn($pdo, 'captcha', 'recaptcha_secretkey',"TEXT",                                   $output, $errors);
     }
 
+    // decrypt legacy (v2.x) and re-encrypt with NEW key
+    $old_sec_key_input = isset($_POST['old_sec_key']) ? (string)$_POST['old_sec_key'] : '';
+    try {
+        if ($old_sec_key_input !== '') {
+            $mig = migrate_encrypted_pastes($pdo, $old_sec_key_input, $sec_key);
+            $output[] = sprintf(
+                "Re-key summary — checked: %d, converted: %d, skipped: %d, failed: %d",
+                $mig['checked'], $mig['converted'], $mig['skipped'], $mig['failed']
+            );
+            if (!empty($mig['errors'])) {
+                $errors = array_merge($errors, $mig['errors']);
+            }
+        } else {
+            $output[] = "Re-key step skipped (no old \$sec_key provided).";
+        }
+    } catch (Throwable $e) {
+        error_log("install.php re-key error: ".$e->getMessage());
+        $errors[] = "Re-key failed: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+    }
+
     // Post-install message
     $post_install_message = 'Installation and schema update completed successfully. ';
     if (isset($enablegoog) && $enablegoog === 'yes') {
@@ -702,6 +922,9 @@ try {
     }
     if (isset($enablesmtp) && $enablesmtp === 'yes') {
         $post_install_message .= "Configure Gmail SMTP OAuth at <a href=\"https://console.developers.google.com\" target=\"_blank\">Google Cloud Console</a> with redirect URI: {$baseurl}oauth/google_smtp.php and scope: gmail.send. Set credentials in admin/configuration.php. ";
+    }
+    if (!empty($warnings)) {
+        $post_install_message .= '<br>Notes: ' . implode('<br>', $warnings);
     }
     $post_install_message .= 'Remove the /install directory and set secure permissions on config.php (chmod 600). Proceed to the <a href="../" class="btn btn-primary">main site</a> or your <a href="../admin" class="btn btn-primary">dashboard</a>.';
 
@@ -723,6 +946,6 @@ try {
     error_log("install.php: Unexpected error: " . $e->getMessage());
     echo json_encode(['status' => 'error', 'message' => 'Unexpected error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')]);
 } finally {
-    $pdo = null;
+    if (isset($pdo)) $pdo = null;
 }
 ?>

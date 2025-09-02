@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -816,6 +816,654 @@ if (!function_exists('sanitize_allowlist_html')) {
 
         return $doc->saveHTML() ?: '';
     }
+}
+// ------------------------------------------------------------
+// Autodetect helpers (shared by highlight.php & GeSHi paths)
+// ------------------------------------------------------------
+
+/** Stricter Markdown sniff: avoid false matches from lists-only or C/C++ code. */
+function paste_probable_markdown(string $s): bool {
+    // Strong MD signals
+    $fenced  = (bool) preg_match('/^\s*(```|~~~)\s*[a-z0-9._+-]*\s*$/mi', $s);
+    $links   = (bool) preg_match('/\[[^\]]+\]\([^)]+\)/', $s) || preg_match('/!\[[^\]]*\]\([^)]+\)/', $s);
+    $tables  = (bool) (preg_match('/^\s*\|.+\|\s*$/m', $s) &&
+                       preg_match('/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m', $s));
+    if ($fenced || $links || $tables) return true;
+
+    // ATX/Setext headings — but guard against YAML (comments with "# ..." on first lines)
+    $atx     = (bool) preg_match('/^\s*#{1,6}\s+\S/m', $s);
+    $setext  = (bool) preg_match('/^[^\r\n]+\r?\n=+\s*$/m', $s) || preg_match('/^[^\r\n]+\r?\n-+\s*$/m', $s);
+
+    // Weaker cues need at least one "markdown-only" feature
+    $bullets2   = (preg_match_all('/^\s*[-*+]\s+\S/m', $s) >= 2);
+    $blockquote = (bool) preg_match('/^\s*>\s+\S/m', $s);
+    $inlinecode = (bool) preg_match('/`[^`\r\n]+`/', $s);
+
+    // If likely YAML (lots of key: value lines), do NOT treat single "# ..." as markdown
+    $yaml_like = (preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $s) ?: 0) >= 3;
+
+    if ($yaml_like && $atx && !($fenced || $links || $tables)) {
+        // Prefer YAML in this ambiguous case
+        return false;
+    }
+
+    return ($atx || $setext) || ($bullets2 && ($blockquote || $inlinecode));
+}
+
+/** Friendly label if none is provided. */
+function paste_friendly_label(string $id): string {
+    $t = str_replace(['-', '_'], ' ', strtolower($id));
+    $t = ucwords($t);
+    $t = preg_replace('/\bSql\b/i','SQL',$t);
+    $t = preg_replace('/\bJson\b/i','JSON',$t);
+    $t = preg_replace('/\bYaml\b/i','YAML',$t);
+    $t = preg_replace('/\bXml\b/i','XML',$t);
+    return $t;
+}
+
+/** Map a detection "source" to a short UI label. */
+function paste_detect_source_label(string $src): string {
+    $map = [
+        'filename'  => 'Filename',
+        'modeline'  => 'Editor modeline',
+        'shebang'   => 'Shebang',
+        'php-tag'   => 'PHP tag',
+        'markdown'  => 'Markdown markers',
+        'hljs'      => 'Highlighter auto',
+        'auto'      => 'Highlighter auto',
+        'ensemble'  => 'Heuristics',
+        'heuristic' => 'Heuristics',
+        'explicit'  => 'Selected',
+        'fallback'  => 'Fallback',
+    ];
+    return $map[$src] ?? paste_friendly_label($src);
+}
+
+/** Synonym map used by shebangs/heuristics -> highlight ids. */
+function paste_synonyms_map(): array {
+    return [
+        // shells
+        'sh'=>'bash','bash'=>'bash','zsh'=>'bash','ksh'=>'bash','dash'=>'bash','csh'=>'bash','tcsh'=>'bash','busybox'=>'bash','fish'=>'bash',
+        // node/js/ts
+        'node'=>'javascript','nodejs'=>'javascript','deno'=>'javascript','bun'=>'javascript',
+        'ts'=>'typescript','tsx'=>'typescript','ts-node'=>'typescript','ts-node-script'=>'typescript',
+        // python
+        'python'=>'python','python2'=>'python','python3'=>'python','pypy'=>'python','pypy3'=>'python',
+        // perl/raku
+        'perl'=>'perl','perl5'=>'perl','perl6'=>'perl','raku'=>'perl',
+        // ruby
+        'ruby'=>'ruby','jruby'=>'ruby','truffleruby'=>'ruby',
+        // jvm & friends
+        'groovysh'=>'groovy','kscript'=>'kotlin',
+        // R
+        'rscript'=>'r',
+        // lua
+        'luajit'=>'lua',
+        // haskell
+        'runghc'=>'haskell','runhaskell'=>'haskell',
+        // lisp/scheme
+        'guile'=>'scheme','racket'=>'scheme','clisp'=>'lisp',
+        // erlang/elixir
+        'escript'=>'erlang','iex'=>'elixir',
+        // math / sci
+        'octave'=>'matlab',
+        // nim
+        'nim'=>'nimrod','nimscript'=>'nimrod',
+        // tcl
+        'tcl'=>'tcl','tclsh'=>'tcl','wish'=>'tcl',
+        // awk/sed
+        'awk'=>'awk','gawk'=>'awk','mawk'=>'awk','nawk'=>'awk','sed'=>'bash',
+        // powershell
+        'pwsh'=>'powershell','powershell.exe'=>'powershell',
+        // php variants
+        'php'=>'php','php-cgi'=>'php',
+        // qml tools
+        'qmlscene'=>'qml','qmlcachegen'=>'qml'
+    ];
+}
+
+/**
+ * Normalize a language id to highlight.php or GeSHi id.
+ * $engine: 'highlight' or 'geshi'
+ */
+function paste_normalize_lang(string $id, string $engine = 'highlight', $hl = null): string {
+    global $HL_ALIAS_MAP; // set by includes/list_languages.php
+    $id0 = strtolower(trim($id));
+    if ($id0 === '') return '';
+
+    $syn = paste_synonyms_map();
+    if (isset($syn[$id0])) $id0 = $syn[$id0];
+
+    if ($engine === 'highlight') {
+        if (isset($HL_ALIAS_MAP[$id0])) $id0 = $HL_ALIAS_MAP[$id0];
+        if ($hl && method_exists($hl, 'listLanguages')) {
+            $set = array_map('strtolower', (array)$hl->listLanguages());
+            if (!in_array($id0, $set, true)) {
+                if ($id0 === 'pgsql' && in_array('sql', $set, true)) return 'sql';
+            }
+        }
+        return $id0;
+    }
+
+    // GeSHi mapping
+    static $HL_TO_GESHI = [
+        'plaintext'=>'text',
+        'text'     =>'text',
+        'xml'      =>'xml',
+        'html'     =>'html5',
+        'bash'     =>'bash',
+        'dos'      =>'dos',
+        'javascript'=>'javascript',
+        'typescript'=>'javascript',
+        'json'     =>'javascript',
+        'yaml'     =>'yaml',
+        'ini'      =>'ini',
+        'toml'     =>'ini',
+        'properties'=>'properties',
+        'php'      =>'php',
+        'python'   =>'python',
+        'ruby'     =>'ruby',
+        'perl'     =>'perl',
+        'java'     =>'java',
+        'c'        =>'c',
+        'cpp'      =>'cpp',
+        'csharp'   =>'csharp',
+        'go'       =>'go',
+        'rust'     =>'rust',
+        'kotlin'   =>'java',
+        'pgsql'    =>'postgresql',
+        'sql'      =>'sql',
+        'scss'     =>'css',
+        'less'     =>'css',
+        'markdown' =>'markdown',
+        'powershell'=>'powershell',
+        'vbnet'    =>'vbnet',
+        'objectivec'=>'objc',
+        'ocaml'    =>'ocaml',
+        'haskell'  =>'haskell',
+        'lua'      =>'lua',
+        'matlab'   =>'matlab',
+        'makefile' =>'make',
+        'nginx'    =>'nginx',
+        'apache'   =>'apache',
+        'dockerfile'=>'bash',
+        'vbscript' =>'vbscript',
+        'vbscript-html'=>'vbscript-html',
+        'vhdl'     =>'vhdl',
+        'verilog'  =>'verilog',
+        'x86asm'   =>'asm',
+        'mirc'     =>'mirc',
+        'qml'      =>'qml',
+    ];
+    return $HL_TO_GESHI[$id0] ?? 'text';
+}
+
+/** Robust shebang detection; returns *highlight* id (normalized) or null. */
+function paste_detect_shebang(string $s): ?string {
+    if (!preg_match('/^\s*#!\s*(.+)$/m', $s, $m)) return null;
+    $line = strtolower(trim($m[1]));
+    if (preg_match('/env(?:\s+-s)?\s+([^\s]+)/', $line, $em)) {
+        $prog = $em[1];
+    } else {
+        $parts = preg_split('/\s+/', $line);
+        $exe   = $parts[0] ?? '';
+        $prog  = basename($exe);
+    }
+    $prog = preg_replace('/(\.exe)?$/', '', $prog);
+    $prog = preg_replace('/\d+$/', '', $prog);
+    return paste_normalize_lang($prog, 'highlight', null);
+}
+
+/** Modeline detection (vim/emacs). Returns highlight id or null. */
+function paste_detect_modeline(string $s): ?string {
+    // Vim: "vim: set ft=python", "vi: set filetype=javascript", "vim:ft=sh"
+    if (preg_match('/\b(?:vi|vim):.*?\b(?:ft|filetype)\s*=\s*([a-z0-9._+-]+)/i', $s, $m)) {
+        return paste_normalize_lang(strtolower($m[1]), 'highlight', null);
+    }
+    // Emacs: "-*- mode: ruby -*-" or "-*- ruby -*-"
+    if (preg_match('/-\*-\s*(?:mode:\s*)?([a-z0-9._+-]+)\s*-\*-/i', $s, $m)) {
+        return paste_normalize_lang(strtolower($m[1]), 'highlight', null);
+    }
+    return null;
+}
+
+/** From file title extension. Returns highlight id or null. */
+function paste_detect_from_title_ext(?string $title, string $code): ?string {
+    if (!$title) return null;
+    $t = strtolower(trim($title));
+    // Pull last ".ext" (handles "name.tar.gz" -> gz; acceptable for our use)
+    if (!preg_match('/\.([a-z0-9_+-]+)\s*$/', $t, $m)) return null;
+    $ext = $m[1];
+
+    // Disambiguate certain extensions using content when needed
+    if ($ext === 'm') {
+        // Objective-C vs MATLAB
+        if (preg_match('/@interface|@implementation|#\s*import\s*<Foundation/i', $code)) return 'objectivec';
+        return 'matlab';
+    }
+
+    static $MAP = [
+        'php'=>'php', 'phtml'=>'php', 'php3'=>'php', 'php4'=>'php', 'php5'=>'php', 'phps'=>'php',
+        'html'=>'html','htm'=>'html','xhtml'=>'xml','xml'=>'xml',
+        'js'=>'javascript','mjs'=>'javascript','cjs'=>'javascript',
+        'ts'=>'typescript','tsx'=>'typescript','jsx'=>'javascript',
+        'json'=>'json','ndjson'=>'json',
+        'yml'=>'yaml','yaml'=>'yaml',
+        'ini'=>'ini','cfg'=>'ini','conf'=>'ini','properties'=>'properties','toml'=>'toml',
+        'md'=>'markdown','markdown'=>'markdown','mkd'=>'markdown',
+        'sh'=>'bash','bash'=>'bash','zsh'=>'bash','ksh'=>'bash','bat'=>'dos','cmd'=>'dos','ps1'=>'powershell',
+        'py'=>'python','rb'=>'ruby','pl'=>'perl','raku'=>'perl','pm'=>'perl','t'=>'perl',
+        'java'=>'java','c'=>'c','h'=>'c','cpp'=>'cpp','cc'=>'cpp','cxx'=>'cpp','hpp'=>'cpp','hh'=>'cpp','hxx'=>'cpp',
+        'cs'=>'csharp','go'=>'go','rs'=>'rust','swift'=>'swift','kt'=>'kotlin','kts'=>'kotlin',
+        'sql'=>'sql','pgsql'=>'pgsql','psql'=>'pgsql',
+        'makefile'=>'makefile','mk'=>'makefile',
+        'psh'=>'powershell',
+        'lua'=>'lua','tcl'=>'tcl','mrc'=>'mirc','qml'=>'qml',
+        'tex'=>'tex','bib'=>'bibtex',
+    ];
+    return $MAP[$ext] ?? null;
+}
+
+/** Fast PHP tag check to hard-lock PHP when present. */
+function paste_detect_php_tag(string $s): bool {
+    return (bool) preg_match('/<\?(php|=)/i', $s);
+}
+
+/**
+ * Feature extractor used by the ensemble. Fast & language-agnostic.
+ * Returns an array of simple counts/ratios.
+ */
+function paste_feature_extract(string $code): array {
+    $len  = max(1, strlen($code));
+    $lines = preg_split('/\R/', $code);
+    $lc   = max(1, count($lines));
+
+    $semicolon = substr_count($code, ';');
+    $braces    = preg_match_all('/[{}]/', $code) ?: 0;
+
+    // HTML/XML-like tags (rough)
+    $tags = preg_match_all('/<\s*\/?\s*[A-Za-z!?][^>\n]*>/', $code) ?: 0;
+
+    // C/C++ preprocessor-ish
+    $has_preproc = (bool) preg_match('/^\s*#\s*(include|define|if|ifdef|ifndef|endif|pragma)\b/m', $code);
+
+    // YAML-like "key: value" lines (avoid JSON with colons)
+    $yaml_key_lines = preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $code) ?: 0;
+
+    // INI headers
+    $ini_headers = preg_match_all('/^\s*\[[^\]]+\]\s*$/m', $code) ?: 0;
+
+    // Very rough JSON sniff
+    $trim = ltrim($code);
+    $json_like = false;
+    if ($trim !== '' && ($trim[0] === '{' || $trim[0] === '[') && $len < 2000000) {
+        $tmp = json_decode($code, true);
+        $json_like = (json_last_error() === JSON_ERROR_NONE) && (is_array($tmp) || is_object($tmp));
+    }
+
+    // SQL keywords
+    $sql_kw = preg_match_all('/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i', $code) ?: 0;
+
+    // Makefile targets & tab-indented commands
+    $make_targets = preg_match_all('/^[A-Za-z0-9_.-]+(?:\s+|)[:](?![=]).*$/m', $code) ?: 0;
+    $has_make_tab = (bool) preg_match('/^\t\S+/m', $code);
+    if (!$has_make_tab) $make_targets = 0;
+
+    // mIRC signals
+    $mirc_patterns = preg_match_all('/(^|\n)\s*on\s+[^:]+:[^:]+:/i', $code) ?: 0;
+
+    // PowerShell cues
+    $powershell_sig = preg_match_all('/(^|\n)\s*param\s*\(|\$\w+:\w+|Write-Host|Get-Process|^\s*function\s+\w+\s*\{|Begin\s*\{|Process\s*\{|End\s*\{/i', $code) ?: 0;
+
+    // TCL cues
+    $tcl_signals = preg_match_all('/\bproc\s+\w+|\bset\s+\w+|\bputs\s+|\bforeach\s+|\bswitch\s+|\bnamespace\s+|\bexpr\s*\{|(\[string\s+\w+)/i', $code) ?: 0;
+
+    // QML hints
+    $qml_hint = 0;
+    $qml_hint += preg_match_all('/(^|\n)\s*import\s+Qt[^\r\n]*/', $code) ?: 0;
+    $qml_hint += preg_match_all('/(^|\n)\s*[A-Z][A-Za-z0-9_]*\s*\{\s*$/m', $code) ?: 0;
+
+    return [
+        'len'              => $len,
+        'lines'            => $lc,
+        'semicolon'        => $semicolon,
+        'braces'           => $braces,
+        'brace_ratio'      => $braces / $len,
+        'semicolon_ratio'  => $semicolon / $lc,
+        'tag_count'        => $tags,
+        'tag_density'      => $tags / $lc,
+        'has_preproc'      => $has_preproc,
+        'yaml_key_lines'   => $yaml_key_lines,
+        'ini_headers'      => $ini_headers,
+        'json_like'        => $json_like,
+        'sql_keywords'     => $sql_kw,
+        'make_targets'     => $make_targets,
+        'mirc_patterns'    => $mirc_patterns,
+        'powershell_sig'   => $powershell_sig,
+        'tcl_signals'      => $tcl_signals,
+        'qml_hint'         => $qml_hint,
+    ];
+}
+
+/** Build a reduced autodetect allowlist for highlight.php */
+function paste_hl_autodetect_allowlist($hl, string $code, bool $allowPhp): ?array {
+    if (!$hl || !method_exists($hl, 'listLanguages')) return null;
+    $langs = (array)$hl->listLanguages();
+    $out = [];
+    foreach ($langs as $L) {
+        $id = strtolower((string)$L);
+        if ($id === 'markdown') continue;          // we render Markdown via Parsedown
+        if (!$allowPhp && $id === 'php') continue; // avoid PHP false positives when tags absent
+        $out[] = $id;
+    }
+    return $out;
+}
+
+/**
+ * Build engine-specific candidate ids from generic features.
+ * Keeps YAML out unless it actually looks like YAML, and avoids HTML when C/C++ preproc is present.
+ */
+function paste_candidate_languages(string $engine, array $f): array {
+    $c_like    = ['cpp','c','java','csharp','go','rust','kotlin','objectivec','javascript','typescript'];
+    $scripting = ['python','ruby','perl','php','lua','tcl','javascript','typescript','bash','powershell'];
+    $data      = ['json','ini','properties','toml','sql','pgsql']; // YAML added below only on signal
+    $markup    = ['xml','html','xhtml'];
+    $build     = ['makefile','cmake','nginx','apache','dos'];
+    $misc      = ['mirc','qml','markdown', ($engine === 'highlight' ? 'plaintext' : 'text')];
+
+    $cand = [];
+
+    // Strong signals
+    if ($f['json_like'])                $cand[] = 'json';
+    if ($f['ini_headers'] > 0)          array_push($cand, 'ini', 'properties');
+    if ($f['sql_keywords'] > 0)         array_push($cand, 'sql', 'pgsql');
+    if ($f['make_targets'] > 0)         $cand[] = 'makefile';
+    if ($f['mirc_patterns'] > 0)        $cand[] = 'mirc';
+    if ($f['powershell_sig'] > 0)       $cand[] = 'powershell';
+    if ($f['tcl_signals'] > 0)          array_push($cand, 'tcl','perl');
+    if ($f['qml_hint'] > 0)             array_push($cand, 'qml','javascript');
+
+    // Markup only when it dominates and no preprocessor
+    if ($f['tag_density'] > 0.015 && !$f['has_preproc']) {
+        $cand = array_merge($cand, $markup);
+    }
+
+    // YAML only with clear YAML shape and low C-like signals
+    if ($f['yaml_key_lines'] >= 3 && $f['brace_ratio'] < 0.4 && $f['semicolon_ratio'] < 0.25) {
+        $cand[] = 'yaml';
+    }
+
+    // C-like?
+    if ($f['has_preproc'] || $f['semicolon_ratio'] >= 0.25 || $f['brace_ratio'] >= 0.4) {
+        $cand = array_merge($cand, $c_like);
+    }
+
+    // Always consider scripting & some data/build & misc
+    $cand = array_merge($cand, $scripting, $data, $build, $misc);
+
+    // Dedup & cap
+    $seen = []; $out = [];
+    foreach ($cand as $id) {
+        $id = strtolower($id);
+        if (!isset($seen[$id])) { $seen[$id] = true; $out[] = $id; }
+        if (count($out) >= 24) break;
+    }
+
+    if ($engine !== 'highlight') {
+        $mapped = [];
+        foreach ($out as $id) $mapped[] = paste_normalize_lang($id, 'geshi', null);
+        return array_values(array_unique($mapped));
+    }
+    return $out;
+}
+
+/** Simple heuristic pick for GeSHi (returns a *highlight* id). */
+function paste_pick_from_features(array $f): string {
+    if ($f['json_like']) return 'json';
+    if ($f['yaml_key_lines'] >= 3 && $f['semicolon_ratio'] < 0.25) return 'yaml';
+    if ($f['sql_keywords'] > 0) return 'sql';
+    if ($f['mirc_patterns'] > 0) return 'mirc';
+    if ($f['powershell_sig'] > 0) return 'powershell';
+    if ($f['tcl_signals'] > 0) return 'tcl';
+    if ($f['ini_headers'] > 0) return 'ini';
+    if ($f['make_targets'] > 0) return 'makefile';
+    if ($f['tag_density'] > 0.02 && !$f['has_preproc']) return 'xml';
+    if ($f['qml_hint'] > 0) return 'qml';
+    if ($f['has_preproc'] || $f['brace_ratio'] >= 0.4) return 'cpp';
+    if ($f['semicolon_ratio'] >= 0.25) return 'javascript';
+    return 'plaintext';
+}
+
+/**
+ * One entry-point: detect language.
+ * Returns: ['id' => engine id, 'label' => display, 'source' => 'filename|modeline|shebang|php-tag|markdown|hljs|heuristic|explicit|fallback']
+ * $engine: 'highlight' or 'geshi'
+ *
+ * NOTE: Uses global $p_title (paste title) for filename extension hints.
+ */
+function paste_autodetect_language(string $code, string $engine = 'highlight', $hl = null): array {
+    global $p_title;
+
+    // 0) Hard locks
+    if (paste_detect_php_tag($code)) {
+        $id = ($engine === 'geshi') ? paste_normalize_lang('php', 'geshi', null) : 'php';
+        return ['id'=>$id, 'label'=>'PHP', 'source'=>'php-tag'];
+    }
+
+    // 1) Filename extension from title
+    if ($p_title && ($extId = paste_detect_from_title_ext($p_title, $code))) {
+        $id = ($engine === 'geshi') ? paste_normalize_lang($extId, 'geshi', null) : paste_normalize_lang($extId, 'highlight', $hl);
+        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'filename'];
+    }
+
+    // 2) Shebang
+    if ($lang = paste_detect_shebang($code)) {
+        $id = ($engine === 'geshi') ? paste_normalize_lang($lang, 'geshi', null) : $lang;
+        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'shebang'];
+    }
+
+    // 3) Editor modelines
+    if ($lang = paste_detect_modeline($code)) {
+        $id = ($engine === 'geshi') ? paste_normalize_lang($lang, 'geshi', null) : $lang;
+        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'modeline'];
+    }
+
+    // 4) Markdown quick sniff (guard against YAML-dominant text)
+    if (paste_probable_markdown($code)) {
+        // If strong YAML shape, prefer YAML over markdown
+        $yaml_keys = preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $code) ?: 0;
+        if ($yaml_keys < 3) {
+            $id = ($engine === 'geshi') ? 'markdown' : 'markdown';
+            return ['id'=>$id, 'label'=>'Markdown', 'source'=>'markdown'];
+        }
+    }
+
+    // 5) Feature-driven ensemble
+    $F = paste_feature_extract($code);
+
+    if ($engine === 'highlight' && $hl) {
+        // Restrict hljs auto to a small candidate pool built from features
+        $cand = paste_candidate_languages('highlight', $F);
+        if ($cand && method_exists($hl, 'setAutodetectLanguages')) {
+            $hl->setAutodetectLanguages($cand);
+        } else {
+            $allow = paste_hl_autodetect_allowlist($hl, $code, paste_detect_php_tag($code));
+            if ($allow) $hl->setAutodetectLanguages($allow);
+        }
+
+        try {
+            $res  = $hl->highlightAuto($code);
+            $lang = strtolower((string)($res->language ?? ''));
+
+            // Guard against misfires: e.g. HTML chosen while C-preproc present
+            if ($lang === '' || ($lang === 'xml' && ($F['has_preproc'] || $F['brace_ratio'] >= 0.4))) {
+                $lang = paste_pick_from_features($F);
+                if ($lang === 'markdown') {
+                    return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'heuristic'];
+                }
+                $id = paste_normalize_lang($lang, 'highlight', $hl);
+                return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
+            }
+
+            if ($lang === 'markdown') {
+                return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'hljs'];
+            }
+
+            // YAML vs SQL/Markdown guard
+            if (in_array($lang, ['sql','markdown'], true) && $F['yaml_key_lines'] >= 3 && $F['semicolon_ratio'] < 0.25) {
+                $lang = 'yaml';
+            }
+
+            $id = paste_normalize_lang($lang, 'highlight', $hl);
+            return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'hljs'];
+        } catch (\Throwable $e) {
+            $lang = paste_pick_from_features($F);
+            $id   = paste_normalize_lang($lang, 'highlight', $hl);
+            return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
+        }
+    }
+
+    // GeSHi path: choose by features, then map to GeSHi id
+    $lang = paste_pick_from_features($F);
+    if ($lang === 'markdown') {
+        return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'heuristic'];
+    }
+    $id = paste_normalize_lang($lang, 'geshi', null);
+    if ($id === '') $id = 'text';
+    return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
+}
+
+/** Comments: fetch latest (simple, no threading) */
+function getPasteComments(PDO $pdo, int $paste_id, int $limit = 50, int $offset = 0): array {
+    try {
+        $sql = "SELECT c.id, c.paste_id, c.user_id, c.username, c.body, c.created_at, c.ip
+                FROM paste_comments c
+                WHERE c.paste_id = :pid
+                ORDER BY c.created_at DESC
+                LIMIT :lim OFFSET :off";
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':pid', $paste_id, PDO::PARAM_INT);
+        $st->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $st->bindValue(':off', $offset, PDO::PARAM_INT);
+        $st->execute();
+        return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (PDOException $e) {
+        error_log("getPasteComments($paste_id): " . $e->getMessage());
+        return [];
+    }
+}
+
+function addPasteComment(
+    PDO $pdo,
+    int $paste_id,
+    int $user_id = null,
+    string $username = 'Guest',
+    string $ip = '0.0.0.0',
+    string $body = '',
+    ?int $parent_id = null
+): ?int {
+    try {
+        $body = trim($body);
+        if ($body === '') return null;
+        if (strlen($body) > 4000) $body = substr($body, 0, 4000);
+
+        // if replying, make sure the parent exists and belongs to the same paste
+        if ($parent_id !== null) {
+            $chk = $pdo->prepare("SELECT paste_id FROM paste_comments WHERE id = ?");
+            $chk->execute([$parent_id]);
+            $pp = $chk->fetchColumn();
+            if ((int)$pp !== $paste_id) {
+                $parent_id = null; // ignore bogus parent
+            }
+        }
+
+        $st = $pdo->prepare("
+            INSERT INTO paste_comments (paste_id, parent_id, user_id, username, body, created_at, ip)
+            VALUES (:pid, :parent, :uid, :un, :body, :ts, :ip)
+        ");
+        $st->execute([
+            ':pid'    => $paste_id,
+            ':parent' => $parent_id,
+            ':uid'    => $user_id,
+            ':un'     => $username,
+            ':body'   => $body,
+            ':ts'     => date('Y-m-d H:i:s'),
+            ':ip'     => $ip
+        ]);
+        return (int)$pdo->lastInsertId();
+    } catch (PDOException $e) {
+        error_log("addPasteComment($paste_id): " . $e->getMessage());
+        return null;
+    }
+}
+
+function getPasteCommentsTree(PDO $pdo, int $paste_id): array {
+    try {
+        $sql = "SELECT id, paste_id, parent_id, user_id, username, body, created_at, ip
+                FROM paste_comments
+                WHERE paste_id = :pid
+                ORDER BY created_at ASC, id ASC";
+        $st = $pdo->prepare($sql);
+        $st->execute([':pid' => $paste_id]);
+        $all = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        // index and attach children
+        $byId = [];
+        foreach ($all as $r) {
+            $r['children'] = [];
+            $byId[$r['id']] = $r;
+        }
+        $roots = [];
+        foreach ($byId as $id => &$node) {
+            $p = $node['parent_id'] ?? null;
+            if (!empty($p) && isset($byId[$p])) {
+                $byId[$p]['children'][] = &$node;
+            } else {
+                $roots[] = &$node;
+            }
+        }
+        unset($node);
+        return $roots;
+    } catch (PDOException $e) {
+        error_log("getPasteCommentsTree($paste_id): " . $e->getMessage());
+        return [];
+    }
+}
+
+
+/** Comments: authorisation check for delete (owner of comment) */
+function userOwnsComment(PDO $pdo, int $comment_id, int $user_id, string $username): bool {
+    try {
+        $st = $pdo->prepare("SELECT user_id, username FROM paste_comments WHERE id = ?");
+        $st->execute([$comment_id]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return false;
+        // Prefer user_id match; fallback to username (for old/guest cases)
+        if (!empty($row['user_id']) && (int)$row['user_id'] === (int)$user_id) return true;
+        return strcasecmp((string)$row['username'], $username) === 0;
+    } catch (PDOException $e) {
+        error_log("userOwnsComment($comment_id): " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Comments: delete */
+function deleteComment(PDO $pdo, int $comment_id): bool {
+    try {
+        $st = $pdo->prepare("DELETE FROM paste_comments WHERE id = ?");
+        return $st->execute([$comment_id]);
+    } catch (PDOException $e) {
+        error_log("deleteComment($comment_id): " . $e->getMessage());
+        return false;
+    }
+}
+
+/** Minimal safe render for comment body: escape + autolink + nl2br */
+function render_comment_html(string $text): string {
+    $safe = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+    // autolink http/https
+    $safe = preg_replace('~(?i)\bhttps?://[^\s<]+~', '<a href="$0" target="_blank" rel="nofollow noopener noreferrer">$0</a>', $safe);
+    return nl2br($safe);
 }
 
 ?>

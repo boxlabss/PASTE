@@ -1,7 +1,6 @@
 highlight.php is a server-side syntax highlighter written in PHP that currently supports 185 languages.
 It's a port of highlight.js by Ivan Sagalaev that makes full use of the language and style definitions of the original JavaScript project.
 You can make updates manually by dropping the contents of https://github.com/scrivo/highlight.php/tree/master/src/Highlight into this directory
-making sure you keep files that belong to Paste (list_languages.php - render.php and bootstrap.php)
 
 
 Licence for highlight.php:

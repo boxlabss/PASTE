@@ -19,27 +19,27 @@
  *	Bootstrap for scrivo/highlight.php
  *	Works with either layout inside /includes/Highlight:
  *	Repo root https://github.com/scrivo/highlight.php/tree/master/src/Highlight/ copied here:
- *		/includes/Highlight/*.php
- *		/includes/Highlight/languages/*.json
- *
- * 	render.php - bootstrap.php - list_languages.php in this directory are ours
+ *		/includes/Highlight
  */
 
 declare(strict_types=1);
 
+// Determine where the Highlight library actually lives
+if (!defined('HL_LIB_DIR')) {
+    $candidate = __DIR__ . '/Highlight';
+    define('HL_LIB_DIR', is_dir($candidate) ? $candidate : __DIR__);
+}
+// Back-compat alias used below
 if (!defined('HL_BASE_DIR')) {
-    define('HL_BASE_DIR', __DIR__);
+    define('HL_BASE_DIR', HL_LIB_DIR);
 }
 
-// Find & register the library classes
-
-// Try both autoloader locations
-$autoloaders = [
-    HL_BASE_DIR . '/Autoloader.php',              // some mirrors place it at root
-    HL_BASE_DIR . '/Highlight/Autoloader.php',    // upstream repo layout
-];
+// ---------- Autoloader ----------
 $autoloader_found = false;
-foreach ($autoloaders as $al) {
+foreach ([
+    HL_LIB_DIR . '/Autoloader.php',            // preferred: includes/Highlight/Autoloader.php
+    HL_LIB_DIR . '/Highlight/Autoloader.php',  // fallback for nested copies
+] as $al) {
     if (is_file($al)) {
         require_once $al;
         if (class_exists('\Highlight\Autoloader')) {
@@ -51,45 +51,48 @@ foreach ($autoloaders as $al) {
 }
 
 if (!$autoloader_found) {
-    // Minimal PSR-4 fallback. Map "Highlight\" to the directory that actually contains the class files.
+    // Minimal PSR-4 fallback for \Highlight\*
     $classRoots = [
-        HL_BASE_DIR,                    // includes/Highlight/Highlighter.php
+        HL_LIB_DIR,    // e.g. includes/Highlight
+        __DIR__,       // e.g. includes (in case files are flattened)
     ];
     spl_autoload_register(static function ($class) use ($classRoots) {
         if (strpos($class, 'Highlight\\') !== 0) return;
-        $rel = str_replace('\\', '/', $class) . '.php';   // Highlight/Highlighter.php
+        $rel = str_replace('\\', '/', $class) . '.php'; // Highlight/Highlighter.php
         foreach ($classRoots as $root) {
-            $p = $root . '/' . basename($rel);           // try flat file name
-            if (is_file($p)) { require $p; return; }
-            $p = $root . '/' . $rel;                     // try nested path
-            if (is_file($p)) { require $p; return; }
+            // Try flat file name (Highlighter.php), then nested (Highlight/Highlighter.php)
+            $p1 = $root . '/' . basename($rel);
+            if (is_file($p1)) { require $p1; return; }
+            $p2 = $root . '/' . $rel;
+            if (is_file($p2)) { require $p2; return; }
         }
     });
 }
 
-// Resolve languages directory
+// ---------- Languages directory ----------
 if (!defined('HL_LANG_DIR')) {
-    $candidates = [
-        HL_BASE_DIR . '/languages',	// repo-root languages
-    ];
-    foreach ($candidates as $d) {
+    foreach ([
+        HL_LIB_DIR . '/languages',         // includes/Highlight/languages  (usual)
+        __DIR__ . '/Highlight/languages',  // if HL_LIB_DIR was __DIR__
+        __DIR__ . '/languages',            // very old/flat layout
+    ] as $d) {
         if (is_dir($d)) { define('HL_LANG_DIR', $d); break; }
     }
     if (!defined('HL_LANG_DIR')) {
-        // last resort (will fail gracefully later)
-        define('HL_LANG_DIR', HL_BASE_DIR . '/languages');
+        // define something harmless; Highlighter will fail gracefully
+        define('HL_LANG_DIR', HL_LIB_DIR . '/languages');
     }
 }
 
-// Factory helper bound to HL_LANG_DIR
+// ---------- Factory ----------
 function make_highlighter(): ?\Highlight\Highlighter {
     if (!class_exists('\Highlight\Highlighter')) return null;
 
-    // expose LanguageFactory at \Highlight\LanguageFactory
+    // Prefer LanguageFactory if available so we can point to HL_LANG_DIR
     if (class_exists('\Highlight\LanguageFactory')) {
         $factory = new \Highlight\LanguageFactory(HL_LANG_DIR);
 
-        // Prefer setter if available; otherwise pass in constructor
+        // Try setter style (newer versions)
         try {
             $hl = new \Highlight\Highlighter();
             if (method_exists($hl, 'setLanguageFactory')) {
@@ -97,16 +100,18 @@ function make_highlighter(): ?\Highlight\Highlighter {
                 return $hl;
             }
         } catch (\Throwable $e) {
-            // fall through to constructor form
+            // fall through
         }
 
+        // Older constructor style
         try {
             return new \Highlight\Highlighter($factory);
         } catch (\Throwable $e) {
-            // fall through to plain instance
+            // fall through
         }
     }
 
+    // Last resort: plain instance (will use default languages)
     try {
         return new \Highlight\Highlighter();
     } catch (\Throwable $e) {

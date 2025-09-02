@@ -2,20 +2,13 @@
   'use strict';
 
   // ========= tiny utils =====================================================
-
-  // Start index of the current line (from a caret index)
   function lineStart(value, i){ while (i > 0 && value.charCodeAt(i - 1) !== 10) i--; return i }
-  // End index of the current line (from a caret index)
   function lineEnd(value, i){ while (i < value.length && value.charCodeAt(i) !== 10) i++; return i }
-  // Fire an input event after programmatic changes
   function triggerInput(el){ try { el.dispatchEvent(new Event('input', { bubbles: true })) } catch(_) {} }
-  // Fast newline counter (no regex; walks the string once)
   function countLinesFast(str){ let n = 1; for (let i=0; i<str.length; i++) if (str.charCodeAt(i) === 10) n++; return n }
-  // Digits in an integer
   function digitsOf(n){ return Math.max(1, (n|0).toString().length) }
 
   // ========= lightweight editor (textarea + virtualized line-number gutter) =
-
   function initLiteEditor(ta, opts){
     if (!ta || ta.dataset.liteInit === '1') return;
     const readOnly = !!(opts && opts.readOnly);
@@ -28,7 +21,7 @@
     gutter.className = 'editor-gutter';
     gutter.setAttribute('aria-hidden','true');
 
-    const rail = document.createElement('div');       // the vertical list of numbers
+    const rail = document.createElement('div');
     rail.className = 'editor-gutter-inner';
     gutter.appendChild(rail);
 
@@ -37,29 +30,25 @@
     wrap.appendChild(ta);
 
     ta.classList.add('editor-ta', 'form-control');
-    ta.setAttribute('wrap','off');        // no soft wrapping (keeps lines 1:1)
+    ta.setAttribute('wrap','off');
     ta.style.overflowX = 'auto';
     ta.style.overflowY = 'auto';
     ta.dataset.liteInit = '1';
 
-    // ---- metrics: match gutter & textarea ----------------------------------
+    // ---- metrics ------------------------------------------------------------
     const csTA = getComputedStyle(ta);
     const fs   = parseFloat(csTA.fontSize) || 14;
-    const lhPx = (csTA.lineHeight && csTA.lineHeight !== 'normal')
-      ? parseFloat(csTA.lineHeight)
-      : Math.round(fs * 1.5);
+	const lhPx = (csTA.lineHeight && csTA.lineHeight !== 'normal')
+	  ? parseFloat(csTA.lineHeight)
+	  : Math.round(fs * 1.5);
+	ta.style.lineHeight = lhPx + 'px';
 
-    ta.style.lineHeight = lhPx + 'px';
-
-    // make gutter use the exact same font + line-height
     gutter.style.fontFamily = csTA.fontFamily;
     gutter.style.fontSize   = csTA.fontSize;
     gutter.style.lineHeight = lhPx + 'px';
     gutter.style.paddingTop    = csTA.paddingTop;
     gutter.style.paddingBottom = csTA.paddingBottom;
 
-    // Compute precise vertical delta so numbers & text align pixel-perfect.
-    // This accounts for paddings/borders on both the textarea and gutter/rail.
     const csG = getComputedStyle(gutter);
     const csR = getComputedStyle(rail);
     const padTopTA = parseFloat(csTA.paddingTop)        || 0;
@@ -67,10 +56,14 @@
     const padTopGU = parseFloat(csG.paddingTop)         || 0;
     const bTopGU   = parseFloat(csG.borderTopWidth)     || 0;
     const padTopRL = parseFloat(csR.paddingTop)         || 0;
-    const TOP_DELTA = (padTopTA + bTopTA) - (padTopGU + bTopGU + padTopRL);
 
-    // lock the initial height so huge pastes don't auto-expand the TA
-    // (honors rows="" if present; otherwise uses current rendered height)
+    // base delta from computed paddings/borders; tiny runtime nudge may be added
+    const TOP_DELTA_BASE = (padTopTA + bTopTA) - (padTopGU + bTopGU + padTopRL);
+    let deltaAdj = 0; // small calibration nudge (±2px)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const snap = (y) => Math.round(y * dpr) / dpr; // snap to device pixel grid
+
+    // lock initial height (avoid huge pastes auto-expanding)
     (function lockHeightOnce(){
       const rows   = parseInt(ta.getAttribute('rows') || '0', 10);
       const padTop    = parseFloat(csTA.paddingTop)        || 0;
@@ -83,7 +76,6 @@
       if (h > 0) { ta.style.height = h + 'px'; ta.style.minHeight = h + 'px'; }
     })();
 
-    // kill bootstrap ring artifacts
     ta.style.boxShadow = 'none';
     ta.style.outline   = '0';
     ta.addEventListener('focus', function(){
@@ -92,123 +84,168 @@
     });
 
     // ---- state for virtual gutter ------------------------------------------
-    let totalLines   = countLinesFast(ta.value); // total in the doc
-    let renderStart  = 1;                        // first line number currently in the rail
-    let renderEnd    = 0;                        // last line number currently in the rail
-    let rafId        = 0;                        // rAF scheduler id
-    const BUFFER     = 40;                       // extra lines above/below the viewport
+    let totalLines   = countLinesFast(ta.value);
+    let renderStart  = 1;
+    let renderEnd    = 0;
+    let rafId        = 0;
 
-    // Ensure gutter width fits the number of digits (in ch, to keep crisp)
-    function ensureGutterWidth(){
-      gutter.style.minWidth = (digitsOf(totalLines) + 2) + 'ch';
-    }
-    ensureGutterWidth();
+    function visibleCount(){ return Math.max(1, Math.ceil(ta.clientHeight / lhPx) + 1); }
+    function bufferSize(){ const v = visibleCount(); return Math.min(200, Math.max(20, v)); }
 
-    // First visible line (1-based)
-    function firstVisibleLine(){
-      return Math.max(1, Math.floor(ta.scrollTop / lhPx) + 1);
+    // cache digits → update gutter width only when digit count changes
+    let lastDigitWidth = digitsOf(totalLines);
+    function ensureGutterWidthMaybe(){
+      const d = digitsOf(totalLines);
+      if (d !== lastDigitWidth) {
+        gutter.style.minWidth = (d + 2) + 'ch';
+        lastDigitWidth = d;
+      }
     }
-    // How many lines can we see right now?
-    function visibleCount(){
-      return Math.max(1, Math.ceil(ta.clientHeight / lhPx) + 1);
-    }
+    ensureGutterWidthMaybe();
 
-    // Build "start..end" as a single string with trailing newline
+    function firstVisibleLine(){ return Math.max(1, Math.floor(ta.scrollTop / lhPx) + 1); }
+
     function buildNumbers(start, end){
       const len = end - start + 1;
-      const buf = new Array(len);
-      for (let i = 0; i < len; i++) buf[i] = (start + i) + '';
-      return buf.join('\n') + '\n';
+      const out = new Array(len);
+      for (let i = 0; i < len; i++) out[i] = (start + i) + '';
+      return out.join('\n') + '\n';
     }
 
-    // Position the rail so that line "renderStart" sits exactly next to the
-    // correct text row (uses translate3d for GPU-friendly subpixel placement)
     function positionRail(){
-      const offsetPx = ((renderStart - 1) * lhPx) - ta.scrollTop + TOP_DELTA;
-      rail.style.transform = 'translate3d(0,' + offsetPx + 'px,0)';
+      const offsetPx = ((renderStart - 1) * lhPx) - ta.scrollTop + TOP_DELTA_BASE + deltaAdj;
+      rail.style.transform = 'translate3d(0,' + snap(offsetPx) + 'px,0)';
     }
 
-    // Main rAF updater: maybe rebuild numbers, always reposition the rail.
+    // Measure & nudge the gutter to perfectly align with the textarea lines
+    function calibrate(){
+      const taRect   = ta.getBoundingClientRect();
+      const railRect = rail.getBoundingClientRect();
+
+      const textTopForRenderStart =
+        taRect.top + padTopTA + bTopTA + ((renderStart - 1) * lhPx) - ta.scrollTop;
+
+      const currentRailTop = railRect.top;
+      const needed = textTopForRenderStart - currentRailTop;
+
+      if (isFinite(needed)) {
+        // clamp: if layout hasn't settled, ignore big diffs
+        const clamped = Math.max(-3, Math.min(3, needed));
+        deltaAdj += clamped;
+        positionRail();
+      }
+    }
+
     function update(){
       rafId = 0;
-
-      // determine the range we need rendered
       const firstVis = firstVisibleLine();
-      const visCnt   = visibleCount();
-      const start    = Math.max(1, firstVis - BUFFER);
-      const end      = Math.min(totalLines, firstVis + visCnt + BUFFER);
+      const buf = bufferSize();
+      const visCnt = visibleCount();
 
-      // only rebuild the rail text if the required range changed
-      if (start !== renderStart || end !== renderEnd) {
-        rail.textContent = buildNumbers(start, end);
-        renderStart = start;
-        renderEnd   = end;
+      const needStart = Math.max(1, firstVis - buf);
+      const needEnd   = Math.min(totalLines, firstVis + visCnt + buf);
+
+      if (needStart !== renderStart || needEnd !== renderEnd) {
+        rail.textContent = buildNumbers(needStart, needEnd);
+        renderStart = needStart;
+        renderEnd   = needEnd;
+        ensureGutterWidthMaybe();
       }
 
-      // adjust width if digits grew/shrank (e.g., 99 -> 100 lines)
-      ensureGutterWidth();
-
-      // always reposition so numbers stay glued to the text
       positionRail();
+      const h = ta.offsetHeight;
+      if (gutter._h !== h) { gutter.style.height = h + 'px'; gutter._h = h; }
 
-      // keep gutter box the same height as the textarea (for nice borders)
-      gutter.style.height = ta.offsetHeight + 'px';
+      // one-shot calibration after first paint (double-rAF so fonts/layout settle)
+      if (!ta._didCal) {
+        ta._didCal = true;
+        requestAnimationFrame(() => requestAnimationFrame(calibrate));
+        // also when fonts are ready (some themes swap fonts late)
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => { requestAnimationFrame(calibrate); });
+        }
+      }
     }
     function schedule(){ if (!rafId) rafId = requestAnimationFrame(update) }
 
     // ---- events -------------------------------------------------------------
-
-    // Scroll: we only need to reposition (cheap), but schedule() also handles
-    // the occasional range rebuild when we cross buffer thresholds.
     ta.addEventListener('scroll', schedule, { passive: true });
 
-    // Content changes: recalc totalLines once, then schedule an update
-    ['input','change','cut','paste'].forEach(ev => {
-      ta.addEventListener(ev, function(){
-        totalLines = countLinesFast(ta.value);
-        schedule();
-      });
-    });
+    const onContent = function(){
+      const newTotal = countLinesFast(ta.value);
+      if (newTotal !== totalLines) { totalLines = newTotal; }
+      schedule();
+    };
+    ta.addEventListener('input',  onContent);
+    ta.addEventListener('change', onContent);
+    ta.addEventListener('cut',    onContent);
+    ta.addEventListener('paste',  onContent);
 
-    // Tab / Shift+Tab indentation helpers (editing only)
     if (!readOnly){
       ta.addEventListener('keydown', function(e){
         if (e.key !== 'Tab') return;
         e.preventDefault();
 
         const start = ta.selectionStart, end = ta.selectionEnd;
-        const v = ta.value, before = v.slice(0,start), sel = v.slice(start,end), after = v.slice(end);
+        const v = ta.value;
 
+        if (start === end) {
+          ta.value = v.slice(0,start) + '    ' + v.slice(start);
+          ta.setSelectionRange(start + 4, start + 4);
+          totalLines = countLinesFast(ta.value);
+          return schedule();
+        }
+
+        const ls = lineStart(v, start);
+        const le = lineEnd(v, end);
+        const before = v.slice(0, ls);
+        const middle = v.slice(ls, le);
+        const after  = v.slice(le);
+
+        let out = [];
         if (e.shiftKey){
-          const lines = sel.split('\n');
-          const newSel = lines.map(l=>{
-            if (l.startsWith('    ')) return l.slice(4);
-            if (l.startsWith('\t'))   return l.slice(1);
-            return l.replace(/^ {1,3}/,'');
-          }).join('\n');
-
-          // adjust selection to account for the first line's removed indent
-          const firstLineStart = before.lastIndexOf('\n') + 1;
-          let removed = 0;
-          const head = v.slice(firstLineStart, firstLineStart+4);
-          if (head.startsWith('\t')) removed = 1;
-          else if (head.startsWith('    ')) removed = 4;
-          else { const m = head.match(/^ {1,3}/); removed = m ? m[0].length : 0 }
-
-          ta.value = before + newSel + after;
-          const newStart = start - Math.min(removed, start - firstLineStart);
-          const diff = sel.length - newSel.length;
-          ta.setSelectionRange(newStart, end - diff);
-        } else {
-          if (sel.indexOf('\n') !== -1){
-            const ind = sel.replace(/^/gm, '    ');
-            ta.value = before + ind + after;
-            ta.setSelectionRange(start + 4, end + (ind.length - sel.length));
-          } else {
-            ta.value = before + '    ' + sel + after;
-            const caret = start + 4;
-            ta.setSelectionRange(caret, caret);
+          let i = 0, addedTotal = 0, firstLineRemoved = 0, atLineStart = true, lineIndex = 0;
+          while (i < middle.length) {
+            if (atLineStart) {
+              let removed = 0;
+              const ch0 = middle.charCodeAt(i);
+              if (ch0 === 9) { i += 1; removed = 1; }
+              else {
+                let k = i, s = 0;
+                while (k < middle.length && s < 4 && middle.charCodeAt(k) === 32) { k++; s++; }
+                i = k; removed = s;
+              }
+              if (lineIndex === 0) firstLineRemoved = removed;
+              addedTotal += removed;
+              atLineStart = false;
+            }
+            const nl = middle.indexOf('\n', i);
+            if (nl === -1) { out.push(middle.slice(i)); break; }
+            out.push(middle.slice(i, nl + 1));
+            i = nl + 1; atLineStart = true; lineIndex++;
           }
+          const newMiddle = out.join('');
+          ta.value = before + newMiddle + after;
+          const newStart = Math.max(ls, start - firstLineRemoved);
+          const newEnd   = le - addedTotal;
+          ta.setSelectionRange(newStart, newEnd);
+        } else {
+          let i = 0, addedTotal = 0, atLineStart = true, firstLineAdded = 4, lineIndex = 0;
+          while (i < middle.length) {
+            if (atLineStart) {
+              out.push('    ');
+              addedTotal += 4;
+              if (lineIndex === 0) firstLineAdded = 4;
+              atLineStart = false;
+            }
+            const nl = middle.indexOf('\n', i);
+            if (nl === -1) { out.push(middle.slice(i)); break; }
+            out.push(middle.slice(i, nl + 1));
+            i = nl + 1; atLineStart = true; lineIndex++;
+          }
+          const newMiddle = out.join('');
+          ta.value = before + newMiddle + after;
+          ta.setSelectionRange(start + firstLineAdded, end + addedTotal);
         }
 
         totalLines = countLinesFast(ta.value);
@@ -219,11 +256,33 @@
     }
 
     // Keep things aligned when the box resizes
+    let ro = null;
     if ('ResizeObserver' in window){
-      new ResizeObserver(schedule).observe(ta);
+      ro = new ResizeObserver(() => { schedule(); requestAnimationFrame(calibrate); });
+      ro.observe(ta);
     } else {
-      window.addEventListener('resize', schedule);
+      window.addEventListener('resize', () => { schedule(); requestAnimationFrame(calibrate); });
     }
+
+    // Recalibrate when coming back to the tab (fonts/layout may snap)
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        schedule();
+        requestAnimationFrame(calibrate);
+      }
+    });
+
+    // Modern cleanup (no unload)
+    let didClean = false;
+    const cleanup = () => {
+      if (didClean) return;
+      didClean = true;
+      if (ro) { try { ro.disconnect(); } catch(_) {} }
+    };
+    window.addEventListener('pagehide', cleanup, { once: true });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') cleanup();
+    }, { once: true });
 
     // Initial paint
     schedule();
@@ -237,14 +296,15 @@
     notification.className = 'notification' + (isError ? ' error' : '');
     notification.style.display = 'block';
     if (fadeOut) {
-      setTimeout(() => {
+      const hide = () => {
         notification.classList.add('fade-out');
         setTimeout(() => {
           notification.style.display = 'none';
           notification.classList.remove('fade-out');
           notification.textContent = '';
         }, 500);
-      }, 3000);
+      };
+      setTimeout(hide, 3000);
     } else {
       if (!notification.querySelector('.close-btn')) {
         const closeBtn = document.createElement('button');
@@ -253,39 +313,31 @@
         closeBtn.addEventListener('click', () => {
           notification.style.display = 'none';
           notification.textContent = '';
-        });
+        }, { once: true });
         notification.appendChild(closeBtn);
       }
     }
   }
 
-  // ========= tools (existing UI hooks) =====================================
+  // ========= tools  =====================================
   window.togglev = function () {
-    // GeSHi wrapper
     const block = document.querySelector('.code-content');
     if (block) {
       block.classList.toggle('no-line-numbers');
       try { localStorage.setItem('paste_ln_hidden', block.classList.contains('no-line-numbers') ? '1' : '0'); } catch (_) {}
       return;
     }
-    // Fallback
     const olElement = document.querySelector('pre ol, .geshi ol, ol');
     if (!olElement) { showNotification('Code list element not found.', true); return; }
     const currentStyle = olElement.style.listStyle || getComputedStyle(olElement).listStyle;
     olElement.style.listStyle = (currentStyle.startsWith('none')) ? 'decimal' : 'none';
   };
 
-  window.toggleFullScreen = function(){
-    const modalElement = document.getElementById('fullscreenModal');
-    if (!modalElement) { showNotification('Fullscreen modal not available.', true); return; }
-    const bsModal = bootstrap.Modal.getOrCreateInstance(modalElement);
-    bsModal.show();
-    modalElement.addEventListener('hidden.bs.modal', function handler() {
-      const backdrop = document.querySelector('.modal-backdrop'); if (backdrop) backdrop.remove();
-      document.body.classList.remove('modal-open');
-      modalElement.removeEventListener('hidden.bs.modal', handler);
-    }, { once: true });
-  };
+window.toggleFullScreen = function(){
+  const modalElement = document.getElementById('fullscreenModal');
+  if (!modalElement) { showNotification('Fullscreen modal not available.', true); return; }
+  bootstrap.Modal.getOrCreateInstance(modalElement).show();
+};
 
   window.copyToClipboard = function(){
     const ta = document.getElementById('code');
@@ -302,47 +354,50 @@
     else showNotification('Could not generate embed code.', true);
   };
 
-  // Insert "!highlight!" at selected lines in the main editor
+  // Insert "!highlight!" at selected lines in the main editor (allocation-light)
   window.highlightLine = function (e) {
     if (e && e.preventDefault) e.preventDefault();
-    var ta = document.getElementById('edit-code'); if (!ta) return;
+    const ta = document.getElementById('edit-code'); if (!ta) return;
 
-    var prefix = '!highlight!';
-    var value  = ta.value;
-    var start  = ta.selectionStart || 0;
-    var end    = ta.selectionEnd   || start;
-    var keepScroll = ta.scrollTop;
+    const prefix = '!highlight!';
+    const value  = ta.value;
+    const start  = ta.selectionStart || 0;
+    const end    = ta.selectionEnd   || start;
+    const keepScroll = ta.scrollTop;
 
-    var ls = lineStart(value, start);
-    var le = lineEnd(value, end);
+    const ls = lineStart(value, start);
+    const le = lineEnd(value, end);
 
-    var before = value.slice(0, ls);
-    var middle = value.slice(ls, le);
-    var after  = value.slice(le);
+    const before = value.slice(0, ls);
+    const middle = value.slice(ls, le);
+    const after  = value.slice(le);
 
-    var lines = middle.split('\n');
-    var addedTotal = 0;
-    var addedPerLine = [];
+    let out = [];
+    let i = 0, addedTotal = 0, firstLineAdded = 0, atLineStart = true, lineIndex = 0;
 
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(prefix)) {
-        addedPerLine[i] = 0;
-      } else {
-        lines[i] = prefix + lines[i];
-        addedPerLine[i] = prefix.length;
-        addedTotal += prefix.length;
+    while (i < middle.length) {
+      if (atLineStart) {
+        if (middle.substr(i, prefix.length) !== prefix) {
+          out.push(prefix);
+          addedTotal += prefix.length;
+          if (lineIndex === 0) firstLineAdded = prefix.length;
+        }
+        atLineStart = false;
       }
+      const nl = middle.indexOf('\n', i);
+      if (nl === -1) { out.push(middle.slice(i)); break; }
+      out.push(middle.slice(i, nl + 1));
+      i = nl + 1; atLineStart = true; lineIndex++;
     }
 
-    var newMiddle = lines.join('\n');
+    const newMiddle = out.join('');
     ta.value = before + newMiddle + after;
 
     if (start === end) {
-      var caretOffset = (addedPerLine[0] || 0);
-      ta.selectionStart = ta.selectionEnd = start + caretOffset;
+      const caret = start + firstLineAdded;
+      ta.setSelectionRange(caret, caret);
     } else {
-      ta.selectionStart = ls;
-      ta.selectionEnd   = le + addedTotal;
+      ta.setSelectionRange(ls, le + addedTotal);
     }
 
     ta.scrollTop = keepScroll;
@@ -352,15 +407,166 @@
 
   // ========= boot ===========================================================
   document.addEventListener('DOMContentLoaded', function(){
+    // Init editor only for the edit box
     const edit = document.getElementById('edit-code'); if (edit) initLiteEditor(edit, { readOnly:false });
-    const raw  = document.getElementById('code');      if (raw)  initLiteEditor(raw,  { readOnly:true  });
 
+    // Delegated clicks
     document.addEventListener('click', function (ev) {
       const t = ev.target;
       if (t.closest && t.closest('.highlight-line'))   { ev.preventDefault(); window.highlightLine(ev); }
       if (t.closest && t.closest('.toggle-fullscreen')){ ev.preventDefault(); window.toggleFullScreen(); }
       if (t.closest && t.closest('.copy-clipboard'))   { ev.preventDefault(); window.copyToClipboard(); }
     }, { capture: true });
+
+    // ---- Move .code-content into fullscreen modal on demand ----------------
+    const modalEl = document.getElementById('fullscreenModal');
+    const host    = document.getElementById('fullscreen-host');
+    const home    = document.getElementById('code-content-home');
+    const codeDom = document.getElementById('code-content');
+
+    if (modalEl && host && home && codeDom && window.bootstrap && bootstrap.Modal) {
+      bootstrap.Modal.getOrCreateInstance(modalEl);
+
+      modalEl.addEventListener('show.bs.modal', () => {
+        if (codeDom.parentNode !== host) host.appendChild(codeDom);
+      });
+
+      modalEl.addEventListener('hidden.bs.modal', () => {
+        if (codeDom.parentNode !== home.parentNode) {
+          home.insertAdjacentElement('beforebegin', codeDom);
+        }
+      });
+    }
+
+    // ---- Lazy-load raw paste into textarea (deferred editor init) ----------
+    const rawBlock = document.getElementById('raw-block');
+    if (rawBlock) {
+      const btn  = document.getElementById('load-raw');
+      const ta   = document.getElementById('code');
+      const url  = rawBlock.getAttribute('data-raw-url');
+
+      if (btn && ta && url) {
+        const load = async () => {
+          btn.disabled = true;
+          try {
+            const res = await fetch(url, { credentials: 'same-origin' });
+            const text = await res.text();
+            ta.value = text;
+            ta.classList.remove('d-none');
+            // now that it's visible and has content, init the gutter
+            initLiteEditor(ta, { readOnly: true });
+            // kick a measurement update just in case
+            triggerInput(ta);
+            btn.remove();
+          } catch (e) {
+            console.error('Raw fetch failed:', e);
+            btn.disabled = false;
+            showNotification('Failed to load raw paste.', true);
+          }
+        };
+        btn.addEventListener('click', load, { once: true });
+      }
+    }
   });
 
 })();
+
+
+// ===== Comments ==================================
+document.addEventListener('DOMContentLoaded', function () {
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  // helper: update remaining characters
+  function updateRemaining(ta) {
+    const max = ta.maxLength || 4000;
+    const left = Math.max(0, max - ta.value.length);
+    const display = (ta.id === 'comment-body-main')
+      ? document.getElementById('c-remaining')
+      : ta.closest('form')?.querySelector('.c-remaining');
+    if (display) display.textContent = left;
+  }
+
+  // open/close inline reply form
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.comment-reply');
+    if (!btn) return;
+    ev.preventDefault();
+    const target = document.querySelector(btn.getAttribute('data-target'));
+    if (!target) return;
+    target.classList.toggle('d-none');
+    if (!target.classList.contains('d-none')) {
+      const ta = target.querySelector('textarea[name="comment_body"]');
+      if (ta) { updateRemaining(ta); ta.focus(); }
+    }
+  }, { capture: true });
+
+  // cancel inline reply
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.reply-cancel');
+    if (!btn) return;
+    ev.preventDefault();
+    const targetSel = btn.getAttribute('data-target');
+    const target = targetSel ? document.querySelector(targetSel) : btn.closest('.mt-2');
+    if (target) target.classList.add('d-none');
+  }, { capture: true });
+
+  // show/hide collapsed reply tail
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.comment-expand');
+    if (!btn) return;
+    ev.preventDefault();
+    const list = document.querySelector(btn.getAttribute('data-target'));
+    if (!list) return;
+
+    // cache initial "Show X more replies" label once
+    if (!btn.dataset.showHtml) btn.dataset.showHtml = btn.innerHTML;
+    if (!btn.dataset.hideHtml) btn.dataset.hideHtml = '<i class="bi bi-chevron-up"></i> Hide replies';
+
+    const nowHidden = list.classList.toggle('d-none'); // true if hidden after toggle
+    btn.innerHTML = nowHidden ? btn.dataset.showHtml : btn.dataset.hideHtml;
+  }, { capture: true });
+
+  // live character counters (main + inline replies)
+  document.addEventListener('input', function (ev) {
+    const ta = ev.target;
+    if (ta && ta.tagName === 'TEXTAREA' && ta.name === 'comment_body') updateRemaining(ta);
+  }, { capture: true });
+  $$('#comment-body-main, form textarea[name="comment_body"]').forEach(updateRemaining);
+
+  // optional AJAX delete (falls back to normal if fetch fails)
+  document.addEventListener('submit', function (ev) {
+    const form = ev.target;
+    if (!form.matches('form')) return;
+    const isDelete = form.querySelector('input[name="action"][value="delete_comment"]');
+    if (!isDelete) return;
+
+    // the inline confirm() is already on the form; if the user cancels it,
+    // submit won't fire and we never get here. so just proceed.
+    ev.preventDefault();
+
+    const li = form.closest('.comment-item');
+    const fd = new FormData(form);
+    fd.set('ajax', '1');
+
+    fetch(form.action, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: fd,
+      credentials: 'same-origin'
+    })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(j => {
+        if (j && j.success) {
+          if (li) li.remove();
+          const badge = document.getElementById('comments-count');
+          if (badge) {
+            const n = parseInt(badge.textContent || '0', 10) || 0;
+            badge.textContent = Math.max(0, n - 1);
+          }
+        } else {
+          showNotification((j && j.message) ? j.message : 'Delete failed.', true);
+        }
+      })
+      .catch(() => showNotification('Delete failed.', true));
+  }, { capture: true });
+});

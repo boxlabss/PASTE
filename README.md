@@ -1,6 +1,26 @@
-Paste 3.1
+Paste 3.2
 =======
-New version 3.1
+* Comments
+*
+```bash
+// Comments
+$comments_enabled          = true;   // on/off
+$comments_require_login    = true;   // if false, guests can comment
+$comments_on_protected     = false;  // allow/show comments on password-protected pastes
+````
+* Highlight.php integration - or continue using GeSHi
+* theme switcher if highlight is enabled
+```bash
+// Code highlighting engine for non-Markdown pastes: 'highlight' (highlight.php) or 'geshi' (default)
+$highlighter = $highlighter ?? 'geshi';
+
+// Style theme for highlighter.php (see includes/Highlight/styles)
+$hl_style = 'hybrid.css';
+```
+* Page navs in header/footer
+* "Cookies" footer
+
+Previous version 3.1
 * Account deletion
 * reCAPTCHA v3 with server side integration and token handling (and v2 support)
 * 	Select reCAPTCHA in admin/configuration.php

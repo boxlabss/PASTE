@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste Admin https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-
 session_start();
 
 /* Early logout (before any output) */
@@ -36,16 +35,29 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/list_languages.php'; // unified language helpers
 
-// PHP < 8 polyfill
+// PHP < 8 small polyfills
 if (!function_exists('str_starts_with')) {
     function str_starts_with($haystack, $needle) {
         return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
     }
 }
+if (!function_exists('paste_friendly_label')) {
+    function paste_friendly_label(string $id): string {
+        $t = str_replace(['-', '_'], ' ', strtolower($id));
+        $t = ucwords($t);
+        $t = preg_replace('/\bSql\b/i','SQL',$t);
+        $t = preg_replace('/\bJson\b/i','JSON',$t);
+        $t = preg_replace('/\bYaml\b/i','YAML',$t);
+        $t = preg_replace('/\bXml\b/i','XML',$t);
+        return $t;
+    }
+}
 
-// Only show highlight.php language list if that engine is active
-$isHighlight = ($highlighter ?? 'highlight') === 'highlight';
+$engine       = $highlighter ?? 'geshi';
+$isHighlight  = ($engine === 'highlight');
+$isGeSHi      = ($engine === 'geshi');
 
 try {
     $pdo = new PDO(
@@ -60,7 +72,7 @@ try {
     );
 
     // baseurl for sidebar links
-    $row = $pdo->query("SELECT baseurl FROM site_info WHERE id=1")->fetch();
+    $row     = $pdo->query("SELECT baseurl FROM site_info WHERE id=1")->fetch();
     $baseurl = rtrim((string)($row['baseurl'] ?? ''), '/');
 
     // validate admin username
@@ -69,11 +81,11 @@ try {
     $adm = $st->fetch();
     if (!$adm || $adm['user'] !== ($_SESSION['admin_login'] ?? '')) {
         unset($_SESSION['admin_login'], $_SESSION['admin_id']);
-        header("Location: " . htmlspecialchars($baseurl . '/admin/index.php', ENT_QUOTES, 'UTF-8'));
+        header("Location: " . $baseurl . '/admin/index.php');
         exit();
     }
 
-    // log admin activity avoid duplicate row if identical ip+time
+    // log admin activity (avoid dup row if identical ip+time)
     $st = $pdo->query("SELECT MAX(id) last_id FROM admin_history");
     $last_id = $st->fetch()['last_id'] ?? null;
     $last_ip = $last_date = null;
@@ -137,23 +149,37 @@ try {
     $themeCssAbs    = __DIR__ . "/../theme/{$d_theme}/css/paste.css";
     $themeCssExists = is_file($themeCssAbs);
 
-    // -------- highlight.php language discovery (only when engine is "highlight") ----------
-    $hl_langs   = [];
-    $hl_count   = 0;
+    // -------- highlight.php languages (via helper) ----------
+    $hl_dir_abs  = highlight_lang_dir();
     $hl_dir_disp = '';
-
-    if ($isHighlight) {
-        require_once __DIR__ . '/../includes/Highlight/list_languages.php';
-        $hl_dir_abs  = highlight_lang_dir();
-        $hl_langs    = highlight_supported_languages($hl_dir_abs);
-        $hl_count    = count($hl_langs);
-
-        // Pretty display path (relative-ish)
+    if ($hl_dir_abs) {
         $projectRoot = realpath(__DIR__ . '/..');
         $hl_dir_disp = ($projectRoot && str_starts_with($hl_dir_abs, $projectRoot))
             ? '..' . substr($hl_dir_abs, strlen($projectRoot))
             : $hl_dir_abs;
     }
+    $hl_langs = highlight_supported_languages(); // [['id','name','filename','aliases'=>[]], ...]
+    $hl_count = count($hl_langs);
+
+    // -------- GeSHi languages (via helper) ----------
+    $geshi_map     = geshi_language_map(); // id => label
+    $geshi_langs   = [];
+    foreach ($geshi_map as $id => $label) {
+        $geshi_langs[] = [
+            'id'       => (string)$id,
+            'name'     => (string)$label,
+            'filename' => $id . '.php', // display hint; we do not load it
+        ];
+    }
+    usort($geshi_langs, static function($a,$b){
+        return strnatcasecmp($a['name'], $b['name']);
+    });
+    $geshi_count   = count($geshi_langs);
+    $geshi_dir_abs = realpath(__DIR__ . '/../includes/geshi') ?: (__DIR__ . '/../includes/geshi');
+    $projectRoot   = realpath(__DIR__ . '/..');
+    $geshi_dir_disp = (is_string($geshi_dir_abs) && $projectRoot && str_starts_with($geshi_dir_abs, $projectRoot))
+        ? '..' . substr($geshi_dir_abs, strlen($projectRoot))
+        : $geshi_dir_abs;
 
 } catch (PDOException $e) {
     die("Unable to connect to database: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
@@ -169,9 +195,7 @@ try {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-      :root{
-        --bg: #0f1115; --card:#141821; --muted:#7f8da3; --border:#1f2633; --accent:#0d6efd;
-      }
+      :root{ --bg:#0f1115; --card:#141821; --muted:#7f8da3; --border:#1f2633; --accent:#0d6efd; }
       body{background:var(--bg);color:#fff;}
       .navbar{background:#121826!important;position:sticky;top:0;z-index:1030}
       .btn-soft{background:#101521;border:1px solid var(--border);color:#dbe5f5}
@@ -186,7 +210,6 @@ try {
       .offcanvas-nav{width:280px;background:#0f1523;color:#dbe5f5}
       .offcanvas-nav .list-group-item{background:transparent;border:0;color:#dbe5f5}
       .offcanvas-nav .list-group-item:hover{background:#0e1422}
-      /* tiny list styling for languages table */
       .lang-list{max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:10px}
       .sticky-top-sm{position:sticky;top:0;background:var(--card);z-index:1}
       .code{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
@@ -327,19 +350,22 @@ try {
         </div>
       </div>
 
-      <?php if ($isHighlight): ?>
-      <!-- Highlight.php languages card (only when highlight engine is active) -->
-      <div class="card">
+      <!-- Highlight.php languages card -->
+      <div class="card mb-2">
         <div class="card-body">
           <h4 class="card-title mb-3">
             Code Highlighting (highlight.php)
-            <span class="badge text-bg-primary ms-2">Active</span>
+            <?php if ($isHighlight): ?>
+              <span class="badge text-bg-primary ms-2">Active</span>
+            <?php else: ?>
+              <span class="badge text-bg-secondary ms-2">Available</span>
+            <?php endif; ?>
           </h4>
 
           <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <div>
               <span class="text-muted">Languages folder:</span>
-              <code class="code"><?php echo htmlspecialchars($hl_dir_disp, ENT_QUOTES, 'UTF-8'); ?></code>
+              <code class="code"><?php echo htmlspecialchars($hl_dir_abs ? $hl_dir_disp : 'not found', ENT_QUOTES, 'UTF-8'); ?></code>
             </div>
             <span class="badge text-bg-secondary"><?php echo (int)$hl_count; ?> languages</span>
             <button type="button" class="btn btn-soft btn-sm" onclick="location.reload()">
@@ -348,7 +374,7 @@ try {
           </div>
 
           <div class="mb-2">
-            <input type="search" id="hl-search" class="form-control" placeholder="Filter languages… (e.g. php, c++, json)">
+            <input type="search" id="hl-search" class="form-control" placeholder="Filter highlight.php languages… (e.g. php, c++, json)">
           </div>
 
           <div class="lang-list">
@@ -369,32 +395,74 @@ try {
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($hl_langs)): ?>
-                <tr><td colspan="3" class="text-warning">No languages found. Make sure you’ve copied <code>scrivo/highlight.php</code> into <code>includes/Highlight/</code>.</td></tr>
+                <tr><td colspan="3" class="text-warning">No highlight.php languages found.</td></tr>
                 <?php endif; ?>
               </tbody>
             </table>
           </div>
 
           <div class="form-text mt-2">
-            This list is read directly from <code>includes/Highlight/languages</code> at runtime.
+            Listed via <code>includes/list_languages.php</code> from <code><?php echo htmlspecialchars($hl_dir_disp ?: 'N/A', ENT_QUOTES, 'UTF-8'); ?></code>.
           </div>
         </div>
       </div>
-      <?php else: ?>
-      <!-- GeSHi info card when highlight.php is not active -->
+
+      <!-- GeSHi languages card -->
       <div class="card">
         <div class="card-body">
-          <h4 class="card-title mb-2">
-            Code Highlighting
-            <span class="badge text-bg-secondary ms-2">GeSHi active</span>
+          <h4 class="card-title mb-3">
+            Code Highlighting (GeSHi)
+            <?php if ($isGeSHi): ?>
+              <span class="badge text-bg-primary ms-2">Active</span>
+            <?php else: ?>
+              <span class="badge text-bg-secondary ms-2">Available</span>
+            <?php endif; ?>
           </h4>
-          <p class="mb-0 text-muted">
-            You’re using the GeSHi highlighter. Switch to Highlight.php in <code>config.php</code> to see the language list:
-          </p>
-          <pre class="code mt-2 mb-0"><code>$highlighter = 'highlight'; // or leave as 'geshi'</code></pre>
+
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <div>
+              <span class="text-muted">Languages folder (expected):</span>
+              <code class="code"><?php echo htmlspecialchars($geshi_dir_disp, ENT_QUOTES, 'UTF-8'); ?></code>
+            </div>
+            <span class="badge text-bg-secondary"><?php echo (int)$geshi_count; ?> languages</span>
+            <button type="button" class="btn btn-soft btn-sm" onclick="location.reload()">
+              <i class="bi bi-arrow-clockwise"></i> Rescan
+            </button>
+          </div>
+
+          <div class="mb-2">
+            <input type="search" id="geshi-search" class="form-control" placeholder="Filter GeSHi languages… (e.g. php, c, yaml)">
+          </div>
+
+          <div class="lang-list">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="sticky-top-sm">
+                <tr>
+                  <th style="width: 38%">Name</th>
+                  <th style="width: 32%">ID</th>
+                  <th>File</th>
+                </tr>
+              </thead>
+              <tbody id="geshi-rows">
+                <?php foreach ($geshi_langs as $G): ?>
+                <tr>
+                  <td><?php echo htmlspecialchars($G['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?></td>
+                  <td><code class="code"><?php echo htmlspecialchars($G['id'] ?? '', ENT_QUOTES, 'UTF-8'); ?></code></td>
+                  <td class="text-muted"><span class="code"><?php echo htmlspecialchars($G['filename'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span></td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($geshi_langs)): ?>
+                <tr><td colspan="3" class="text-warning">No GeSHi languages listed by helper.</td></tr>
+                <?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="form-text mt-2">
+            Listed via <code>includes/list_languages.php</code> (static map). Files typically live in <code>includes/geshi/</code>.
+          </div>
         </div>
       </div>
-      <?php endif; ?>
 
       <div class="text-muted small mt-3">
         Powered by <a class="text-decoration-none" href="https://phpaste.sourceforge.io" target="_blank">Paste</a>
@@ -403,24 +471,24 @@ try {
   </div>
 </div>
 
-<?php if ($isHighlight): ?>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const q = document.getElementById('hl-search');
-  const rows = document.querySelectorAll('#hl-rows tr');
-  if (!q || !rows.length) return;
-  q.addEventListener('input', () => {
-    const needle = q.value.trim().toLowerCase();
-    rows.forEach(tr => {
-      const text = tr.innerText.toLowerCase();
-      tr.style.display = text.includes(needle) ? '' : 'none';
+  const hookFilter = (inputId, rowsSelector) => {
+    const q = document.getElementById(inputId);
+    if (!q) return;
+    const rows = document.querySelectorAll(rowsSelector);
+    q.addEventListener('input', () => {
+      const needle = q.value.trim().toLowerCase();
+      rows.forEach(tr => {
+        tr.style.display = tr.innerText.toLowerCase().includes(needle) ? '' : 'none';
+      });
     });
-  });
+  };
+  hookFilter('hl-search', '#hl-rows tr');
+  hookFilter('geshi-search', '#geshi-rows tr');
 });
 </script>
-<?php endif; ?>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
 </body>
 </html>
-<?php
-$pdo = null;
+<?php $pdo = null; ?>
