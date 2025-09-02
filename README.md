@@ -1,5 +1,6 @@
 Paste 3.2
 =======
+<<<<<<< HEAD
 * Comments
 *
 ```bash
@@ -21,6 +22,18 @@ $hl_style = 'hybrid.css';
 * "Cookies" footer
 
 Previous version 3.1
+=======
+In progress: 3.2
+* improvements
+* integration of https://github.com/scrivo/highlight.php
+* (geshi or highlight in config.php)
+* theme picker if highlight.php enabled 
+* improved the layout for paste views, fixed some line number css bugs
+* added a "we has cookies" footer/just comment it out in /theme/default/footer.php if not required
+* live demo: https://paste.boxlabs.uk
+
+New version 3.1
+>>>>>>> 522a24dae673ca8889a6ca87f2b578e8ff688bf0
 * Account deletion
 * reCAPTCHA v3 with server side integration and token handling (and v2 support)
 * 	Select reCAPTCHA in admin/configuration.php
