@@ -1,7 +1,7 @@
 Paste 3.2
 =======
 * Comments integration
-```bash
+```php
 // Comments
 $comments_enabled          = true;   // on/off
 $comments_require_login    = true;   // if false, guests can comment
@@ -9,7 +9,7 @@ $comments_on_protected     = false;  // allow/show comments on password-protecte
 ````
 * Highlight.php integration - or continue using GeSHi
 * theme switcher if highlight is enabled
-```bash
+```php
 // Code highlighting engine for non-Markdown pastes: 'highlight' (highlight.php) or 'geshi' (default)
 $highlighter = $highlighter ?? 'geshi';
 
