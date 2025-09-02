@@ -1,7 +1,6 @@
 Paste 3.2
 =======
-* Comments
-*
+* Comments integration
 ```bash
 // Comments
 $comments_enabled          = true;   // on/off
@@ -19,6 +18,7 @@ $hl_style = 'hybrid.css';
 ```
 * Page navs in header/footer
 * "Cookies" footer
+* See docs/CHANGELOG for more
 
 Previous version 3.1
 * Account deletion
