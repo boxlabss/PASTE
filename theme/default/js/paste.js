@@ -1,3 +1,25 @@
+// --- fixes for older iOS/Android ---
+(function () {
+  var E = Element.prototype;
+  if (!E.matches) {
+    E.matches = E.msMatchesSelector || E.webkitMatchesSelector || function (sel) {
+      var n = (this.document || this.ownerDocument).querySelectorAll(sel), i = n.length;
+      while (--i >= 0 && n.item(i) !== this) {}
+      return i > -1;
+    };
+  }
+  if (!E.closest) {
+    E.closest = function (sel) {
+      var el = this;
+      while (el) {
+        if (el.matches && el.matches(sel)) return el;
+        el = el.parentElement || el.parentNode;
+      }
+      return null;
+    };
+  }
+})();
+
 (function () {
   'use strict';
 
@@ -474,78 +496,97 @@ window.toggleFullScreen = function(){
 
 // ===== Comments ==================================
 document.addEventListener('DOMContentLoaded', function () {
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  // tiny $$ helper w/o NodeList.forEach dependency
+  function $all(sel, root) {
+    return Array.prototype.slice.call((root || document).querySelectorAll(sel));
+  }
 
-  // helper: update remaining characters
+  // helper: update remaining characters (mobile-safe)
   function updateRemaining(ta) {
-    const max = ta.maxLength || 4000;
-    const left = Math.max(0, max - ta.value.length);
-    const display = (ta.id === 'comment-body-main')
-      ? document.getElementById('c-remaining')
-      : ta.closest('form')?.querySelector('.c-remaining');
+    if (!ta) return;
+    var maxAttr = ta.getAttribute('maxlength');
+    var max = parseInt(maxAttr || '4000', 10);
+    if (!isFinite(max) || max <= 0) max = 4000;
+
+    var left = Math.max(0, max - ((ta.value || '').length));
+
+    var display;
+    if (ta.id === 'comment-body-main') {
+      display = document.getElementById('c-remaining');
+    } else {
+      var form = ta.closest('form');
+      display = form ? form.querySelector('.c-remaining') : null;
+    }
     if (display) display.textContent = left;
   }
 
   // open/close inline reply form
   document.addEventListener('click', function (ev) {
-    const btn = ev.target.closest('.comment-reply');
+    var btn = ev.target.closest ? ev.target.closest('.comment-reply') : null;
     if (!btn) return;
     ev.preventDefault();
-    const target = document.querySelector(btn.getAttribute('data-target'));
+    var targetSel = btn.getAttribute('data-target');
+    var target = targetSel ? document.querySelector(targetSel) : null;
     if (!target) return;
-    target.classList.toggle('d-none');
-    if (!target.classList.contains('d-none')) {
-      const ta = target.querySelector('textarea[name="comment_body"]');
-      if (ta) { updateRemaining(ta); ta.focus(); }
+    var isHidden = target.classList.contains('d-none');
+    if (isHidden) target.classList.remove('d-none'); else target.classList.add('d-none');
+    if (!isHidden) {
+      var ta = target.querySelector('textarea[name="comment_body"]');
+      if (ta) { updateRemaining(ta); try { ta.focus(); } catch(_){} }
     }
-  }, { capture: true });
+  }, true);
 
   // cancel inline reply
   document.addEventListener('click', function (ev) {
-    const btn = ev.target.closest('.reply-cancel');
+    var btn = ev.target.closest ? ev.target.closest('.reply-cancel') : null;
     if (!btn) return;
     ev.preventDefault();
-    const targetSel = btn.getAttribute('data-target');
-    const target = targetSel ? document.querySelector(targetSel) : btn.closest('.mt-2');
-    if (target) target.classList.add('d-none');
-  }, { capture: true });
+    var targetSel = btn.getAttribute('data-target');
+    var target = targetSel ? document.querySelector(targetSel) : (btn.closest ? btn.closest('.mt-2') : null);
+    if (target && !target.classList.contains('d-none')) target.classList.add('d-none');
+  }, true);
 
   // show/hide collapsed reply tail
   document.addEventListener('click', function (ev) {
-    const btn = ev.target.closest('.comment-expand');
+    var btn = ev.target.closest ? ev.target.closest('.comment-expand') : null;
     if (!btn) return;
     ev.preventDefault();
-    const list = document.querySelector(btn.getAttribute('data-target'));
+    var listSel = btn.getAttribute('data-target');
+    var list = listSel ? document.querySelector(listSel) : null;
     if (!list) return;
 
-    // cache initial "Show X more replies" label once
     if (!btn.dataset.showHtml) btn.dataset.showHtml = btn.innerHTML;
     if (!btn.dataset.hideHtml) btn.dataset.hideHtml = '<i class="bi bi-chevron-up"></i> Hide replies';
 
-    const nowHidden = list.classList.toggle('d-none'); // true if hidden after toggle
+    var nowHidden = list.classList.toggle('d-none'); // true if hidden after toggle
     btn.innerHTML = nowHidden ? btn.dataset.showHtml : btn.dataset.hideHtml;
-  }, { capture: true });
+  }, true);
 
   // live character counters (main + inline replies)
-  document.addEventListener('input', function (ev) {
-    const ta = ev.target;
+  function counterHandler(ev) {
+    var ta = ev.target;
     if (ta && ta.tagName === 'TEXTAREA' && ta.name === 'comment_body') updateRemaining(ta);
-  }, { capture: true });
-  $$('#comment-body-main, form textarea[name="comment_body"]').forEach(updateRemaining);
+  }
+  document.addEventListener('input', counterHandler, true);
+  document.addEventListener('keyup',  counterHandler, true); // helps older mobiles
 
-  // optional AJAX delete (falls back to normal if fetch fails)
+  $all('#comment-body-main, form textarea[name="comment_body"]').forEach(updateRemaining);
+
+  // optional AJAX delete (fallback to normal submit if fetch not available)
   document.addEventListener('submit', function (ev) {
-    const form = ev.target;
-    if (!form.matches('form')) return;
-    const isDelete = form.querySelector('input[name="action"][value="delete_comment"]');
+    var form = ev.target;
+    if (!form || !form.matches || !form.matches('form')) return;
+
+    var isDelete = form.querySelector('input[name="action"][value="delete_comment"]');
     if (!isDelete) return;
 
-    // the inline confirm() is already on the form; if the user cancels it,
-    // submit won't fire and we never get here. so just proceed.
+    // if fetch isn't supported, allow default submission
+    if (!window.fetch) return;
+
     ev.preventDefault();
 
-    const li = form.closest('.comment-item');
-    const fd = new FormData(form);
+    var li = form.closest ? form.closest('.comment-item') : null;
+    var fd = new FormData(form);
     fd.set('ajax', '1');
 
     fetch(form.action, {
@@ -554,19 +595,19 @@ document.addEventListener('DOMContentLoaded', function () {
       body: fd,
       credentials: 'same-origin'
     })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(j => {
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (j) {
         if (j && j.success) {
-          if (li) li.remove();
-          const badge = document.getElementById('comments-count');
+          if (li && li.parentNode) li.parentNode.removeChild(li);
+          var badge = document.getElementById('comments-count');
           if (badge) {
-            const n = parseInt(badge.textContent || '0', 10) || 0;
+            var n = parseInt(badge.textContent || '0', 10) || 0;
             badge.textContent = Math.max(0, n - 1);
           }
         } else {
           showNotification((j && j.message) ? j.message : 'Delete failed.', true);
         }
       })
-      .catch(() => showNotification('Delete failed.', true));
-  }, { capture: true });
+      .catch(function () { showNotification('Delete failed.', true); });
+  }, true);
 });
