@@ -1,5 +1,10 @@
 Paste 3.2
 =======
+* diff viewer reintegration
+	?diff.php?a=thispaste&b=anotherpaste
+
+	Supports downloadable .diff files after generation
+
 * Comments integration
 ```php
 // Comments

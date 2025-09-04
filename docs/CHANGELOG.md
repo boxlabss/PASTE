@@ -10,6 +10,7 @@ In progress: 3.2
 * Improve "My Pastes" - paginate user pastes - list comments
 * Added a small tool to help client side password generation for user registration
 * Fixed the installer to migrate encrypted pastes from 2.x
+* readded a .diff feature (might still be bugs at this time) but supports ?diff.php?a=oldpasteID&b=newpasteID and generates a usable .diff
 
 New version 3.1
 * Account deletion
