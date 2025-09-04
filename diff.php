@@ -266,8 +266,8 @@ function hl_render_line(string $text, string $lang='text'): string {
 
 $left  = '';
 $right = '';
-$leftLabel  = 'Left';
-$rightLabel = 'Right';
+$leftLabel  = 'Old';
+$rightLabel = 'New';
 
 /* ---------- Minimal site/bootstrap so header/footer look right ---------- */
 $mod_rewrite = $mod_rewrite ?? '0';
@@ -399,8 +399,8 @@ setcookie('diffSplitPct', (string)$split_pct, [
 
 /* ---------- Download unified diff ---------- */
 if (isset($_GET['download']) && $_GET['download'] === '1') {
-    $nameA = $leftLabel  ?: 'Left';
-    $nameB = $rightLabel ?: 'Right';
+    $nameA = $leftLabel  ?: 'Old';
+    $nameB = $rightLabel ?: 'New';
     $ud = unified_diff_download($left, $right, $nameA, $nameB, 3);
     header('Content-Type: text/x-diff; charset=utf-8');
     header('Content-Disposition: attachment; filename="paste.diff"');

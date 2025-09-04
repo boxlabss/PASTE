@@ -199,7 +199,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
               <h1><?php echo htmlspecialchars($lang['newpaste'] ?? 'New Paste'); ?></h1>
 				<?php
 				// Quick diff
-				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=newpaste&b=oldpaste';
+				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
 				?>
 				  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
 					  title="View differences">
