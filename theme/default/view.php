@@ -306,7 +306,7 @@ if (!function_exists('render_comment_node')) {
 ?>
 
 <!-- Content -->
-<div class="container-xl my-4">
+<div class="container-xxl my-4">
   <div class="row">
 <?php if (isset($privatesite) && $privatesite === "on"): ?>
 

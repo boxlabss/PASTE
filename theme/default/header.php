@@ -46,7 +46,7 @@
 <body>
     <!-- Header -->
     <nav class="navbar navbar-expand-lg bg-dark">
-        <div class="container-xl d-flex align-items-center">
+        <div class="container-xxl d-flex align-items-center">
             <a class="navbar-brand" href="<?php echo htmlspecialchars($baseurl ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 <i class="bi bi-clipboard"></i> <?php echo htmlspecialchars($site_name ?? '', ENT_QUOTES, 'UTF-8'); ?>
             </a>

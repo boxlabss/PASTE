@@ -25,7 +25,7 @@ $captcha_enabled    = ($cap_e === 'on' && $mode === 'reCAPTCHA' && !empty($site_
 ?>
 
 <!-- Footer -->
-<footer class="container-xl py-3 my-4 border-top">
+<footer class="container-xxl py-3 my-4 border-top">
   <div class="row align-items-center gy-2">
     <div class="col-md-4 mb-0 text-muted">
       Copyright &copy; <?php echo date("Y"); ?>
@@ -60,7 +60,7 @@ $captcha_enabled    = ($cap_e === 'on' && $mode === 'reCAPTCHA' && !empty($site_
 
 <!-- GDPR stuff -->
 <div id="cookieBanner" class="position-fixed bottom-0 start-0 end-0 border-top shadow-sm">
-  <div class="container-xl py-1 d-flex flex-column flex-lg-row align-items-start align-items-lg-center justify-content-between gap-3">
+  <div class="container-xxl py-1 d-flex flex-column flex-lg-row align-items-start align-items-lg-center justify-content-between gap-3">
     <div class="me-lg-2">
       <h6 class="mb-1">We use cookies. To comply with GDPR in the EU and the UK we have to show you these.</h6>
       <p class="mb-0 text-muted small">

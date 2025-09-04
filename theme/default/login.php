@@ -176,8 +176,8 @@ $captcha_enabled   = ($cap_e === 'on' && $mode === 'reCAPTCHA' && !empty($recapt
                   <input type="password" class="form-control" id="signupPassword" name="password" autocomplete="new-password" required>
                 </div>
                 <div class="form-text">
-                  Need help? Generate a secure password at
-                  <a href="https://mkpasswd.net/" target="_blank" rel="noopener noreferrer">mkpasswd.net</a>.
+                  Need help?
+                  <a href="<?php echo htmlspecialchars($baseurl . 'generatepasswd.php', ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer">Generate a password</a>.
                 </div>
               </div>
               <button type="submit" class="btn btn-primary btn-perky fw-bold w-100"><?php echo htmlspecialchars($lang['signup'] ?? 'Register', ENT_QUOTES, 'UTF-8'); ?></button>

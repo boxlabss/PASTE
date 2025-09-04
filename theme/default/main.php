@@ -19,7 +19,7 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none'; // 'recaptcha' (v2 checkbox
 $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main form (set in index during GET)
 ?>
 
-<div class="container-xl my-4">
+<div class="container-xxl my-4">
   <div class="row">
     <?php if (isset($privatesite) && $privatesite === "on"): ?>
       <div class="col-lg-12">
@@ -37,6 +37,14 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
           <div class="card">
             <div class="card-header">
               <h1><?php echo htmlspecialchars($lang['newpaste'] ?? 'New Paste'); ?></h1>
+				<?php
+				// Quick diff
+				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
+				?>
+				  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
+					  title="View differences">
+					<i class="bi bi-arrow-left-right"></i> NEW: or try .diff
+				  </a>
             </div>
             <div class="card-body">
               <?php if (!empty($flash_error)): ?>
@@ -189,6 +197,14 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
           <div class="card">
             <div class="card-header">
               <h1><?php echo htmlspecialchars($lang['newpaste'] ?? 'New Paste'); ?></h1>
+				<?php
+				// Quick diff
+				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=newpaste&b=oldpaste';
+				?>
+				  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
+					  title="View differences">
+					<i class="bi bi-arrow-left-right"></i> NEW: or try .diff
+				  </a>
             </div>
             <div class="card-body">
               <?php if (!empty($flash_error)): ?>
