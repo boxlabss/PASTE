@@ -89,6 +89,18 @@ $loginNext = function(string $frag = '#comments') use ($basePasteUrl, $baseurl) 
     return rtrim($baseurl ?? '/', '/') . '/login.php?next=' . rawurlencode($basePasteUrl . $frag);
 };
 
+// Quick diff: current paste
+$diffQuickUrl = null; //if no pastes yet
+if (!empty($paste_id)) {
+  $diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=' . (int)$paste_id . '&b=' . (int)$paste_id;
+}
+
+$diffUrl = null;
+// Diff URL (if this paste is a fork of another - future idea)
+//$diffUrl = (isset($paste_parent_id, $paste_id) && (int)$parent_id > 0 && (int)$paste_id > 0)
+//  ? rtrim($baseurl ?? '/', '/') . '/diff.php?a=' . (int)$parent_id . '&b=' . (int)$paste_id
+//  : null;
+
 // Convenience: detect if comments are globally disabled (from paste.php logic)
 $show_comments_ui = isset($show_comments) ? (bool)$show_comments : true;
 
@@ -387,6 +399,14 @@ if (!function_exists('render_comment_node')) {
               <a href="<?php echo htmlspecialchars($p_download ?? ($baseurl . '/download.php?id=' . ($paste_id ?? ''))); ?>" class="btn btn-outline-secondary" title="Download">
                 <i class="bi bi-file-arrow-down"></i>
               </a>
+
+              <?php if ($diffUrl): ?>
+                <!-- Compact Diff button -->
+                <a href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                   class="btn btn-outline-secondary" title="View differences from parent">
+                  <i class="bi bi-arrow-left-right"></i>
+                </a>
+              <?php endif; ?>
             </div>
             <div id="notification" class="notification"></div>
           </div>
@@ -417,6 +437,15 @@ if (!function_exists('render_comment_node')) {
                 </a>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to edit this paste">
                   <i class="bi bi-pencil"></i> Edit
+                </a>
+              <?php endif; ?>
+
+              <?php if ($diffUrl): ?>
+                <!-- Big Diff button (guests & logged-in) -->
+                <a class="btn btn-outline-secondary"
+                   href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                   title="View differences from parent">
+                  <i class="bi bi-arrow-left-right"></i> View differences
                 </a>
               <?php endif; ?>
             </div>
@@ -505,6 +534,15 @@ if (!function_exists('render_comment_node')) {
                           <input class="btn btn-primary paste-button" type="submit" name="edit" id="edit" value="<?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit Paste'); ?>" />
                         <?php endif; ?>
                         <input class="btn btn-primary paste-button" type="submit" name="submit" id="submit" value="<?php echo htmlspecialchars($lang['forkpaste'] ?? 'Fork Paste'); ?>" />
+
+                        <?php if ($diffUrl): ?>
+                          <!-- Diff link styled like a button -->
+                          <a class="btn btn-outline-secondary paste-button"
+                             href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                             title="View differences from parent">
+                            <i class="bi bi-arrow-left-right"></i> View differences
+                          </a>
+                        <?php endif; ?>
                       </div>
                     </form>
                   </div>
@@ -834,6 +872,15 @@ if (!function_exists('render_comment_node')) {
             <a href="<?php echo htmlspecialchars($p_download ?? ($baseurl . '/download.php?id=' . ($paste_id ?? ''))); ?>" class="btn btn-outline-secondary" title="Download">
               <i class="bi bi-file-arrow-down"></i>
             </a>
+
+            <?php if ($diffUrl): ?>
+              <!-- Compact Diff button -->
+              <a href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                 class="btn btn-outline-secondary" title="View differences from parent">
+                <i class="bi bi-arrow-left-right"></i>
+              </a>
+            <?php endif; ?>
+
             <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on") && ($disableguest ?? '') != "on"): ?>
               <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register">
                 <i class="bi bi-person"></i>
@@ -871,6 +918,15 @@ if (!function_exists('render_comment_node')) {
                 </a>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to edit this paste">
                   <i class="bi bi-pencil"></i> Edit
+                </a>
+              <?php endif; ?>
+
+              <?php if ($diffUrl): ?>
+                <!-- Big Diff button (guests & logged-in) -->
+                <a class="btn btn-outline-secondary"
+                   href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                   title="View differences from parent">
+                  <i class="bi bi-arrow-left-right"></i> View differences
                 </a>
               <?php endif; ?>
             </div>
@@ -911,11 +967,21 @@ if (!function_exists('render_comment_node')) {
                           ?>
                         </select>
                       </div>
+					  
+                      <div class="col-sm-2 ms-auto">
+						<?php if ($diffQuickUrl): ?>
+						  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
+							 class="btn btn-secondary" title="View differences">
+							<i class="bi bi-arrow-left-right"></i> Make.diff
+						  </a>
+						<?php endif; ?>
+                      </div>
+
                       <div class="col-sm-2 ms-auto">
                         <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
                       </div>
                     </div>
-
+					
                     <div class="mb-3">
                       <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="helloworld"><?php echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                     </div>
@@ -960,6 +1026,16 @@ if (!function_exists('render_comment_node')) {
                         <input class="btn btn-primary paste-button" type="submit" name="edit" id="edit" value="<?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit Paste'); ?>" />
                       <?php endif; ?>
                       <input class="btn btn-primary paste-button" type="submit" name="submit" id="submit" value="<?php echo htmlspecialchars($lang['forkpaste'] ?? 'Fork Paste'); ?>" />
+
+                      <?php if ($diffUrl): ?>
+                        <!-- Diff link styled like a button -->
+                        <a class="btn btn-outline-secondary paste-button"
+                           href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
+						   name="diff"
+                           title="View differences from parent">
+                          <i class="bi bi-arrow-left-right"></i> View differences
+                        </a>
+                      <?php endif; ?>
                     </div>
                   </form>
                 </div>
