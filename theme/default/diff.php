@@ -20,125 +20,6 @@ declare(strict_types=1);
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
 ?>
 
-<style>
-/* =========================
-   Basic layout & toolbar
-   =======================*/
-.diff-outer { padding-top: 12px; }
-
-.diff-toolbar{
-  display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;
-  padding:.5rem .75rem; border:1px solid var(--bs-border-color,#3333);
-  border-radius:.5rem; background: var(--bs-body-bg, transparent);
-}
-.diff-toolbar .grow{ flex:1; }
-.diff-toolbar .lbl{ opacity:.8; font-size:.9rem; margin-right:.25rem; }
-.langbar{ display:grid; grid-template-columns: 1fr 1fr; gap:.75rem; width:100%; }
-.lang-select{ min-width:160px; }
-
-/* =========================
-   Scroll viewport & splitter
-   =======================*/
-.diff-area{ margin-top:.75rem; position:relative; }
-.diff-scroll{
-  --lno: 56px;                                    /* default per-side line number width */
-  height: clamp(60vh, calc(100vh - 240px), 88vh); /* fixed scrollport height */
-  overflow: auto;
-  border:1px solid var(--bs-border-color,#3333);
-  border-radius:.5rem;
-  position: relative;
-}
-
-.split-overlay{
-  position: absolute; inset: 0;
-  z-index: 20;
-  pointer-events: none;
-}
-
-/* Splitter handle */
-.splitter{
-  position: absolute; top: 0; bottom: 0; left: 0;
-  width: 12px; cursor: col-resize; z-index: 21; background: transparent;
-  margin-left: 0 !important; transform: none !important;
-  pointer-events: auto;
-}
-/* Visible center line + subtle hover/drag wash */
-.splitter::before{
-  content:""; position:absolute; top:0; bottom:0; left:50%;
-  width:2px; margin-left:-1px; border-radius:1px;
-  background: var(--bs-border-color, #6c757d66);
-}
-.splitter::after{
-  content:""; position:absolute; inset:0;
-  background:#6c757d1a; opacity:0; transition: opacity .12s ease-in-out;
-  pointer-events:none;
-}
-.splitter:hover::before{ background: var(--bs-border-color, #6c757db3); }
-.splitter:hover::after, .splitter.dragging::after{ opacity:.35; }
-
-/* =========================
-   Diff tables
-   =======================*/
-.diff-table{
-  width:100%;
-  border-collapse: separate;
-  border-spacing:0;
-  table-layout:fixed;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size:13px; line-height:1.35;
-}
-.diff-table td{ vertical-align: top; }
-
-/* line numbers live inside each pane */
-.diff-table td.no{
-  width: var(--lno); min-width: var(--lno);
-  color: var(--bs-secondary-color,#8892a6);
-  user-select:none; text-align:right;
-  padding: 2px 6px; border-right:1px solid var(--bs-border-color,#0001);
-}
-
-/* code cells */
-.diff-table td.code{ padding:0; }
-.code-inner{ display:block; width:100%; padding:2px 8px; overflow:auto; }
-/* neutralize highlight block padding */
-.code-inner .hljs{ display:inline; padding:0 !important; background:transparent; line-height:inherit; }
-
-/* zebra */
-.diff-table tr:nth-child(even) td { background: rgba(0,0,0,.02); }
-@media (prefers-color-scheme: dark){
-  .diff-table tr:nth-child(even) td { background: rgba(255,255,255,.03); }
-}
-
-/* change surfaces */
-.diff-table td.ctx  { background: transparent; }
-.diff-table td.add  { background: rgba(25,135,84,.16); }
-.diff-table td.del  { background: rgba(220,53,69,.18); }
-.diff-table td.empty{ background: rgba(108,117,125,.10); }
-
-.marker{ font-weight:600; margin-right:.25rem; opacity:.9; }
-
-/* wrapping + line numbers toggles */
-.wrap-off .code-inner{ white-space: pre; }
-.wrap-on  .code-inner{ white-space: pre-wrap; word-break: break-word; }
-
-/* Keep cells but collapse when line numbers are off (prevents layout jump) */
-.lineoff td.no{
-  width:0 !important; min-width:0 !important;
-  padding:0 !important; border:0 !important;
-  color:transparent !important; overflow:hidden !important;
-}
-.lineoff col.col-lno-l,
-.lineoff col.col-lno-r{ width:0 !important; min-width:0 !important; }
-
-/* unified specifics */
-.diff-table.unified td.no{ width:2.75rem; min-width:2.75rem; }
-.diff-table.unified.lineoff td.no{ width:0 !important; min-width:0 !important; padding:0 !important; border:0 !important; }
-.diff-table.unified td.code{ width:auto; }
-
-/* responsive */
-@media (max-width:1000px){ .langbar{ grid-template-columns: 1fr; } }
-</style>
-
 <div class="container-fluid diff-outer">
   <!-- Top toolbar -->
   <div class="diff-toolbar">
@@ -220,10 +101,10 @@ $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
     <div class="w-100">
       <div class="row g-3">
         <div class="col-lg-6">
-          <textarea class="form-control code-input paste-textarea" rows="10" id="leftText" data-editor="true" spellcheck="false"><?= $h($GLOBALS['left'] ?? '') ?></textarea>
+          <textarea class="form-control code-input paste-textarea" rows="10" id="leftText" data-editor="true" spellcheck="false" placeholder="old version"><?= $h($GLOBALS['left'] ?? '') ?></textarea>
         </div>
         <div class="col-lg-6">
-          <textarea class="form-control code-input paste-textarea" rows="10" id="rightText" data-editor="true" spellcheck="false"><?= $h($GLOBALS['right'] ?? '') ?></textarea>
+          <textarea class="form-control code-input paste-textarea" rows="10" id="rightText" data-editor="true" spellcheck="false" placeholder="new version"><?= $h($GLOBALS['right'] ?? '') ?></textarea>
         </div>
       </div>
     </div>
