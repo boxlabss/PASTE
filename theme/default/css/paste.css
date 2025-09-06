@@ -434,3 +434,16 @@ html{ scroll-behavior:smooth; }
 
 /* Responsive */
 @media (max-width:1000px){ .langbar{ grid-template-columns: 1fr; } }
+
+/* ---- Internal CAPTCHA ---- */
+.captcha-img{
+  height:64px;
+  width:220px;
+  object-fit:cover;
+  border-radius:.5rem;
+  border:1px solid var(--bs-border-color, rgba(0,0,0,.125));
+  background:var(--bs-body-bg,#fff);
+  user-select:none;
+}
+[data-captcha] .form-control { min-height:56px; }
+.imagever { width:auto; max-width:100%; height:56px; object-fit:cover; }

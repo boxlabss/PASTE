@@ -305,10 +305,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
                     <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response">
                   <?php else: ?>
                     <!-- Internal CAPTCHA -->
-                    <div class="row mb-3">
-                      <?php echo '<img src="' . htmlspecialchars($_SESSION['captcha']['image_src'] ?? '', ENT_QUOTES, 'UTF-8') . '" alt="CAPTCHA" class="imagever">'; ?>
-                      <input style="height: 65px;" type="text" class="form-control" name="scode" value="" placeholder="<?php echo htmlspecialchars($lang['entercode'] ?? 'Enter CAPTCHA code', ENT_QUOTES, 'UTF-8'); ?>">
-                    </div>
+					<?php include __DIR__ . '/captcha_bootstrap.php'; ?>
                   <?php endif; ?>
                 <?php endif; ?>
 

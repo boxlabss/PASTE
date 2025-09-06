@@ -234,12 +234,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 					}
 				} else {
 					// internal captcha (image)
-					$scode    = strtolower(htmlentities(trim($_POST['scode'] ?? '')));
-					$cap_code = strtolower($_SESSION['captcha']['code'] ?? '');
-					if ($cap_code !== $scode) {
+					$posted = strtolower(preg_replace('/\s+/', '', (string)($_POST['scode'] ?? '')));
+
+					$cfg = isset($_SESSION['_CAPTCHA']['config'])
+						? @unserialize($_SESSION['_CAPTCHA']['config'], ['allowed_classes' => false])
+						: null;
+
+					$cap_code = strtolower((string)($cfg['code'] ?? ($_SESSION['captcha']['code'] ?? '')));
+
+					// timing-safe compare; require non-empty
+					if ($cap_code === '' || !hash_equals($cap_code, $posted)) {
 						$error = $lang['image_wrong'] ?? 'Incorrect CAPTCHA code.';
 						goto OutPut;
 					}
+
+					unset($_SESSION['captcha'], $_SESSION['_CAPTCHA']);
 				}
 			}
 		}
