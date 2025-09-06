@@ -29,7 +29,9 @@ try {
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 } catch (PDOException $e) {
-    die("Unable to connect to database: " . $e->getMessage());
+    $error = 'Database error. Please try again later.';
+    $GLOBALS['error'] = $error;
+    paste_error($error, 503); // themed render + exit
 }
 
 function str_contains_polyfill(string $haystack, string $needle, bool $ignoreCase = false): bool
@@ -1356,7 +1358,7 @@ function getPasteComments(PDO $pdo, int $paste_id, int $limit = 50, int $offset 
 function addPasteComment(
     PDO $pdo,
     int $paste_id,
-    int $user_id = null,
+    ?int $user_id = null,
     string $username = 'Guest',
     string $ip = '0.0.0.0',
     string $body = '',
@@ -1464,6 +1466,153 @@ function render_comment_html(string $text): string {
     // autolink http/https
     $safe = preg_replace('~(?i)\bhttps?://[^\s<]+~', '<a href="$0" target="_blank" rel="nofollow noopener noreferrer">$0</a>', $safe);
     return nl2br($safe);
+}
+
+// --- Fatal Errors ---
+if (!function_exists('paste_error')) {
+    function paste_error(string $msg, int $httpCode = 200): void
+    {
+        // Variables expected by theme/default/errors.php
+        $error            = $msg;
+        $notfound         = null;
+        $require_password = false;
+        $paste_id         = 0;
+
+        // fallbacks
+        $default_theme = (string)($GLOBALS['default_theme'] ?? 'default');
+        $baseurl       = (string)($GLOBALS['baseurl'] ?? '/');
+        $mod_rewrite   = (string)($GLOBALS['mod_rewrite'] ?? '0');
+        $lang          = (array)($GLOBALS['lang'] ?? []);
+        $title         = (string)($GLOBALS['title'] ?? 'Error');
+        $site_name     = (string)($GLOBALS['site_name'] ?? 'Paste');
+        $des           = (string)($GLOBALS['des'] ?? '');
+        $keyword       = (string)($GLOBALS['keyword'] ?? '');
+        $ga            = (string)($GLOBALS['ga'] ?? '');
+        $additional_scripts = (string)($GLOBALS['additional_scripts'] ?? '');
+        $ads_1         = (string)($GLOBALS['ads_1'] ?? '');
+        $ads_2         = (string)($GLOBALS['ads_2'] ?? '');
+        $text_ads      = (string)($GLOBALS['text_ads'] ?? '');
+        $privatesite   = (string)($GLOBALS['privatesite'] ?? 'off');
+        $noguests      = (string)($GLOBALS['noguests'] ?? 'off');
+        $enablegoog    = (string)($GLOBALS['enablegoog'] ?? 'no');
+        $enablefb      = (string)($GLOBALS['enablefb'] ?? 'no');
+        $hl_style      = (string)($GLOBALS['hl_style'] ?? 'hybrid.css');
+        $ges_style     = (string)($GLOBALS['ges_style'] ?? '');
+
+        // Provide a safe $pdo so header.php can call getNavLinks($pdo,'header')
+        if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+            $pdo = $GLOBALS['pdo']; // make it local for the include scope
+        } else {
+            if (!class_exists('PasteDummyPDO')) {
+                class PasteDummyPDO extends PDO {
+                    public function __construct() { /* no parent ctor */ }
+                    public function prepare($query, $options = []) { throw new PDOException('DB unavailable'); }
+                    public function query($query, $mode = null, ...$args) { throw new PDOException('DB unavailable'); }
+                }
+            }
+            $pdo = new PasteDummyPDO();
+            $GLOBALS['pdo'] = $pdo; // optional
+        }
+
+        // If we're here from an OOM, avoid loading header/footer (keeps memory tiny)
+        if (!empty($GLOBALS['__PASTE_FATAL_OOM__'])) {
+            while (ob_get_level() > 0) { @ob_end_clean(); }
+            http_response_code($httpCode);
+            header('Content-Type: text/html; charset=utf-8');
+            $safe = htmlspecialchars($error, ENT_QUOTES, 'UTF-8');
+            exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
+        }
+
+        // theme
+        $rootDir  = dirname(__DIR__);
+        $themeDir = $rootDir . '/theme/' . basename($default_theme);
+        $header   = $themeDir . '/header.php';
+        $errors   = $themeDir . '/errors.php';
+        $footer   = $themeDir . '/footer.php';
+
+        // Clean any partial output and set status
+        while (ob_get_level() > 0) { @ob_end_clean(); }
+        http_response_code($httpCode);
+
+        if (is_file($header) && is_file($errors) && is_file($footer)) {
+            require $header;   // sees all locals above ($pdo, $baseurl, $lang, …)
+            require $errors;
+            require $footer;
+            exit;
+        }
+
+        // Minimal fallback
+        header('Content-Type: text/html; charset=utf-8');
+        $safe = htmlspecialchars($error, ENT_QUOTES, 'UTF-8');
+        exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
+    }
+}
+
+
+if (!function_exists('paste_enable_themed_errors')) {
+    function paste_enable_themed_errors(): void
+    {
+        if (!empty($GLOBALS['PASTE_NO_THEMED_ERRORS'])) {
+            return; // per-script opt-out
+        }
+
+        if (!headers_sent()) {
+            ob_start(); // allow clearing partial output on fatal
+        }
+
+        set_exception_handler(static function (Throwable $ex): void {
+            error_log('[paste-uncaught] ' . get_class($ex) . ': ' . $ex->getMessage() . ' @ ' . $ex->getFile() . ':' . $ex->getLine());
+            $GLOBALS['error'] = 'An unexpected error occurred while processing your request.';
+            paste_error($GLOBALS['error'], 200);
+        });
+
+        set_error_handler(static function (int $severity, string $message, string $file = '', int $line = 0) {
+            // Respect @-silencing
+            if (!(error_reporting() & $severity)) {
+                return false;
+            }
+            // Escalate only serious, recoverable fatals
+            if (in_array($severity, [E_RECOVERABLE_ERROR, E_USER_ERROR], true)) {
+                throw new ErrorException($message, 0, $severity, $file, $line);
+            }
+            return false; // let PHP handle warnings/notices
+        });
+
+        register_shutdown_function(static function (): void {
+            $err = error_get_last();
+            if (!$err) {
+                return;
+            }
+
+            $type = (int)($err['type'] ?? 0);
+            if (!in_array($type, [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                return;
+            }
+
+            $msg = (string)($err['message'] ?? '');
+            $isOOM     = stripos($msg, 'Allowed memory size') !== false;
+            $isTimeout = stripos($msg, 'Maximum execution time') !== false;
+
+            if (!$isOOM && !$isTimeout && $type !== E_PARSE) {
+                return; // ignore non-fatal shutdowns
+            }
+
+            $ml = ini_get('memory_limit') ?: '';
+            $mlText = $ml !== '' ? " Current memory_limit in php.ini settings: $ml." : '';
+
+            if ($isOOM) {
+                $error = 'The operation needs more memory than the server allows. Try unified view or download the .diff.' . $mlText;
+            } elseif ($isTimeout) {
+                $error = 'The operation took too long and timed out. Try unified view or downloading the .diff.';
+            } else {
+                $error = 'A fatal error occurred while rendering this page.';
+            }
+
+            $GLOBALS['error'] = $error;
+            header('X-Paste-Fatal: ' . ($isOOM ? 'oom' : ($isTimeout ? 'timeout' : 'fatal')));
+            paste_error($error, 200);
+        });
+    }
 }
 
 ?>

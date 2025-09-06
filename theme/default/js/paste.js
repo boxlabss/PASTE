@@ -30,6 +30,28 @@
   function countLinesFast(str){ let n = 1; for (let i=0; i<str.length; i++) if (str.charCodeAt(i) === 10) n++; return n }
   function digitsOf(n){ return Math.max(1, (n|0).toString().length) }
 
+  // byte length helper (UTF-8)
+  function byteLen(str){
+    try { return (new TextEncoder()).encode(str).length; }
+    catch(_) { return unescape(encodeURIComponent(str)).length; }
+  }
+
+  // a11y live region (created on demand)
+  function ensureLiveRegion(){
+    var el = document.getElementById('file-announce');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'file-announce';
+    el.className = 'visually-hidden';
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+    return el;
+  }
+  function announce(msg){
+    var a = ensureLiveRegion();
+    a.textContent = String(msg || '');
+  }
+
   // ========= lightweight editor (textarea + virtualized line-number gutter) =
   function initLiteEditor(ta, opts){
     if (!ta || ta.dataset.liteInit === '1') return;
@@ -60,10 +82,10 @@
     // ---- metrics ------------------------------------------------------------
     const csTA = getComputedStyle(ta);
     const fs   = parseFloat(csTA.fontSize) || 14;
-	const lhPx = (csTA.lineHeight && csTA.lineHeight !== 'normal')
-	  ? parseFloat(csTA.lineHeight)
-	  : Math.round(fs * 1.5);
-	ta.style.lineHeight = lhPx + 'px';
+    const lhPx = (csTA.lineHeight && csTA.lineHeight !== 'normal')
+      ? parseFloat(csTA.lineHeight)
+      : Math.round(fs * 1.5);
+    ta.style.lineHeight = lhPx + 'px';
 
     gutter.style.fontFamily = csTA.fontFamily;
     gutter.style.fontSize   = csTA.fontSize;
@@ -355,11 +377,15 @@
     olElement.style.listStyle = (currentStyle.startsWith('none')) ? 'decimal' : 'none';
   };
 
-window.toggleFullScreen = function(){
-  const modalElement = document.getElementById('fullscreenModal');
-  if (!modalElement) { showNotification('Fullscreen modal not available.', true); return; }
-  bootstrap.Modal.getOrCreateInstance(modalElement).show();
-};
+  window.toggleFullScreen = function(){
+    const modalElement = document.getElementById('fullscreenModal');
+    if (!modalElement) { showNotification('Fullscreen modal not available.', true); return; }
+    if (window.bootstrap && bootstrap.Modal) {
+      bootstrap.Modal.getOrCreateInstance(modalElement).show();
+    } else {
+      showNotification('Bootstrap modal is unavailable.', true);
+    }
+  };
 
   window.copyToClipboard = function(){
     const ta = document.getElementById('code');
@@ -427,6 +453,225 @@ window.toggleFullScreen = function(){
     ta.focus();
   };
 
+  // ========= drag & drop loader =================================
+	function enableEditorDragDrop(target, opts){
+	  var ta = document.getElementById('edit-code');
+	  if (!target || !ta) return;
+
+	  // Use the whole editor wrapper as the drop zone (more reliable than the textarea)
+	  var zone = ta.closest('.editor-wrap') || ta.parentNode || ta;
+
+	  // Create overlay once
+	  var overlay = zone.querySelector('.drop-overlay');
+	  if (!overlay) {
+		overlay = document.createElement('div');
+		overlay.className = 'drop-overlay';
+		overlay.textContent = 'Drop file to load';
+		zone.appendChild(overlay);
+	  }
+
+	  var maxBytes = (opts && +opts.maxBytes) || (+ta.dataset.maxBytes || 10 * 1024 * 1024);
+
+	  var extMap = (opts && opts.extMap) || {
+		php:'php', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+		py:'python', rb:'ruby', java:'java', c:'c', h:'c', cpp:'cpp', cc:'cpp', cs:'csharp',
+		go:'go', rs:'rust', kt:'kotlin', swift:'swift', sh:'bash', ps1:'powershell',
+		sql:'sql', html:'html', htm:'html', css:'css', scss:'scss',
+		json:'json', xml:'xml', yml:'yaml', yaml:'yaml', ini:'ini', conf:'ini', md:'markdown'
+	  };
+
+	  function uiAlert(msg, isErr){
+		if (typeof showNotification === 'function') showNotification(msg, !!isErr);
+		else alert(msg);
+	  }
+	  function looksBinary(s){ return /\x00/.test(s); }
+	  function stripBom(s){ return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s; }
+	  function byteLen(str){
+		try { return (new TextEncoder()).encode(str).length; }
+		catch(_) { return unescape(encodeURIComponent(str)).length; }
+	  }
+	  function setFormatByExt(name){
+		var m = /\.([^.]+)$/.exec(name || '');
+		if (!m) return;
+		var code = extMap[(m[1] || '').toLowerCase()];
+		if (!code) return;
+		var sel = document.getElementById('format');
+		if (!sel) return;
+		var opt = sel.querySelector('option[value="'+code+'"]');
+		if (opt) sel.value = code;
+	  }
+
+	  // Keep track of nested dragenter/leaves
+	  var enter = 0;
+
+	  zone.addEventListener('dragover', function(e){
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+	  });
+
+	  zone.addEventListener('dragenter', function(e){
+		e.preventDefault();
+		if (enter++ === 0) zone.classList.add('dragging','drag-hover');
+	  });
+
+	  zone.addEventListener('dragleave', function(){
+		if (--enter <= 0) { enter = 0; zone.classList.remove('dragging','drag-hover'); }
+	  });
+
+	  zone.addEventListener('drop', function(e){
+		e.preventDefault();
+		enter = 0; zone.classList.remove('dragging','drag-hover');
+
+		var files = e.dataTransfer && e.dataTransfer.files;
+		if (!files || !files.length) return;
+		var f = files[0];
+
+		if (f.size > maxBytes) { uiAlert('File is larger than the site limit.', true); return; }
+
+		var reader = new FileReader();
+		reader.onload = function(){
+		  var text = String(reader.result || '');
+		  if (looksBinary(text)) { uiAlert('This file looks binary.', true); return; }
+		  text = stripBom(text).replace(/\r\n?/g, '\n');
+		  if (byteLen(text) > maxBytes) { uiAlert('Loaded text exceeds the site limit.', true); return; }
+
+		  ta.value = text;
+		  try { triggerInput(ta); } catch(_){}
+		  setFormatByExt(f.name);
+
+		  var title = document.querySelector('input[name="title"]');
+		  if (title && !title.value) title.value = f.name;
+
+		  if (typeof announce === 'function') announce('Loaded ' + f.name);
+		  if (opts && typeof opts.onLoaded === 'function') opts.onLoaded(f);
+		};
+		reader.readAsText(f);
+	  });
+	}
+
+  // ========= local "Load file into editor" (no upload) ======================
+  function setupLocalFileLoader(){
+    if (document.getElementById('load_file_btn') && document.getElementById('code_file') && document.getElementById('clear_file_btn')) {
+      // already wired by template; still connect handlers below
+    } else {
+      // If markup isn't present, create next to Highlight
+      var anchor = document.querySelector('.highlight-line');
+      if (anchor) {
+        if (!document.getElementById('load_file_btn')) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.id = 'load_file_btn';
+          b.className = 'btn btn-outline-secondary ms-2';
+          b.title = 'Load file into editor (no upload)';
+          b.innerHTML = '<i class="bi bi-upload"></i> Load file';
+          anchor.insertAdjacentElement('afterend', b);
+        }
+        if (!document.getElementById('code_file')) {
+          var i = document.createElement('input');
+          i.type = 'file';
+          i.id   = 'code_file';
+          i.className = 'visually-hidden';
+          i.setAttribute('accept',
+            '.txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*'
+          );
+          anchor.nextElementSibling
+            ? anchor.nextElementSibling.insertAdjacentElement('afterend', i)
+            : anchor.insertAdjacentElement('afterend', i);
+        }
+        if (!document.getElementById('clear_file_btn')) {
+          var c = document.createElement('button');
+          c.type = 'button';
+          c.id = 'clear_file_btn';
+          c.className = 'btn btn-outline-secondary';
+          c.title = 'Clear editor';
+          c.innerHTML = '<i class="bi bi-x-circle"></i> Clear';
+          var loadBtn = document.getElementById('load_file_btn');
+          loadBtn.insertAdjacentElement('afterend', c);
+        }
+      }
+    }
+
+    var textarea = document.getElementById('edit-code');
+    var btn   = document.getElementById('load_file_btn');
+    var input = document.getElementById('code_file');
+    var clr   = document.getElementById('clear_file_btn');
+    if (!textarea || !btn || !input) return;
+
+    // Size limit: default 10MB; can be overridden via data-max-bytes on the textarea
+    var maxBytes = (+textarea.dataset.maxBytes) || (10 * 1024 * 1024);
+
+    // ext -> language codes
+    var extMap = {
+      php:'php', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+      py:'python', rb:'ruby', java:'java', c:'c', h:'c', cpp:'cpp', cc:'cpp', cs:'csharp',
+      go:'go', rs:'rust', kt:'kotlin', swift:'swift', sh:'bash', ps1:'powershell',
+      sql:'sql', html:'html', htm:'html', css:'css', scss:'scss',
+      json:'json', xml:'xml', yml:'yaml', yaml:'yaml', ini:'ini', conf:'ini', md:'markdown'
+    };
+
+    function uiAlert(msg, isErr){
+      if (typeof showNotification === 'function') showNotification(msg, !!isErr);
+      else alert(msg);
+    }
+    function setFormatByExt(name){
+      var m = /\.([^.]+)$/.exec(name || '');
+      if (!m) return;
+      var code = extMap[(m[1] || '').toLowerCase()];
+      if (!code) return;
+      var sel = document.getElementById('format');
+      if (!sel) return;
+      var opt = sel.querySelector('option[value="'+code+'"]');
+      if (opt) sel.value = code;
+    }
+    function looksBinary(s){ return /\x00/.test(s); }
+    function stripBom(s){ return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s; }
+
+    // Button -> open picker
+    btn.onclick = function(){ input.click(); };
+
+    // Picker -> read file locally and insert into editor
+    input.onchange = function(){
+      var f = input.files && input.files[0];
+      if (!f) return;
+      if (f.size > maxBytes) { uiAlert('File is larger than the site limit.', true); input.value=''; return; }
+
+      var reader = new FileReader();
+      reader.onload = function(){
+        var text = String(reader.result || '');
+        if (looksBinary(text)) { uiAlert('This file looks binary. Please choose a text file.', true); input.value=''; return; }
+        text = stripBom(text).replace(/\r\n?/g, '\n');
+
+        // Soft byte guard (UTF-8)
+        if (byteLen(text) > maxBytes) { uiAlert('Loaded text exceeds the site limit.', true); return; }
+
+        textarea.value = text;
+        try { triggerInput(textarea); } catch(_){}
+        setFormatByExt(f.name);
+
+        // Set title if empty
+        var title = document.querySelector('input[name="title"]');
+        if (title && !title.value) title.value = f.name;
+
+        announce('Loaded ' + f.name);
+      };
+      reader.readAsText(f);
+    };
+
+    // Clear button
+    if (clr) {
+      clr.onclick = function(){
+        textarea.value = '';
+        try { triggerInput(textarea); } catch(_){}
+        if (input) input.value = '';
+        announce('Cleared editor');
+        showNotification('Editor cleared');
+      };
+    }
+
+    // Hook up drag & drop via the reusable function
+    enableEditorDragDrop(textarea, { maxBytes: maxBytes });
+  }
+
   // ========= boot ===========================================================
   document.addEventListener('DOMContentLoaded', function(){
     // Init editor only for the edit box
@@ -439,6 +684,9 @@ window.toggleFullScreen = function(){
       if (t.closest && t.closest('.toggle-fullscreen')){ ev.preventDefault(); window.toggleFullScreen(); }
       if (t.closest && t.closest('.copy-clipboard'))   { ev.preventDefault(); window.copyToClipboard(); }
     }, { capture: true });
+
+    // ---- Place the Load/Clear buttons next to Highlight & enable DnD -------
+    setupLocalFileLoader();
 
     // ---- Move .code-content into fullscreen modal on demand ----------------
     const modalEl = document.getElementById('fullscreenModal');

@@ -1,12 +1,26 @@
 <?php
+/*
+ * Paste $v3.2 2025/09/06 https://github.com/boxlabss/PASTE
+ * demo: https://paste.boxlabs.uk/
+ *
+ * https://phpaste.sourceforge.io/
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 3
+ * of the License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License in LICENCE for more details.
+ *
+ * captcha.php
+ */
+ 
 declare(strict_types=1);
 
-/**
- * Build captcha config, store in session, and return src + code.
- * Usage in your form controller:
- *   $cap = captcha('#0a58ca','Normal','on','ABCDEFGHJKLMNPQRSTUVWXYZ23456789');
- *   echo '<img src="'.htmlspecialchars($cap['image_src'],ENT_QUOTES).'" ...>';
- */
+// Build captcha config, store in session, and return src + code.
 function captcha(string $color, string $mode, string $mul, string $allowed, array $config = []): array
 {
     $bg_path   = __DIR__ . '/captchabg/';

@@ -1,4 +1,23 @@
 <?php
+/*
+ * Paste $v3.2 2025/09/02 https://github.com/boxlabss/PASTE
+ * demo: https://paste.boxlabs.uk/
+ *
+ * https://phpaste.sourceforge.io/
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 3
+ * of the License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License in LICENCE for more details.
+ *
+ * captcha_bootstrap.php
+ */
+ 
 $__cap_color      = isset($captcha_color)      && is_string($captcha_color)      ? $captcha_color      : '#0a58ca';
 $__cap_mode       = isset($captcha_difficulty) && is_string($captcha_difficulty) ? $captcha_difficulty : 'Normal';   // Easy|Normal|Tough
 $__cap_multibg    = isset($captcha_multibg)    && is_string($captcha_multibg)    ? $captcha_multibg    : 'on';       // 'on' or ''
@@ -6,7 +25,7 @@ $__cap_allowed    = isset($captcha_allowed)    && is_string($captcha_allowed)   
 $__input_name     = isset($captcha_input_name) && is_string($captcha_input_name) ? $captcha_input_name : 'scode';
 $__placeholder    = (isset($lang) && is_array($lang) && isset($lang['entercode']) && is_string($lang['entercode']))
                     ? htmlspecialchars($lang['entercode'], ENT_QUOTES, 'UTF-8')
-                    : 'Enter Code';
+                    : 'Enter CAPTCHA';
 
 if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
 
@@ -31,7 +50,7 @@ if (strpos($imgSrc, '_CAPTCHA=') === false) {
 }
 
 
-//Unique IDs per instance
+// Unique IDs per instance
 $GLOBALS['__CAPTCHA_WIDGET_SEQ'] = ($GLOBALS['__CAPTCHA_WIDGET_SEQ'] ?? 0) + 1;
 $seq    = (int)$GLOBALS['__CAPTCHA_WIDGET_SEQ'];
 $imgId  = "captcha-img-$seq";
@@ -81,7 +100,6 @@ $placeholder = htmlspecialchars($lang['entercode'] ?? 'Enter CAPTCHA code', ENT_
     <div id="scode-help" class="form-text">Type the characters shown on the left.</div>
   </div>
 </div>
-
 
 <?php if (!defined('CAPTCHA_BOOTSTRAP_WIDGET_JS')): define('CAPTCHA_BOOTSTRAP_WIDGET_JS', true); ?>
 <script>

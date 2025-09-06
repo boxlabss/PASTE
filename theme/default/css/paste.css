@@ -24,7 +24,7 @@ body {
 .nav-link { transition: color .2s; }
 .nav-link:hover { color: #0d6efd !important; }
 
-.search-form { max-width: 400px; width: 100%; display: flex; align-items: center; }
+.search-form { max-width: 300px; width: 100%; display: flex; align-items: center; }
 .search-form .form-control { background-color: #2a2a2a; border-color: #444; color: #fff; }
 .search-form .form-control:focus { background-color: #2a2a2a; border-color: #0d6efd; box-shadow: 0 0 0 .25rem rgba(13,110,253,.25); }
 .search-form .btn { border-color: #444; }
@@ -174,6 +174,49 @@ body {
 #cookieBanner{ font-size:.9em; z-index:1080; display:none; background: rgba(var(--bs-dark-rgb), var(--bs-bg-opacity)) !important; backdrop-filter: blur(3px); }
 
 /* === Editor (textarea + gutter) ======================================== */
+
+/* when a file is dragged over the editor */
+.editor-wrap { position: relative; }
+
+/* Subtle outline when dragging over the zone */
+#edit-code.drag-hover,
+.editor-wrap.drag-hover{
+  outline: 2px dashed var(--drop-accent, var(--bs-primary, #6ea8fe));
+  outline-offset: 4px;
+}
+
+/* Overlay */
+.editor-wrap .drop-overlay{
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+
+  /* dark-friendly glass */
+  background: rgba(255,255,255, .06);
+  color: var(--drop-text, #f1f3f5);
+  border: 2px dashed rgba(255,255,255, .55);
+  border-radius: .6rem;
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  font-weight: 600;
+
+  /* gentle glow using Bootstrap primary */
+  box-shadow:
+    0 0 0 2px rgba(var(--bs-primary-rgb, 110,168,254), .15),
+    0 0 36px rgba(var(--bs-primary-rgb, 110,168,254), .18) inset;
+}
+
+.editor-wrap.dragging .drop-overlay { display: flex; }
+
+/* slightly nicer motion */
+@media (prefers-reduced-motion: no-preference){
+  .editor-wrap .drop-overlay { transition: opacity .15s ease-in-out; opacity: .98; }
+  .editor-wrap.dragging .drop-overlay { opacity: 1; }
+}
+
 .editor-wrap{ position:relative; display:grid; grid-template-columns:max-content 1fr; align-items:stretch; gap:0; overflow:hidden; box-shadow:none !important; }
 .editor-gutter{
   display:flex; overflow:hidden; text-align:right; user-select:none; white-space:pre;
@@ -407,7 +450,6 @@ html{ scroll-behavior:smooth; }
 .marker{ font-weight:600; margin-right:.25rem; opacity:.9; }
 
 /* Wrapping + line-number toggles */
-.wrap-off .code-inner{ white-space: pre; }
 .wrap-on  .code-inner{ white-space: pre-wrap; word-break: break-word; }
 
 /* Keep cells, collapse visuals when line numbers are off */

@@ -221,7 +221,7 @@ if (!function_exists('render_comment_node')) {
                 <div class="d-flex align-items-center gap-2">
                   <?php if ($can_comment): ?>
                     <button type="button" class="btn btn-link btn-sm p-0 comment-reply" data-target="#reply-form-<?php echo $id; ?>">
-                      <i class="bi bi-reply"></i> Reply
+                      <i class="bi bi-reply"></i> <?php echo htmlspecialchars($lang['reply'] ?? 'Reply', ENT_QUOTES, 'UTF-8'); ?>
                     </button>
                   <?php endif; ?>
                   <?php if ($can_delete): ?>
@@ -261,19 +261,19 @@ if (!function_exists('render_comment_node')) {
                         required
                       ></textarea>
                       <div class="d-flex justify-content-end mt-1">
-                        <small class="text-muted"><span class="c-remaining">4000</span> chars left</small>
+                        <small class="text-muted"><span class="c-remaining">4000</span> <?php echo htmlspecialchars($lang['charsleft'] ?? 'chars left', ENT_QUOTES, 'UTF-8'); ?></small>
                       </div>
                     </div>
                     <div class="d-flex justify-content-end gap-2">
-                      <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $id; ?>">Cancel</button>
-                      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> Post reply</button>
+                      <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $id; ?>"><?php echo htmlspecialchars($lang['cancel'] ?? 'Cancel', ENT_QUOTES, 'UTF-8'); ?></button>
+                      <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> <?php echo htmlspecialchars($lang['postreply'] ?? 'Post Reply', ENT_QUOTES, 'UTF-8'); ?></button>
                     </div>
                   </form>
                 </div>
               <?php else: ?>
                 <div class="mt-2">
                   <a class="btn btn-link btn-sm p-0" href="<?php echo htmlspecialchars($loginNext('#reply-form-' . $id), ENT_QUOTES, 'UTF-8'); ?>">
-                    <i class="bi bi-box-arrow-in-right"></i> Log in to reply
+                    <i class="bi bi-box-arrow-in-right"></i> <?php echo htmlspecialchars($lang['loginreply'] ?? 'Login to Reply', ENT_QUOTES, 'UTF-8'); ?>
                   </a>
                 </div>
               <?php endif; ?>
@@ -424,7 +424,7 @@ if (!function_exists('render_comment_node')) {
             <div class="mb-3 position-relative" id="raw-block"
                  data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? '')), ENT_QUOTES, 'UTF-8'); ?>">
               <p><?php echo htmlspecialchars($lang['rawpaste'] ?? 'Raw Paste'); ?></p>
-              <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm">Load Raw</button>
+            <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm"><?php echo htmlspecialchars($lang['loadraw'] ?? 'Load Raw', ENT_QUOTES, 'UTF-8'); ?></button>
               <textarea class="form-control d-none" rows="15" id="code" readonly></textarea>
               <div id="line-number-tooltip" class="line-number-tooltip"></div>
             </div>
@@ -433,10 +433,10 @@ if (!function_exists('render_comment_node')) {
             <div class="btn-group" role="group" aria-label="Fork and Edit actions">
               <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to fork this paste">
-                  <i class="bi bi-git"></i> Fork
+                  <i class="bi bi-git"></i> <?php echo htmlspecialchars($lang['forkpaste'] ?? 'Fork', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to edit this paste">
-                  <i class="bi bi-pencil"></i> Edit
+                  <i class="bi bi-git"></i> <?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
               <?php endif; ?>
 
@@ -445,7 +445,7 @@ if (!function_exists('render_comment_node')) {
                 <a class="btn btn-outline-secondary"
                    href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
                    title="View differences from parent">
-                  <i class="bi bi-arrow-left-right"></i> View differences
+                  <i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
               <?php endif; ?>
             </div>
@@ -514,9 +514,9 @@ if (!function_exists('render_comment_node')) {
                         <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                         <div class="col-sm-10">
                           <select class="form-select" name="visibility">
-                            <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>>Public</option>
-                            <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>>Unlisted</option>
-                            <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>>Private</option>
+							  <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
+							  <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
+							  <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
                           </select>
                         </div>
                       </div>
@@ -540,7 +540,7 @@ if (!function_exists('render_comment_node')) {
                           <a class="btn btn-outline-secondary paste-button"
                              href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
                              title="View differences from parent">
-                            <i class="bi bi-arrow-left-right"></i> View differences
+							<i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                           </a>
                         <?php endif; ?>
                       </div>
@@ -586,7 +586,7 @@ if (!function_exists('render_comment_node')) {
             <div class="modal-dialog">
               <div class="modal-content">
                 <div class="modal-header">
-                  <h5 class="modal-title" id="detectedExplainLabel">How we detected the language</h5>
+                  <h5 class="modal-title" id="detectedExplainLabel"><?php echo htmlspecialchars($lang['detectedexplainlabel'] ?? 'How we detected the language', ENT_QUOTES, 'UTF-8'); ?></h5>
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -617,13 +617,13 @@ if (!function_exists('render_comment_node')) {
             <div class="card-header bg-dark text-light d-flex align-items-center justify-content-between">
               <div class="d-flex align-items-center gap-2">
                 <i class="bi bi-chat-square-text"></i>
-                <span class="fw-semibold">Comments</span>
+                <span class="fw-semibold"><?php echo htmlspecialchars($lang['comments'] ?? 'Comments', ENT_QUOTES, 'UTF-8'); ?></span>
                 <a class="badge bg-secondary text-decoration-none" href="#comments">
                   <span id="comments-count"><?php echo (int)count_comments_total($comments ?? []); ?></span>
                 </a>
               </div>
               <?php if (!$can_comment): ?>
-                <small class="text-light-50">Login to join the discussion</small>
+                <small class="text-light-50"><?php echo htmlspecialchars($lang['logintocomment'] ?? 'Login to join the discussion.', ENT_QUOTES, 'UTF-8'); ?></small>
               <?php endif; ?>
             </div>
 
@@ -696,7 +696,7 @@ if (!function_exists('render_comment_node')) {
                           <?php if ($can_comment): ?>
                             <div class="mt-2">
                               <button type="button" class="btn btn-link btn-sm p-0 comment-reply" data-target="#reply-form-<?php echo $cid; ?>">
-                                <i class="bi bi-reply"></i> Reply
+                                <i class="bi bi-reply"></i> <?php echo htmlspecialchars($lang['reply'] ?? 'Reply', ENT_QUOTES, 'UTF-8'); ?>
                               </button>
                             </div>
                             <div id="reply-form-<?php echo $cid; ?>" class="mt-2 d-none">
@@ -707,19 +707,19 @@ if (!function_exists('render_comment_node')) {
                                 <div class="mb-2">
                                   <textarea class="form-control" name="comment_body" rows="3" minlength="1" maxlength="4000" placeholder="Write a reply…" required></textarea>
                                   <div class="d-flex justify-content-end mt-1">
-                                    <small class="text-muted"><span class="c-remaining">4000</span> chars left</small>
+                                    <small class="text-muted"><span class="c-remaining">4000</span> <?php echo htmlspecialchars($lang['charsleft'] ?? 'chars left', ENT_QUOTES, 'UTF-8'); ?></small>
                                   </div>
                                 </div>
                                 <div class="d-flex justify-content-end gap-2">
-                                  <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $cid; ?>">Cancel</button>
-                                  <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> Post reply</button>
+                                  <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $cid; ?>"><?php echo htmlspecialchars($lang['cancel'] ?? 'Cancel', ENT_QUOTES, 'UTF-8'); ?></button>
+                                  <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> <?php echo htmlspecialchars($lang['postreply'] ?? 'Post Reply', ENT_QUOTES, 'UTF-8'); ?></button>
                                 </div>
                               </form>
                             </div>
                           <?php else: ?>
                             <div class="mt-2">
                               <a class="btn btn-link btn-sm p-0" href="<?php echo htmlspecialchars($loginNext('#reply-form-' . $cid), ENT_QUOTES, 'UTF-8'); ?>">
-                                <i class="bi bi-box-arrow-in-right"></i> Log in to reply
+                                <i class="bi bi-box-arrow-in-right"></i> <?php echo htmlspecialchars($lang['loginreply'] ?? 'Login to Reply', ENT_QUOTES, 'UTF-8'); ?>
                               </a>
                             </div>
                           <?php endif; ?>
@@ -729,7 +729,7 @@ if (!function_exists('render_comment_node')) {
                   <?php endforeach; } ?>
                 <?php else: ?>
                   <li class="list-group-item bg-body text-center text-muted py-5">
-                    No comments yet — be the first!
+                    <?php echo htmlspecialchars($lang['nocomments'] ?? 'No comments yet. Be the first.', ENT_QUOTES, 'UTF-8'); ?>
                   </li>
                 <?php endif; ?>
               </ul>
@@ -753,23 +753,23 @@ if (!function_exists('render_comment_node')) {
                         required
                       ></textarea>
                       <div class="d-flex justify-content-between mt-1">
-                        <small class="text-muted">Markdown is not enabled; links will be auto-linked.</small>
-                        <small class="text-muted"><span id="c-remaining">4000</span> chars left</small>
+                        <small class="text-muted"><?php echo htmlspecialchars($lang['commentexplain'] ?? 'Markdown is not enabled; links will be auto-linked.', ENT_QUOTES, 'UTF-8'); ?></small>
+                        <small class="text-muted"><span id="c-remaining">4000</span> <?php echo htmlspecialchars($lang['charsleft'] ?? 'chars left', ENT_QUOTES, 'UTF-8'); ?></small>
                       </div>
                     </div>
                     <div class="d-flex justify-content-end">
                       <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-send"></i> Post comment
+                        <i class="bi bi-send"></i> <?php echo htmlspecialchars($lang['postcomment'] ?? 'Post comment', ENT_QUOTES, 'UTF-8'); ?>
                       </button>
                     </div>
                   </form>
                 <?php else: ?>
                   <div class="alert alert-info mb-0">
                     <div class="d-flex align-items-center justify-content-between">
-                      <span>Login to post a comment.</span>
+                      <span><?php echo htmlspecialchars($lang['logintocomment'] ?? 'Login to post a comment.', ENT_QUOTES, 'UTF-8'); ?></span>
                       <a class="btn btn-sm btn-outline-primary"
                          href="<?php echo htmlspecialchars($loginNext('#comments'), ENT_QUOTES, 'UTF-8'); ?>">
-                        <i class="bi bi-box-arrow-in-right"></i> Login
+                        <i class="bi bi-box-arrow-in-right"></i> <?php echo htmlspecialchars($lang['login/register'] ?? 'Login/Register', ENT_QUOTES, 'UTF-8'); ?>
                       </a>
                     </div>
                   </div>
@@ -780,7 +780,7 @@ if (!function_exists('render_comment_node')) {
         </div>
         <?php else: ?>
           <div class="mt-5" id="comments">
-            <div class="alert alert-secondary">Comments have been disabled.</div>
+            <div class="alert alert-secondary"><?php echo htmlspecialchars($lang['commentsdisabled'] ?? 'Comments have been disabled.', ENT_QUOTES, 'UTF-8'); ?></div>
           </div>
         <?php endif; ?>
 
@@ -804,7 +804,7 @@ if (!function_exists('render_comment_node')) {
               <span class="badge bg-primary"><?php echo htmlspecialchars($display_code); ?></span>
               <?php if (!empty($p_code_source) && $p_code_source !== 'explicit' && !empty($p_code_explain)): ?>
                   <span class="text-muted small">
-                    Detected
+                    <?php echo htmlspecialchars($lang['detected'] ?? 'Detected', ENT_QUOTES, 'UTF-8'); ?>
                     <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-bs-toggle="modal" data-bs-target="#detectedExplainModal" title="Why this language?">
                       <i class="bi bi-question-circle"></i>
                     </button>
@@ -824,8 +824,8 @@ if (!function_exists('render_comment_node')) {
               ?>
               </span>
               <span><i class="bi bi-eye me-1"></i><?php echo htmlspecialchars((string) ($p_views ?? 0)); ?> <?php echo htmlspecialchars($lang['views'] ?? 'Views'); ?></span>
-              <span>Size: <?php echo htmlspecialchars($paste_size); ?></span>
-              <span>Posted on: <?php echo htmlspecialchars($p_date ? date('M j, y @ g:i A', strtotime($p_date)) : date('M j, Y, g:i A')); ?></span>
+              <span><?php echo htmlspecialchars($lang['size'] ?? 'Size:', ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars($paste_size); ?></span>
+              <span><?php echo htmlspecialchars($lang['postedon'] ?? 'Posted on:', ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars($p_date ? date('M j, y @ g:i A', strtotime($p_date)) : date('M j, Y, g:i A')); ?></span>
             </div>
           </div>
 
@@ -903,7 +903,7 @@ if (!function_exists('render_comment_node')) {
           <div class="mb-3 position-relative" id="raw-block"
                data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? '')), ENT_QUOTES, 'UTF-8'); ?>">
             <p><?php echo htmlspecialchars($lang['rawpaste'] ?? 'Raw Paste'); ?></p>
-            <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm">Load raw</button>
+            <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm"><?php echo htmlspecialchars($lang['loadraw'] ?? 'Load Raw', ENT_QUOTES, 'UTF-8'); ?></button>
             <textarea class="form-control d-none" rows="15" id="code" readonly><?php
               echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8');
             ?></textarea>
@@ -914,10 +914,10 @@ if (!function_exists('render_comment_node')) {
             <div class="btn-group" role="group" aria-label="Fork and Edit actions">
               <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to fork this paste">
-                  <i class="bi bi-git"></i> Fork
+                  <i class="bi bi-git"></i> <?php echo htmlspecialchars($lang['forkpaste'] ?? 'Fork', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
                 <a href="#" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#signin" title="Login or Register to edit this paste">
-                  <i class="bi bi-pencil"></i> Edit
+                  <i class="bi bi-pencil"></i> <?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
               <?php endif; ?>
 
@@ -926,7 +926,7 @@ if (!function_exists('render_comment_node')) {
                 <a class="btn btn-outline-secondary"
                    href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
                    title="View differences from parent">
-                  <i class="bi bi-arrow-left-right"></i> View differences
+                  <i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                 </a>
               <?php endif; ?>
             </div>
@@ -1006,9 +1006,9 @@ if (!function_exists('render_comment_node')) {
                       <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                       <div class="col-sm-10">
                         <select class="form-select" name="visibility">
-                          <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>>Public</option>
-                          <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>>Unlisted</option>
-                          <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>>Private</option>
+                          <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
+                          <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
+                          <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
                         </select>
                       </div>
                     </div>
@@ -1033,7 +1033,7 @@ if (!function_exists('render_comment_node')) {
                            href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
 						   name="diff"
                            title="View differences from parent">
-                          <i class="bi bi-arrow-left-right"></i> View differences
+						<i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                       <?php endif; ?>
                     </div>
@@ -1079,7 +1079,7 @@ if (!function_exists('render_comment_node')) {
           <div class="modal-dialog">
             <div class="modal-content">
               <div class="modal-header">
-                <h5 class="modal-title" id="detectedExplainLabel">How we detected the language</h5>
+                <h5 class="modal-title" id="detectedExplainLabel"><?php echo htmlspecialchars($lang['detectedexplainlabel'] ?? 'How we detected the language', ENT_QUOTES, 'UTF-8'); ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
               <div class="modal-body">
@@ -1110,13 +1110,13 @@ if (!function_exists('render_comment_node')) {
           <div class="card-header bg-dark text-light d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
               <i class="bi bi-chat-square-text"></i>
-              <span class="fw-semibold">Comments</span>
+              <span class="fw-semibold"><?php echo htmlspecialchars($lang['comments'] ?? 'Comments', ENT_QUOTES, 'UTF-8'); ?></span>
               <a class="badge bg-secondary text-decoration-none" href="#comments">
                 <span id="comments-count"><?php echo (int)count_comments_total($comments ?? []); ?></span>
               </a>
             </div>
             <?php if (!$can_comment): ?>
-              <small class="text-light-50">Login to join the discussion</small>
+              <small class="text-light-50"><?php echo htmlspecialchars($lang['logintocomment'] ?? 'Login to join the discussion.', ENT_QUOTES, 'UTF-8'); ?></small>
             <?php endif; ?>
           </div>
 
@@ -1189,7 +1189,7 @@ if (!function_exists('render_comment_node')) {
                         <?php if ($can_comment): ?>
                           <div class="mt-2">
                             <button type="button" class="btn btn-link btn-sm p-0 comment-reply" data-target="#reply-form-<?php echo $cid; ?>">
-                              <i class="bi bi-reply"></i> Reply
+                              <i class="bi bi-reply"></i> <?php echo htmlspecialchars($lang['reply'] ?? 'Reply', ENT_QUOTES, 'UTF-8'); ?>
                             </button>
                           </div>
                           <div id="reply-form-<?php echo $cid; ?>" class="mt-2 d-none">
@@ -1200,19 +1200,19 @@ if (!function_exists('render_comment_node')) {
                               <div class="mb-2">
                                 <textarea class="form-control" name="comment_body" rows="3" minlength="1" maxlength="4000" placeholder="Write a reply…" required></textarea>
                                 <div class="d-flex justify-content-end mt-1">
-                                  <small class="text-muted"><span class="c-remaining">4000</span> chars left</small>
+                                  <small class="text-muted"><span class="c-remaining">4000</span> <?php echo htmlspecialchars($lang['charsleft'] ?? 'chars left', ENT_QUOTES, 'UTF-8'); ?></small>
                                 </div>
                               </div>
                               <div class="d-flex justify-content-end gap-2">
-                                <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $cid; ?>">Cancel</button>
-                                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> Post reply</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm reply-cancel" data-target="#reply-form-<?php echo $cid; ?>"><?php echo htmlspecialchars($lang['cancel'] ?? 'Cancel', ENT_QUOTES, 'UTF-8'); ?></button>
+                                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> <?php echo htmlspecialchars($lang['postreply'] ?? 'Post Reply', ENT_QUOTES, 'UTF-8'); ?></button>
                               </div>
                             </form>
                           </div>
                         <?php else: ?>
                           <div class="mt-2">
                             <a class="btn btn-link btn-sm p-0" href="<?php echo htmlspecialchars($loginNext('#reply-form-' . $cid), ENT_QUOTES, 'UTF-8'); ?>">
-                              <i class="bi bi-box-arrow-in-right"></i> Log in to reply
+                              <i class="bi bi-box-arrow-in-right"></i> <?php echo htmlspecialchars($lang['loginreply'] ?? 'Login to Reply', ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                           </div>
                         <?php endif; ?>
@@ -1222,7 +1222,7 @@ if (!function_exists('render_comment_node')) {
                 <?php endforeach; } ?>
               <?php else: ?>
                 <li class="list-group-item bg-body text-center text-muted py-5">
-                  No comments yet — be the first!
+                  <?php echo htmlspecialchars($lang['nocomments'] ?? 'No comments yet — be the first.', ENT_QUOTES, 'UTF-8'); ?>
                 </li>
               <?php endif; ?>
             </ul>
@@ -1246,23 +1246,23 @@ if (!function_exists('render_comment_node')) {
                       required
                     ></textarea>
                     <div class="d-flex justify-content-between mt-1">
-                      <small class="text-muted">Markdown is not enabled; links will be auto-linked.</small>
-                      <small class="text-muted"><span id="c-remaining">4000</span> chars left</small>
+                      <small class="text-muted"><?php echo htmlspecialchars($lang['commentexplain'] ?? 'Markdown is not enabled; links will be auto-linked.', ENT_QUOTES, 'UTF-8'); ?></small>
+                      <small class="text-muted"><span id="c-remaining">4000</span> <?php echo htmlspecialchars($lang['charsleft'] ?? 'chars left', ENT_QUOTES, 'UTF-8'); ?></small>
                     </div>
                   </div>
                   <div class="d-flex justify-content-end">
                     <button type="submit" class="btn btn-primary">
-                      <i class="bi bi-send"></i> Post comment
+                      <i class="bi bi-send"></i> <?php echo htmlspecialchars($lang['postcomment'] ?? 'Post comment', ENT_QUOTES, 'UTF-8'); ?>
                     </button>
                   </div>
                 </form>
               <?php else: ?>
                 <div class="alert alert-info mb-0">
                   <div class="d-flex align-items-center justify-content-between">
-                    <span>Login to post a comment.</span>
+                    <span><?php echo htmlspecialchars($lang['logintocomment'] ?? 'Login to post a comment.', ENT_QUOTES, 'UTF-8'); ?></span>
                     <a class="btn btn-sm btn-outline-primary"
                        href="<?php echo htmlspecialchars($loginNext('#comments'), ENT_QUOTES, 'UTF-8'); ?>">
-                      <i class="bi bi-box-arrow-in-right"></i> Login
+                      <i class="bi bi-box-arrow-in-right"></i> <?php echo htmlspecialchars($lang['login/register'] ?? 'Login/Register', ENT_QUOTES, 'UTF-8'); ?>
                     </a>
                   </div>
                 </div>
@@ -1274,7 +1274,7 @@ if (!function_exists('render_comment_node')) {
 
       <?php else: ?>
         <div class="mt-5" id="comments">
-          <div class="alert alert-secondary">Comments have been disabled.</div>
+          <div class="alert alert-secondary"><?php echo htmlspecialchars($lang['commentsdisabled'] ?? 'Comments have been disabled.', ENT_QUOTES, 'UTF-8'); ?></div>
         </div>
       <?php endif; ?>
 

@@ -138,7 +138,7 @@ $captcha_enabled    = ($cap_e === 'on' && $mode === 'reCAPTCHA' && !empty($site_
 
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-<script src="<?php echo htmlspecialchars($baseurl . 'theme/' . $default_theme . '/js/paste.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($baseurl . 'theme/' . $default_theme . '/js/paste.min.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
   <script>
 	// Highlight.php theme picker

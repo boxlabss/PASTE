@@ -43,7 +43,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
 				?>
 				  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
 					  title="View differences">
-					<i class="bi bi-arrow-left-right"></i> NEW: or try .diff
+					<i class="bi bi-arrow-left-right"></i> .diff
 				  </a>
             </div>
             <div class="card-body">
@@ -86,13 +86,31 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
 					  ?>
                     </select>
                   </div>
-                  <div class="col-sm-2 ms-auto">
-                    <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
-                  </div>
+					<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+					  <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines">
+						<i class="bi bi-text-indent-left"></i> Highlight
+					  </a>
+					  <!-- Load file -->
+					  <button type="button" class="btn btn-outline-secondary" id="load_file_btn" title="Load file into editor (no upload)">
+						<i class="bi bi-upload"></i> Load
+					  </button>
+					  
+						<!-- Clear -->
+							<button type="button" class="btn btn-outline-secondary" id="clear_file_btn" title="Clear editor">
+							  <i class="bi bi-x-circle"></i> Clear
+							</button>
+							
+					  <!-- Accepted formats -->
+					  <input type="file" id="code_file" class="visually-hidden"
+							 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+					</div>
                 </div>
-
+				
+					<!-- For screen readers -->
+					<div id="file-announce" class="visually-hidden" aria-live="polite"></div>
+					
                 <div class="mb-3">
-                  <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world"><?php echo htmlspecialchars($paste_data ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                  <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world" data-max-bytes="<?php echo 1024*1024*($pastelimit ?? 10); ?>"><?php echo htmlspecialchars($paste_data ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                 </div>
 
                 <div class="row mb-3">
@@ -115,9 +133,9 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
                   <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                   <div class="col-sm-10">
                     <select class="form-select" name="visibility">
-                      <option value="0" <?php echo ($visibility ?? '0') == "0" ? 'selected' : ''; ?>>Public</option>
-                      <option value="1" <?php echo ($visibility ?? '0') == "1" ? 'selected' : ''; ?>>Unlisted</option>
-                      <option value="2" <?php echo ($visibility ?? '0') == "2" ? 'selected' : ''; ?>>Private</option>
+					  <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
+					  <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
+					  <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
                     </select>
                   </div>
                 </div>
@@ -174,6 +192,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
     <?php else: ?>
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
+		<!--
         <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
           <div class="card guest-welcome text-center">
             <div class="btn-group" role="group" aria-label="Login or Register">
@@ -181,6 +200,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
               <a href="#" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#signup">Register</a>
             </div>
           </div>
+		  -->
         <?php endif; ?>
 
         <?php if (!isset($_SESSION['username']) && (isset($disableguest) && $disableguest === "on")): ?>
@@ -203,7 +223,7 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
 				?>
 				  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
 					  title="View differences">
-					<i class="bi bi-arrow-left-right"></i> NEW: or try .diff
+					<i class="bi bi-arrow-left-right"></i> .diff
 				  </a>
             </div>
             <div class="card-body">
@@ -246,13 +266,32 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
 					  ?>
                     </select>
                   </div>
-                  <div class="col-sm-2 ms-auto">
-                    <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
-                  </div>
+					<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+					  <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines">
+						<i class="bi bi-text-indent-left"></i> Highlight
+					  </a>
+
+					  <!-- Load file button -->
+					  <button type="button" class="btn btn-outline-secondary" id="load_file_btn" title="Load file into editor">
+						<i class="bi bi-upload"></i> Load
+					  </button>
+
+						<!-- Clear -->
+							<button type="button" class="btn btn-outline-secondary" id="clear_file_btn" title="Clear editor">
+							  <i class="bi bi-x-circle"></i> Clear
+							</button>
+							
+					  <!-- Accepted formats -->
+					  <input type="file" id="code_file" class="visually-hidden"
+							 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+					</div>
                 </div>
+				
+					<!-- For screen readers -->
+					<div id="file-announce" class="visually-hidden" aria-live="polite"></div>
 
                 <div class="mb-3">
-                  <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world"><?php echo htmlspecialchars($paste_data ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                  <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world" data-max-bytes="<?php echo 1024*1024*($pastelimit ?? 10); ?>"><?php echo htmlspecialchars($paste_data ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                 </div>
 
                 <div class="row mb-3">
@@ -275,9 +314,9 @@ $main_sitekey = $_SESSION['captcha']       ?? '';     // sitekey for this main f
                   <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                   <div class="col-sm-10">
                     <select class="form-select" name="visibility">
-                      <option value="0" <?php echo ($visibility ?? '0') == "0" ? 'selected' : ''; ?>>Public</option>
-                      <option value="1" <?php echo ($visibility ?? '0') == "1" ? 'selected' : ''; ?>>Unlisted</option>
-                      <option value="2" <?php echo ($visibility ?? '0') == "2" ? 'selected' : ''; ?>>Private</option>
+					  <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
+					  <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
+					  <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
                     </select>
                   </div>
                 </div>

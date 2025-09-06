@@ -40,6 +40,8 @@ date_default_timezone_set('UTC');
 require_once('config.php');
 require_once('includes/captcha.php');
 require_once('includes/functions.php');
+// Error handling
+paste_enable_themed_errors();
 
 // ip
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
