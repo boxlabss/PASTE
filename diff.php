@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/07 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -61,7 +61,7 @@ function load_paste(PDO $pdo, int $id): ?array {
     }
 }
 
-// Inline (word/char) diff → [leftHTML, rightHTML] with <span class="diff-inside-...">
+// Inline (word/char) diff > [leftHTML, rightHTML] with <span class="diff-inside-...">
 function inline_diff(string $a, string $b): array {
     $split = static function(string $s): array {
         preg_match_all('/\s+|[^\s]+/u', $s, $m);
@@ -91,32 +91,152 @@ function inline_diff(string $a, string $b): array {
 }
 
 /**
- * Index-based LCS diff at line level → opcodes referencing original arrays.
+ * Index-based diff at line level > opcodes referencing original arrays.
  * Opcodes:
  *   - ['op'=>'eq','ai'=>i,'bi'=>j]
  *   - ['op'=>'del','ai'=>i]
  *   - ['op'=>'add','bi'=>j]
+ *
+ *   1) xdiff accelerator (parse unified diff) if available
+ *   2) Myers O((N+M)D) fallback in pure PHP
  */
 function diff_lines_idx(array $A, array $B, ?callable $normalizer=null): array {
     $An = $normalizer ? array_map($normalizer, $A) : $A;
     $Bn = $normalizer ? array_map($normalizer, $B) : $B;
 
-    $n = count($An); $m = count($Bn);
-    $L = array_fill(0, $n+1, array_fill(0, $m+1, 0));
-    for ($i=$n-1; $i>=0; $i--) {
-        for ($j=$m-1; $j>=0; $j--) {
-            $L[$i][$j] = ($An[$i] === $Bn[$j]) ? $L[$i+1][$j+1]+1 : max($L[$i+1][$j], $L[$i][$j+1]);
+    if (function_exists('xdiff_string_diff')) {
+        return _diff_idx_via_xdiff($An, $Bn);
+    }
+    return _diff_idx_via_myers($An, $Bn);
+}
+
+/* ---------- Fast path: use xdiff to compute unified diff, parse to opcodes ---------- */
+function _diff_idx_via_xdiff(array $A, array $B): array {
+    $N = count($A); $M = count($B);
+
+    // Join as text; ensure trailing newline to keep line counts exact
+    $left  = ($N ? implode("\n", $A) : '') . "\n";
+    $right = ($M ? implode("\n", $B) : '') . "\n";
+
+    // 0-context unified diff, non-minimal for speed
+    $ud = xdiff_string_diff($left, $right, 0, false);
+    if ($ud === false) {
+        // Fallback to trivial equality handling
+        $ops = [];
+        $eq = min($N, $M);
+        for ($i=0; $i<$eq; $i++) $ops[] = ['op'=>'eq','ai'=>$i,'bi'=>$i];
+        for ($i=$eq; $i<$N; $i++) $ops[] = ['op'=>'del','ai'=>$i];
+        for ($j=$eq; $j<$M; $j++) $ops[] = ['op'=>'add','bi'=>$j];
+        return $ops;
+    }
+    if ($ud === '') {
+        $ops = [];
+        for ($i=0; $i<$N && $i<$M; $i++) $ops[]=['op'=>'eq','ai'=>$i,'bi'=>$i];
+        for ($i=$M; $i<$N; $i++) $ops[]=['op'=>'del','ai'=>$i];
+        for ($j=$N; $j<$M; $j++) $ops[]=['op'=>'add','bi'=>$j];
+        return $ops;
+    }
+
+    $ops = [];
+    $ai = 0; $bi = 0;
+
+    $lines = preg_split("/\R/u", $ud);
+    foreach ($lines as $ln) {
+        if ($ln === '' && $ln !== '0') continue;
+
+        if (preg_match('/^@@\s+-([0-9]+)(?:,([0-9]+))?\s+\+([0-9]+)(?:,([0-9]+))?\s+@@/', $ln, $m)) {
+            $startA = max(0, (int)$m[1] - 1); // 0-based
+            $startB = max(0, (int)$m[3] - 1);
+            // Emit equal block before this hunk (between current cursors and hunk start)
+            $eq = min(max(0, $startA - $ai), max(0, $startB - $bi));
+            for ($k=0; $k<$eq; $k++) { $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi]; $ai++; $bi++; }
+            continue;
+        }
+
+        $tag = $ln[0] ?? '';
+        if     ($tag === ' ') { $ops[] = ['op'=>'eq',  'ai'=>$ai,  'bi'=>$bi];  $ai++; $bi++; }
+        elseif ($tag === '-') { $ops[] = ['op'=>'del', 'ai'=>$ai];              $ai++;        }
+        elseif ($tag === '+') { $ops[] = ['op'=>'add',              'bi'=>$bi];         $bi++; }
+        else {
+            // headers '---', '+++', empty, etc > ignore
         }
     }
-    $i=0; $j=0; $ops=[];
-    while ($i<$n && $j<$m) {
-        if ($An[$i] === $Bn[$j]) { $ops[] = ['op'=>'eq','ai'=>$i,'bi'=>$j]; $i++; $j++; }
-        elseif ($L[$i+1][$j] >= $L[$i][$j+1]) { $ops[] = ['op'=>'del','ai'=>$i]; $i++; }
-        else { $ops[] = ['op'=>'add','bi'=>$j]; $j++; }
-    }
-    while ($i<$n) { $ops[] = ['op'=>'del','ai'=>$i]; $i++; }
-    while ($j<$m) { $ops[] = ['op'=>'add','bi'=>$j]; $j++; }
+
+    // Trailing equals after last hunk
+    $tailEq = min($N - $ai, $M - $bi);
+    for ($k=0; $k<$tailEq; $k++) { $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi]; $ai++; $bi++; }
+    for (; $ai<$N; $ai++) $ops[] = ['op'=>'del','ai'=>$ai];
+    for (; $bi<$M; $bi++) $ops[] = ['op'=>'add','bi'=>$bi];
+
     return $ops;
+}
+
+/* ---------- Fallback: Myers O((N+M)D) with path reconstruction ---------- */
+function _diff_idx_via_myers(array $A, array $B): array {
+    $N = count($A); $M = count($B);
+
+    if ($N === 0 && $M === 0) return [];
+    if ($N === 0) { $ops=[]; for($j=0;$j<$M;$j++) $ops[]=['op'=>'add','bi'=>$j]; return $ops; }
+    if ($M === 0) { $ops=[]; for($i=0;$i<$N;$i++) $ops[]=['op'=>'del','ai'=>$i]; return $ops; }
+
+    $max = $N + $M;
+    $off = $max;
+    $V = array_fill(0, 2 * $max + 1, 0);
+    $trace = [];
+
+    $Dend = 0;
+    for ($d = 0; $d <= $max; $d++) {
+        $trace[$d] = $V;
+
+        for ($k = -$d; $k <= $d; $k += 2) {
+            if ($k == -$d || ($k != $d && $V[$off + $k - 1] < $V[$off + $k + 1])) {
+                $x = $V[$off + $k + 1];       // down (insert B)
+            } else {
+                $x = $V[$off + $k - 1] + 1;   // right (delete A)
+            }
+            $y = $x - $k;
+
+            while ($x < $N && $y < $M && $A[$x] === $B[$y]) { $x++; $y++; }
+
+            $V[$off + $k] = $x;
+
+            if ($x >= $N && $y >= $M) {
+                $trace[$d] = $V;
+                $Dend = $d;
+                break 2;
+            }
+        }
+    }
+
+    $ops = [];
+    $x = $N; $y = $M;
+    for ($d = $Dend; $d > 0; $d--) {
+        $Vprev = $trace[$d-1];
+        $k  = $x - $y;
+
+        $down = ($k == -$d) || ($k != $d && $Vprev[$off + $k - 1] < $Vprev[$off + $k + 1]);
+        $kPrev   = $down ? $k + 1 : $k - 1;
+        $xStart  = $down ? $Vprev[$off + $kPrev] : $Vprev[$off + $kPrev] + 1;
+        $yStart  = $xStart - $kPrev;
+
+        while ($x > $xStart && $y > $yStart) { $x--; $y--; $ops[] = ['op'=>'eq','ai'=>$x,'bi'=>$y]; }
+
+        if ($down) {
+            $yStart--;
+            $ops[] = ['op'=>'add','bi'=>$yStart];
+        } else {
+            $xStart--;
+            $ops[] = ['op'=>'del','ai'=>$xStart];
+        }
+
+        $x = $xStart; $y = $yStart;
+    }
+
+    while ($x > 0 && $y > 0) { $x--; $y--; $ops[] = ['op'=>'eq','ai'=>$x,'bi'=>$y]; }
+    while ($x > 0) { $x--; $ops[] = ['op'=>'del','ai'=>$x]; }
+    while ($y > 0) { $y--; $ops[] = ['op'=>'add','bi'=>$y]; }
+
+    return array_reverse($ops);
 }
 
 // Build side-by-side & unified row arrays from ops (index-based).
@@ -160,8 +280,8 @@ function apply_inline_sxs(array &$sideRows): void {
 // Proper unified .diff (xdiff if present; else POSIX-ish fallback)
 function unified_diff_download(string $left, string $right, string $nameA='a', string $nameB='b', int $ctx=3): string {
     if (function_exists('xdiff_string_diff')) {
-        $flags = 0;
-        $ud = xdiff_string_diff($left, $right, $ctx, $flags);
+        // Use non-minimal for speed; we rewrite headers below
+        $ud = xdiff_string_diff($left, $right, $ctx, false);
         if ($ud !== false) {
             $ts = gmdate('Y-m-d H:i:s O');
             $hdr = "--- {$nameA}\t{$ts}\n+++ {$nameB}\t{$ts}\n";
@@ -209,7 +329,7 @@ function unified_diff_download(string $left, string $right, string $nameA='a', s
     foreach ($ops as $op) {
         if ($op['op'] === 'eq') {
             if ($buf['open']) {
-                if ($ctxAhead < $ctx) {
+                if ($ctxAhead < 3) {
                     $line = rtrim((string)$aOrig[$op['ai']], "\r");
                     $buf['lines'][] = ' ' . $line . "\n";
                     $buf['oldLen']++; $buf['newLen']++; $ctxAhead++;
@@ -220,12 +340,12 @@ function unified_diff_download(string $left, string $right, string $nameA='a', s
             }
             $ai++; $bi++;
         } elseif ($op['op'] === 'del') {
-            if (!$buf['open']) { $buf['open']=true; $ctxAhead=0; $grab_context($aOrig, $bOrig, $ai, $bi, $ctx); }
+            if (!$buf['open']) { $buf['open']=true; $ctxAhead=0; $grab_context($aOrig, $bOrig, $ai, $bi, 3); }
             $line = rtrim((string)$aOrig[$op['ai']], "\r");
             $buf['lines'][] = '-' . $line . "\n";
             $buf['oldLen']++; $ai++;
         } else { // add
-            if (!$buf['open']) { $buf['open']=true; $ctxAhead=0; $grab_context($aOrig, $bOrig, $ai, $bi, $ctx); }
+            if (!$buf['open']) { $buf['open']=true; $ctxAhead=0; $grab_context($aOrig, $bOrig, $ai, $bi, 3); }
             $line = rtrim((string)$bOrig[$op['bi']], "\r");
             $buf['lines'][] = '+' . $line . "\n";
             $buf['newLen']++; $bi++;
@@ -383,6 +503,10 @@ $view_mode = ($_GET['view'] ?? 'side') === 'unified' ? 'unified' : 'side';
 $wrap      = isset($_GET['wrap'])      ? (int)$_GET['wrap']      : 0;
 $lineno    = isset($_GET['lineno'])    ? (int)$_GET['lineno']    : 1;
 
+/* ---------- Ignore trailing whitespace (toggle via ?ignore_ws=1) ---------- */
+$ignore_ws = isset($_GET['ignore_ws']) ? (int)$_GET['ignore_ws'] : 0;
+$normalizer = $ignore_ws ? static fn($s) => rtrim($s, " \t") : null;
+
 /* ---------- Persisted split percentage ---------- */
 $split_pct = 50.0;
 if (isset($_POST['split_pct'])) {
@@ -404,6 +528,9 @@ if (isset($_GET['download']) && $_GET['download'] === '1') {
     $nameA = $leftLabel  ?: 'Old';
     $nameB = $rightLabel ?: 'New';
     $ud = unified_diff_download($left, $right, $nameA, $nameB, 3);
+    // Surface engine in headers for debug
+    header('X-Diff-Engine: '.(function_exists('xdiff_string_diff') ? 'xdiff' : 'myers'));
+    header('X-Diff-Ignore-WS: '.($ignore_ws ? '1':'0'));
     header('Content-Type: text/x-diff; charset=utf-8');
     header('Content-Disposition: attachment; filename="paste.diff"');
     echo $ud;
@@ -416,17 +543,46 @@ $rightLines = preg_split("/\R/u", $right);
 if ($leftLines === false)  $leftLines  = [$left];
 if ($rightLines === false) $rightLines = [$right];
 
-$ops = diff_lines_idx($leftLines, $rightLines, null);
+$ops = diff_lines_idx($leftLines, $rightLines, $normalizer);
 
 /* ---------- Build tables server-side ---------- */
 [$sideRows, $uniRows] = build_tables_idx($ops, $leftLines, $rightLines);
-apply_inline_sxs($sideRows);
+
+/* ---------- Limit expensive inline diff pass for very large diffs ---------- */
+$perform_inline = true;
+$totalBytes = strlen($left) + strlen($right);
+if (count($sideRows) > 4000 || $totalBytes > 4*1024*1024) {
+    $perform_inline = false;
+}
+if ($perform_inline) {
+    apply_inline_sxs($sideRows);
+}
+
+/* ---------- Expose engine + toggle info to theme and headers ---------- */
+$engine_is_xdiff = function_exists('xdiff_string_diff');
+$engine_label    = $engine_is_xdiff ? 'xdiff' : 'myers';
+header('X-Diff-Engine: '.$engine_label);
+header('X-Diff-Ignore-WS: '.($ignore_ws ? '1':'0'));
+
+// Convenience strings the theme can show in the toolbar:
+$diff_engine_badge = '<span class="badge bg-secondary" title="Diff engine">'.$engine_label.'</span>';
+$ignore_ws_on      = (bool)$ignore_ws;
+
+// Build toggle URL for ignore_ws (preserve other query params)
+$qs = $_GET;
+$qs['ignore_ws'] = $ignore_ws ? 0 : 1;
+$ignore_ws_toggle_url = strtok($_SERVER['REQUEST_URI'], '?') . '?' . http_build_query($qs);
 
 /* ---------- Render theme ---------- */
 $themeDir = 'theme/' . htmlspecialchars($default_theme ?? 'default', ENT_QUOTES, 'UTF-8');
 
 // expose split pct to the view if needed by JS
 $GLOBALS['split_pct'] = $split_pct;
+
+// Also expose new goodies for the toolbar (the theme may choose to use them)
+$GLOBALS['diff_engine_badge']  = $diff_engine_badge;
+$GLOBALS['ignore_ws_on']       = $ignore_ws_on;
+$GLOBALS['ignore_ws_toggle']   = $ignore_ws_toggle_url;
 
 require_once $themeDir . '/header.php';
 require_once $themeDir . '/diff.php';

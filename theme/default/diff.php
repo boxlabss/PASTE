@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/07 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -18,6 +18,11 @@
  
 declare(strict_types=1);
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
+
+/* Engine badge + ignore WS toggle (provided by controller) */
+$engine_badge_html = $GLOBALS['diff_engine_badge'] ?? '';
+$ws_on             = !empty($GLOBALS['ignore_ws_on']);
+$ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
 ?>
 
 <div class="container-fluid diff-outer">
@@ -29,6 +34,11 @@ $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
       <span class="lbl ms-2">Languages:</span>
       <span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? '') ?></span>
       <span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? '') ?></span>
+
+      <!-- Engine badge -->
+      <?php if (!empty($engine_badge_html)): ?>
+        <span class="ms-2"><?= $engine_badge_html /* safe HTML from controller */ ?></span>
+      <?php endif; ?>
     </div>
 
     <div class="form-check form-switch">
@@ -39,6 +49,14 @@ $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
       <input class="form-check-input" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
       <label class="form-check-label" for="optLine">Line #</label>
     </div>
+
+    <!-- Ignore whitespace toggle -->
+    <a class="btn btn-outline-secondary btn-sm" id="btnWS"
+       href="<?= $h($ws_toggle_url) ?>"
+       role="button"
+       title="Toggle ignoring trailing whitespace">
+      <?= $ws_on ? 'Whitespace: Ignored' : 'Whitespace: Shown' ?>
+    </a>
 
     <div class="btn-group" role="group">
       <button type="button" class="btn btn-outline-secondary btn-sm <?= ($view_mode ?? '')==='side'?'active':'' ?>" id="btnSide">Side-by-side</button>
