@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/07 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,16 +15,20 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
- 
 declare(strict_types=1);
+
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
 
-/* Engine badge + ignore WS toggle (provided by controller) */
+/* Engine badge -+changes + ignore WS toggle (provided by controller) */
 $engine_badge_html = $GLOBALS['diff_engine_badge'] ?? '';
 $ws_on             = !empty($GLOBALS['ignore_ws_on']);
 $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
-?>
 
+$no_changes        = !empty($GLOBALS['diff_no_changes']);
+$changes_add       = (int)($GLOBALS['diff_changes_add'] ?? 0);
+$changes_del       = (int)($GLOBALS['diff_changes_del'] ?? 0);
+$changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $changes_del));
+?>
 <div class="container-fluid diff-outer">
   <!-- Top toolbar -->
   <div class="diff-toolbar">
@@ -35,9 +39,16 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
       <span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? '') ?></span>
       <span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? '') ?></span>
 
-      <!-- Engine badge -->
       <?php if (!empty($engine_badge_html)): ?>
-        <span class="ms-2"><?= $engine_badge_html /* safe HTML from controller */ ?></span>
+        <span class="ms-2"><?= $engine_badge_html /* safe HTML */ ?></span>
+      <?php endif; ?>
+
+      <?php if ($no_changes): ?>
+        <span class="badge bg-success ms-2" title="No differences between left and right">No changes</span>
+      <?php else: ?>
+        <span class="badge bg-success ms-2" title="Added lines">+<?= $changes_add ?></span>
+        <span class="badge bg-danger  ms-1" title="Deleted lines">-<?= $changes_del ?></span>
+        <span class="badge bg-secondary-subtle ms-1" title="Total changed lines">±<?= $changes_total ?></span>
       <?php endif; ?>
     </div>
 
@@ -50,7 +61,6 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
       <label class="form-check-label" for="optLine">Line #</label>
     </div>
 
-    <!-- Ignore whitespace toggle -->
     <a class="btn btn-outline-secondary btn-sm" id="btnWS"
        href="<?= $h($ws_toggle_url) ?>"
        role="button"
@@ -74,17 +84,23 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
         <select class="form-select form-select-sm lang-select" id="leftLang">
           <option value="autodetect" <?= (strtolower($lang_left ?? '')==='autodetect')?'selected':''; ?>>Autodetect</option>
           <option disabled>──────────</option>
-          <?php $printed=[]; foreach ($popular_langs as $pid) {
-            $lid=strtolower($pid); if (!isset($language_map[$lid])) continue; $printed[$lid]=true;
-            $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
-            echo '<option value="'.$h($lid).'"'.$sel.'>'.$h($language_map[$lid]).'</option>';
-          }
-          echo '<option disabled>──────────</option>';
-          foreach ($language_map as $lid=>$label) {
-            if (isset($printed[$lid])) continue;
-            $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
-            echo '<option value="'.$h($lid).'"'.$sel.'>'.$h($label).'</option>';
-          } ?>
+          <?php
+            $printed = [];
+            foreach ($popular_langs as $pid):
+                $lid = strtolower($pid);
+                if (!isset($language_map[$lid])) continue;
+                $printed[$lid] = true;
+                $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
+          <?php endforeach; ?>
+          <option disabled>──────────</option>
+          <?php foreach ($language_map as $lid => $label):
+                if (isset($printed[$lid])) continue;
+                $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
+          <?php endforeach; ?>
         </select>
       </div>
 
@@ -93,17 +109,23 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
         <select class="form-select form-select-sm lang-select" id="rightLang">
           <option value="autodetect" <?= (strtolower($lang_right ?? '')==='autodetect')?'selected':''; ?>>Autodetect</option>
           <option disabled>──────────</option>
-          <?php $printed=[]; foreach ($popular_langs as $pid) {
-            $lid=strtolower($pid); if (!isset($language_map[$lid])) continue; $printed[$lid]=true;
-            $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
-            echo '<option value="'.$h($lid).'"'.$sel.'>'.$h($language_map[$lid]).'</option>';
-          }
-          echo '<option disabled>──────────</option>';
-          foreach ($language_map as $lid=>$label) {
-            if (isset($printed[$lid])) continue;
-            $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
-            echo '<option value="'.$h($lid).'"'.$sel.'>'.$h($label).'</option>';
-          } ?>
+          <?php
+            $printed = [];
+            foreach ($popular_langs as $pid):
+                $lid = strtolower($pid);
+                if (!isset($language_map[$lid])) continue;
+                $printed[$lid] = true;
+                $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
+          <?php endforeach; ?>
+          <option disabled>──────────</option>
+          <?php foreach ($language_map as $lid => $label):
+                if (isset($printed[$lid])) continue;
+                $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
+          <?php endforeach; ?>
         </select>
       </div>
     </div>
@@ -148,25 +170,25 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
           <tr>
             <td class="no"><?= $h($r['lno']) ?></td>
             <td class="code left <?= $r['lclass'] ?>"><div class="code-inner">
-              <?php
-                if ($r['lclass'] === 'ctx') {
-                  echo hl_render_line((string)$r['lhtml'], $lang_left ?? 'text');
-                } else {
-                  if ($r['lhtml'] !== '') echo '<span class="marker">'.($r['lclass']==='del'?'–':'').'</span>';
-                  echo $r['l_intra'] ? $r['lhtml'] : $h($r['lhtml']);
-                }
-              ?>
+              <?php if ($r['lclass'] === 'ctx'): ?>
+                <?= hl_render_line((string)$r['lhtml'], $lang_left ?? 'text') ?>
+              <?php else: ?>
+                <?php if ($r['lhtml'] !== ''): ?>
+                  <span class="marker"><?= $r['lclass']==='del' ? '–' : '' ?></span>
+                <?php endif; ?>
+                <?= $r['l_intra'] ? $r['lhtml'] : $h($r['lhtml']) ?>
+              <?php endif; ?>
             </div></td>
             <td class="no"><?= $h($r['rno']) ?></td>
             <td class="code right <?= $r['rclass'] ?>"><div class="code-inner">
-              <?php
-                if ($r['rclass'] === 'ctx') {
-                  echo hl_render_line((string)$r['rhtml'], $lang_right ?? 'text');
-                } else {
-                  if ($r['rhtml'] !== '') echo '<span class="marker">'.($r['rclass']==='add'?'+':'').'</span>';
-                  echo $r['r_intra'] ? $r['rhtml'] : $h($r['rhtml']);
-                }
-              ?>
+              <?php if ($r['rclass'] === 'ctx'): ?>
+                <?= hl_render_line((string)$r['rhtml'], $lang_right ?? 'text') ?>
+              <?php else: ?>
+                <?php if ($r['rhtml'] !== ''): ?>
+                  <span class="marker"><?= $r['rclass']==='add' ? '+' : '' ?></span>
+                <?php endif; ?>
+                <?= $r['r_intra'] ? $r['rhtml'] : $h($r['rhtml']) ?>
+              <?php endif; ?>
             </div></td>
           </tr>
         <?php endforeach; ?>
@@ -181,14 +203,14 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
             <td class="no"><?= $h($r['lno']) ?></td>
             <td class="no"><?= $h($r['rno']) ?></td>
             <td class="code <?= $r['class'] ?>"><div class="code-inner">
-              <?php
-                if ($r['class'] === 'ctx') {
-                  echo hl_render_line((string)$r['html'], ($lang_right ?: $lang_left) ?? 'text');
-                } else {
-                  echo $r['html'] !== '' ? '<span class="marker">'.($r['class']==='add'?'+':($r['class']==='del'?'–':'')).'</span>' : '';
-                  echo $r['intra'] ? $r['html'] : $h($r['html']);
-                }
-              ?>
+              <?php if ($r['class'] === 'ctx'): ?>
+                <?= hl_render_line((string)$r['html'], ($lang_right ?: $lang_left) ?? 'text') ?>
+              <?php else: ?>
+                <?php if ($r['html'] !== ''): ?>
+                  <span class="marker"><?= $r['class']==='add' ? '+' : ($r['class']==='del' ? '–' : '') ?></span>
+                <?php endif; ?>
+                <?= $r['intra'] ? $r['html'] : $h($r['html']) ?>
+              <?php endif; ?>
             </div></td>
           </tr>
         <?php endforeach; ?>
@@ -218,13 +240,13 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     tblSide.classList.contains('lineoff') ? 0 :
       (parseFloat(getComputedStyle(root).getPropertyValue('--lno')) || 56);
 
-  // ---- Swap
+  // Swap
   $('#btnSwap')?.addEventListener('click', ()=>{
     const a=$('#leftText'), b=$('#rightText'); const t=a.value; a.value=b.value; b.value=t;
     const la=$('#leftLang'), lb=$('#rightLang'); if (la&&lb){ const tv=la.value; la.value=lb.value; lb.value=tv; }
   });
 
-  // ---- Compare
+  // Compare
   $('#btnCompare')?.addEventListener('click', ()=>{
     const f=document.createElement('form'); f.method='POST';
     const url=new URL(location.href); url.searchParams.delete('download'); f.action=url.pathname+url.search;
@@ -237,7 +259,7 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     document.body.appendChild(f); f.submit();
   });
 
-  // ---- Download
+  // Download
   $('#btnDownload')?.addEventListener('click', ()=>{
     const f=document.createElement('form'); f.method='POST';
     const url=new URL(location.href); url.searchParams.set('download','1'); f.action=url.pathname+'?'+url.searchParams.toString();
@@ -252,7 +274,7 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     document.body.appendChild(f); f.submit();
   });
 
-  // ---- Layout
+  // Layout
   function placeBar(px){
     bar.style.marginLeft = '0';
     bar.style.transform  = 'none';
@@ -274,10 +296,10 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     const rightCode= avail - leftCode;
 
     if (cols.length === 4){
-      cols[0].style.width = lno+'px';        // l#
-      cols[1].style.width = leftCode+'px';   // lcode
-      cols[2].style.width = lno+'px';        // r#
-      cols[3].style.width = rightCode+'px';  // rcode
+      cols[0].style.width = lno+'px';
+      cols[1].style.width = leftCode+'px';
+      cols[2].style.width = lno+'px';
+      cols[3].style.width = rightCode+'px';
     }
 
     const barW = bar.offsetWidth || 12;
@@ -285,18 +307,18 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     placeBar(x);
   }
 
-  // ---- View toggles
+  // View toggles
   $('#btnSide')?.addEventListener('click', ()=>{
     tblSide.style.display=''; tblUni.style.display='none';
-    overlay.style.display='';     // show splitter overlay
+    overlay.style.display='';
     requestAnimationFrame(layoutSideTable);
   });
   $('#btnUni')?.addEventListener('click', ()=>{
     tblUni.style.display='';   tblSide.style.display='none';
-    overlay.style.display='none'; // hide splitter in unified view
+    overlay.style.display='none';
   });
 
-  // ---- Wrap / Line toggles
+  // Wrap / Line toggles
   $('#optWrap')?.addEventListener('change', (e)=>{
     [tblSide, tblUni].forEach(t=> t && t.classList.toggle('wrap-on', e.target.checked));
     [tblSide, tblUni].forEach(t=> t && t.classList.toggle('wrap-off', !e.target.checked));
@@ -307,7 +329,7 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
     requestAnimationFrame(layoutSideTable);
   });
 
-  // ---- Dragging
+  // Dragging
   (function(){
     if (!root || !bar) return;
 
@@ -327,7 +349,7 @@ $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
       splitPct = clamp((leftCode / codeAvail) * 100, 20, 80);
       writeCookie('diffSplitPct', splitPct.toFixed(1));
 
-      placeBar(px - (barW/2));   // update position immediately
+      placeBar(px - (barW/2));
       requestAnimationFrame(layoutSideTable);
     }
 

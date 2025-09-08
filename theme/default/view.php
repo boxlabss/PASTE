@@ -485,9 +485,24 @@ if (!function_exists('render_comment_node')) {
                             ?>
                           </select>
                         </div>
-                        <div class="col-sm-2 ms-auto">
-                          <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
-                        </div>
+						<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+						  <a class="btn btn-secondary btn-sm highlight-line" href="#" title="Highlight selected lines">
+							<i class="bi bi-text-indent-left"></i> Highlight
+						  </a>
+						  <!-- Load file -->
+						  <button type="button" class="btn btn-outline-secondary btn-sm" id="load_file_btn" title="Load file into editor (no upload)">
+							<i class="bi bi-upload"></i> Load
+						  </button>
+						  
+							<!-- Clear -->
+								<button type="button" class="btn btn-outline-secondary btn-sm" id="clear_file_btn" title="Clear editor">
+								  <i class="bi bi-x-circle"></i> Clear
+								</button>
+								
+						  <!-- Accepted formats -->
+						  <input type="file" id="code_file" class="visually-hidden"
+								 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+						</div>
                       </div>
 
                       <div class="mb-3">
@@ -967,19 +982,31 @@ if (!function_exists('render_comment_node')) {
                           ?>
                         </select>
                       </div>
-					  
-                      <div class="col-sm-2 ms-auto">
+
+						<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+						  <a class="btn btn-secondary btn-sm highlight-line" href="#" title="Highlight selected lines">
+							<i class="bi bi-text-indent-left"></i> Highlight
+						  </a>
 						<?php if ($diffQuickUrl): ?>
 						  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
-							 class="btn btn-secondary" title="View differences">
+							 class="btn btn-secondary btn-sm" title="View differences">
 							<i class="bi bi-arrow-left-right"></i> Make.diff
 						  </a>
 						<?php endif; ?>
-                      </div>
-
-                      <div class="col-sm-2 ms-auto">
-                        <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines"><i class="bi bi-text-indent-left"></i> Highlight</a>
-                      </div>
+						  <!-- Load file -->
+						  <button type="button" class="btn btn-outline-secondary btn-sm" id="load_file_btn" title="Load file into editor (no upload)">
+							<i class="bi bi-upload"></i> Load
+						  </button>
+						  
+							<!-- Clear -->
+								<button type="button" class="btn btn-outline-secondary btn-sm" id="clear_file_btn" title="Clear editor">
+								  <i class="bi bi-x-circle"></i> Clear
+								</button>
+								
+						  <!-- Accepted formats -->
+						  <input type="file" id="code_file" class="visually-hidden"
+								 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+						</div>
                     </div>
 					
                     <div class="mb-3">

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/07 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/08 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -114,14 +114,15 @@ function diff_lines_idx(array $A, array $B, ?callable $normalizer=null): array {
 function _diff_idx_via_xdiff(array $A, array $B): array {
     $N = count($A); $M = count($B);
 
-    // Join as text; ensure trailing newline to keep line counts exact
+    // Join as text; add trailing newline to stabilize EOF handling
     $left  = ($N ? implode("\n", $A) : '') . "\n";
     $right = ($M ? implode("\n", $B) : '') . "\n";
 
-    // 0-context unified diff, non-minimal for speed
-    $ud = xdiff_string_diff($left, $right, 0, false);
+    // Use context for stable headers + ' ' lines; non-minimal for speed
+    $ctx = 3;
+    $ud = xdiff_string_diff($left, $right, $ctx, false);
     if ($ud === false) {
-        // Fallback to trivial equality handling
+        // Trivial fallback: align common prefix, then tail adds/dels
         $ops = [];
         $eq = min($N, $M);
         for ($i=0; $i<$eq; $i++) $ops[] = ['op'=>'eq','ai'=>$i,'bi'=>$i];
@@ -131,9 +132,9 @@ function _diff_idx_via_xdiff(array $A, array $B): array {
     }
     if ($ud === '') {
         $ops = [];
-        for ($i=0; $i<$N && $i<$M; $i++) $ops[]=['op'=>'eq','ai'=>$i,'bi'=>$i];
-        for ($i=$M; $i<$N; $i++) $ops[]=['op'=>'del','ai'=>$i];
-        for ($j=$N; $j<$M; $j++) $ops[]=['op'=>'add','bi'=>$j];
+        for ($i=0; $i<min($N,$M); $i++) $ops[] = ['op'=>'eq','ai'=>$i,'bi'=>$i];
+        for ($i=$M; $i<$N; $i++) $ops[] = ['op'=>'del','ai'=>$i];
+        for ($j=$N; $j<$M; $j++) $ops[] = ['op'=>'add','bi'=>$j];
         return $ops;
     }
 
@@ -144,25 +145,34 @@ function _diff_idx_via_xdiff(array $A, array $B): array {
     foreach ($lines as $ln) {
         if ($ln === '' && $ln !== '0') continue;
 
-        if (preg_match('/^@@\s+-([0-9]+)(?:,([0-9]+))?\s+\+([0-9]+)(?:,([0-9]+))?\s+@@/', $ln, $m)) {
-            $startA = max(0, (int)$m[1] - 1); // 0-based
+        // Hunk header: @@ -aStart,aLen +bStart,bLen @@
+        if (($ln[0] ?? '') === '@' &&
+            preg_match('/^@@\s+-([0-9]+)(?:,([0-9]+))?\s+\+([0-9]+)(?:,([0-9]+))?\s+@@/', $ln, $m)) {
+
+            $startA = max(0, (int)$m[1] - 1);  // convert to 0-based
             $startB = max(0, (int)$m[3] - 1);
-            // Emit equal block before this hunk (between current cursors and hunk start)
-            $eq = min(max(0, $startA - $ai), max(0, $startB - $bi));
-            for ($k=0; $k<$eq; $k++) { $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi]; $ai++; $bi++; }
+
+            // Between hunks: move forward by equal lines only
+            $gap = min(max(0, $startA - $ai), max(0, $startB - $bi));
+            for ($k=0; $k<$gap; $k++) { $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi]; $ai++; $bi++; }
             continue;
         }
 
         $tag = $ln[0] ?? '';
-        if     ($tag === ' ') { $ops[] = ['op'=>'eq',  'ai'=>$ai,  'bi'=>$bi];  $ai++; $bi++; }
-        elseif ($tag === '-') { $ops[] = ['op'=>'del', 'ai'=>$ai];              $ai++;        }
-        elseif ($tag === '+') { $ops[] = ['op'=>'add',              'bi'=>$bi];         $bi++; }
-        else {
-            // headers '---', '+++', empty, etc > ignore
+        if ($tag === ' ') {                   // context (equal)
+            $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi];  $ai++; $bi++;
+        } elseif ($tag === '-') {             // deletion
+            $ops[] = ['op'=>'del','ai'=>$ai];           $ai++;
+        } elseif ($tag === '+') {             // addition
+            $ops[] = ['op'=>'add','bi'=>$bi];                    $bi++;
+        } elseif ($tag === '\\') {
+            // "\ No newline at end of file" > ignore
+        } else {
+            // headers '---' / '+++' or noise > ignore
         }
     }
 
-    // Trailing equals after last hunk
+    // Trailing equals after the last hunk
     $tailEq = min($N - $ai, $M - $bi);
     for ($k=0; $k<$tailEq; $k++) { $ops[] = ['op'=>'eq','ai'=>$ai,'bi'=>$bi]; $ai++; $bi++; }
     for (; $ai<$N; $ai++) $ops[] = ['op'=>'del','ai'=>$ai];
@@ -545,6 +555,66 @@ if ($rightLines === false) $rightLines = [$right];
 
 $ops = diff_lines_idx($leftLines, $rightLines, $normalizer);
 
+/* ---------- change counts & exposure ----------
+ * Treat an adjacent del-run followed by an add-run (or vice-versa) as "mods".
+ * Each paired line counts as 1 change in the total.
+ * Returns: [$adds, $dels, $mods, $total, $no_changes]
+ */
+function compute_change_counts(array $ops): array {
+    $adds = 0; $dels = 0; $mods = 0;
+    $n = count($ops);
+    for ($i = 0; $i < $n; ) {
+        $op = $ops[$i]['op'] ?? 'eq';
+        if ($op !== 'add' && $op !== 'del') { $i++; continue; }
+
+        // First run (all adds or all dels)
+        $t1 = $op;
+        $c1 = 0;
+        $j  = $i;
+        while ($j < $n && ($ops[$j]['op'] ?? 'eq') === $t1) { $c1++; $j++; }
+
+        // Optional immediately-adjacent opposite run
+        $t2 = ($t1 === 'add') ? 'del' : 'add';
+        $c2 = 0;
+        $k  = $j;
+        while ($k < $n && ($ops[$k]['op'] ?? 'eq') === $t2) { $c2++; $k++; }
+
+        // Pair min(c1,c2) as modifications
+        $pair = min($c1, $c2);
+        $mods += $pair;
+
+        if ($t1 === 'add') {
+            $adds += $c1 - $pair;
+            $dels += $c2 - $pair;
+        } else {
+            $dels += $c1 - $pair;
+            $adds += $c2 - $pair;
+        }
+
+        // Advance past both runs
+        $i = ($c2 > 0) ? $k : $j;
+    }
+
+    $total = $adds + $dels + $mods;   // modified lines count as 1
+    $no_changes = ($total === 0);
+    return [$adds, $dels, $mods, $total, $no_changes];
+}
+
+/* ---------- change counts (mods collapse -/+ into 1) ---------- */
+[$adds, $dels, $mods, $changed_total, $no_changes] = compute_change_counts($ops);
+
+header('X-Diff-No-Changes: ' . ($no_changes ? '1' : '0'));
+header('X-Diff-Change-Add: ' . $adds);
+header('X-Diff-Change-Del: ' . $dels);
+header('X-Diff-Change-Mod: ' . $mods);
+header('X-Diff-Change-Total: ' . $changed_total);
+
+$GLOBALS['diff_no_changes']     = $no_changes;
+$GLOBALS['diff_changes_add']    = $adds;
+$GLOBALS['diff_changes_del']    = $dels;
+$GLOBALS['diff_changes_mod']    = $mods;         // available if you want a separate badge
+$GLOBALS['diff_changes_total']  = $changed_total; // theme uses this for ±T
+
 /* ---------- Build tables server-side ---------- */
 [$sideRows, $uniRows] = build_tables_idx($ops, $leftLines, $rightLines);
 
@@ -579,7 +649,7 @@ $themeDir = 'theme/' . htmlspecialchars($default_theme ?? 'default', ENT_QUOTES,
 // expose split pct to the view if needed by JS
 $GLOBALS['split_pct'] = $split_pct;
 
-// Also expose new goodies for the toolbar (the theme may choose to use them)
+// badges/toggle url for the theme
 $GLOBALS['diff_engine_badge']  = $diff_engine_badge;
 $GLOBALS['ignore_ws_on']       = $ignore_ws_on;
 $GLOBALS['ignore_ws_toggle']   = $ignore_ws_toggle_url;
