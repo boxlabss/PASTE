@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
+ * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -103,8 +103,9 @@ try {
 
 // Calculate redirect URI for OAuth
 $protocol  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+$host      = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'];
 $base_path = rtrim(dirname($_SERVER['SCRIPT_NAME'], 2), '/\\'); // Adjust for /install directory
-$baseurl   = $protocol . $_SERVER['SERVER_NAME'] . $base_path . '/';
+$baseurl   = $protocol . $host . ($base_path ? $base_path . '/' : '/');
 $redirect_uri  = $baseurl . 'oauth/google.php';
 $https_warning = ($enablegoog === 'yes' || $enablefb === 'yes') && $protocol === 'http://' ? 'Warning: OAuth is enabled without HTTPS. This is insecure and may cause issues with OAuth providers.' : '';
 
@@ -227,7 +228,7 @@ define('SECRET', \$sec_key);
 // define('SMTP_DEBUG', true);
 
 // Code highlighting engine for non-Markdown pastes: 'highlight' (highlight.php - default) or 'geshi'
-\$highlighter = \$highlighter ?? 'geshi';
+\$highlighter = \$highlighter ?? 'highlight';
 
 // Style theme for highlighter.php (see includes/Highlight/styles)
 \$hl_style = 'hybrid.css';

@@ -44,29 +44,50 @@ ini_set('log_errors', '1');
 $date = date('Y-m-d H:i:s');
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 require_once '../config.php';
-require_once '../mail/mail.php';
+// Dependency guards if vendor trees missing
+$OAUTH_VENDOR = __DIR__ . '/../oauth/vendor/autoload.php';
+$OAUTH_READY  = is_file($OAUTH_VENDOR) && is_file(__DIR__ . '/../oauth/vendor/composer/autoload_real.php');
+$OAUTH_WARNING_HTML = $OAUTH_READY ? '' :
+    'OAuth libraries not installed. Install: <code>cd oauth && composer require google/apiclient:^2.17 league/oauth2-client:^2.7 league/oauth2-google:^4.0</code>';
 
-$oauth_autoloader = __DIR__ . '/../oauth/vendor/autoload.php';
-if (!file_exists($oauth_autoloader)) {
-    error_log("configuration.php: OAuth autoloader not found");
-    ob_end_clean();
-    die("OAuth autoloader not found. Run: <code>cd oauth && composer require google/apiclient:^2.17 league/oauth2-client:^2.7 league/oauth2-google:^4.0</code>");
+$MAIL_VENDOR = __DIR__ . '/../mail/vendor/autoload.php';
+$MAIL_READY  = is_file($MAIL_VENDOR) && is_file(__DIR__ . '/../mail/vendor/composer/autoload_real.php');
+$MAIL_WARNING_HTML = $MAIL_READY ? '' :
+    'Mail libraries not installed. Install: <code>cd mail && composer require phpmailer/phpmailer:^6.9</code>';
+
+function is_ajax(): bool {
+    return isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 }
-require_once $oauth_autoloader;
 
-use Google\Client as Google_Client;
-
-$required_classes = [
-    'Google\Client' => 'google/apiclient:^2.17',
-    'PHPMailer\PHPMailer\PHPMailer' => 'phpmailer/phpmailer:^6.9',
-    'League\OAuth2\Client\Provider\Google' => 'league/oauth2-client:^2.7 league/oauth2-google:^4.0'
-];
-foreach ($required_classes as $class => $packages) {
-    if (!class_exists($class)) {
-        error_log("configuration.php: $class not found. Run: cd oauth && composer require $packages");
-        ob_end_clean();
-        die('<div class="alert alert-danger text-center">OAuth configuration error: ' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . ' not found. Run: composer require ' . htmlspecialchars($packages, ENT_QUOTES, 'UTF-8') . '</div>');
+// Require OAuth vendor only when actually needed.
+function require_oauth_vendor_or_json_error(): void {
+    global $OAUTH_READY, $OAUTH_VENDOR;
+    if ($OAUTH_READY) { require_once $OAUTH_VENDOR; return; }
+    if (is_ajax()) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'OAuth libraries not installed. Run: cd oauth && composer require google/apiclient:^2.17 league/oauth2-client:^2.7 league/oauth2-google:^4.0'
+        ]);
+        exit;
     }
+    // UI will show a warning.
+}
+
+// Require Mail vendor + mail.php only when actually needed.
+function require_mail_vendor_or_json_error(): void {
+    global $MAIL_READY, $MAIL_VENDOR;
+    if ($MAIL_READY) {
+        require_once $MAIL_VENDOR;
+        require_once __DIR__ . '/../mail/mail.php';
+        return;
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'status'  => 'error',
+        'message' => 'Mail libraries not installed. Run: cd mail && composer require phpmailer/phpmailer:^6.9'
+    ]);
+    exit;
 }
 
 try {
@@ -527,6 +548,12 @@ if (!in_array($activeTab, $validTabs, true)) {
       <div class="card">
         <div class="card-body">
           <div id="message-container"><?php if (isset($msg)) echo $msg; ?></div>
+          <?php if (!empty($OAUTH_WARNING_HTML)): ?>
+            <div class="alert alert-warning text-center mb-3"><?php echo $OAUTH_WARNING_HTML; ?></div>
+          <?php endif; ?>
+          <?php if (!empty($MAIL_WARNING_HTML)): ?>
+            <div class="alert alert-warning text-center mb-3"><?php echo $MAIL_WARNING_HTML; ?></div>
+          <?php endif; ?>
 
           <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
             <li class="nav-item" role="presentation">
