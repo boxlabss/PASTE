@@ -884,10 +884,12 @@ try {
             color VARCHAR(7) NOT NULL DEFAULT '#000000',
             recaptcha_sitekey TEXT,
             recaptcha_secretkey TEXT,
+            turnstile_sitekey TEXT,
+            turnstile_secretkey TEXT,
             PRIMARY KEY(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-        $pdo->exec("INSERT INTO captcha (cap_e, mode, recaptcha_version, mul, allowed, color, recaptcha_sitekey, recaptcha_secretkey)
-                    VALUES ('off','Normal','v2','off','ABCDEFGHIJKLMNOPQRSTUVYXYZabcdefghijklmnopqrstuvwxyz0123456789','#000000','','')");
+        $pdo->exec("INSERT INTO captcha (cap_e, mode, recaptcha_version, mul, allowed, color, recaptcha_sitekey, recaptcha_secretkey, turnstile_sitekey, turnstile_secretkey)
+                    VALUES ('off','normal','v2','off','ABCDEFGHIJKLMNOPQRSTUVYXYZabcdefghijklmnopqrstuvwxyz0123456789','#000000','','','','')");
         $output[] = 'captcha table created & seeded.';
     } else {
         ensureEngineAndCharset($pdo,'captcha',$output,$errors);
@@ -900,6 +902,8 @@ try {
         ensureColumn($pdo,'captcha','color',              "VARCHAR(7) NOT NULL DEFAULT '#000000'",$output,$errors);
         ensureColumn($pdo,'captcha','recaptcha_sitekey',  "TEXT",$output,$errors);
         ensureColumn($pdo,'captcha','recaptcha_secretkey',"TEXT",$output,$errors);
+        ensureColumn($pdo,'captcha','turnstile_sitekey', "TEXT",$output,$errors);
+        ensureColumn($pdo,'captcha','turnstile_secretkey',"TEXT",$output,$errors);
     }
 
     $pdo->exec('SET FOREIGN_KEY_CHECKS=1');

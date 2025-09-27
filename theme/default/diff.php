@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -19,7 +19,7 @@ declare(strict_types=1);
 
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
 
-/* Engine badge -+changes + ignore WS toggle (provided by controller) */
+/* Engine badge -+changes + ignore WS toggle */
 $engine_badge_html = $GLOBALS['diff_engine_badge'] ?? '';
 $ws_on             = !empty($GLOBALS['ignore_ws_on']);
 $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
@@ -28,113 +28,155 @@ $no_changes        = !empty($GLOBALS['diff_no_changes']);
 $changes_add       = (int)($GLOBALS['diff_changes_add'] ?? 0);
 $changes_del       = (int)($GLOBALS['diff_changes_del'] ?? 0);
 $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $changes_del));
+
+/* server-side "only changes" toggle */
+$only_on           = !empty($GLOBALS['only_on']);
+$only_toggle_url   = (string)($GLOBALS['only_toggle_url'] ?? '');
+
+/* Derive single dropdown initial value + label */
+$single_id = strtolower($lang_right ?? $lang_left ?? 'autodetect');
+if ($single_id === 'autodetect' && isset($lang_left) && strtolower((string)$lang_left) !== 'autodetect') {
+    $single_id = strtolower((string)$lang_left);
+}
+$leftLabel  = $leftLabel  ?? 'Old';
+$rightLabel = $rightLabel ?? 'New';
+
+/* For the header: if both labels same, show one Language badge; else show two */
+$sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
 ?>
 <div class="container-fluid diff-outer">
-  <!-- Top toolbar -->
-  <div class="diff-toolbar">
-    <div class="grow">
-      <span class="lbl">Left:</span><span class="badge bg-secondary-subtle"><?= $h($leftLabel ?? 'Old code') ?></span>
-      <span class="lbl ms-2">Right:</span><span class="badge bg-secondary-subtle"><?= $h($rightLabel ?? 'New code') ?></span>
-      <span class="lbl ms-2">Languages:</span>
-      <span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? '') ?></span>
-      <span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? '') ?></span>
+	<!-- Top toolbar -->
+	<div class="diff-toolbar btn-toolbar justify-content-between flex-wrap gap-2 align-items-center">
+	  <!-- Left: context + stats -->
+	  <div class="d-flex flex-wrap align-items-center gap-2">
+		<div class="d-flex align-items-center flex-wrap gap-2 small text-body-secondary">
+		  <span>Left:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($leftLabel) ?></span>
+		  <span class="ms-2">Right:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($rightLabel) ?></span>
 
-      <?php if (!empty($engine_badge_html)): ?>
-        <span class="ms-2"><?= $engine_badge_html /* safe HTML */ ?></span>
-      <?php endif; ?>
+		  <?php if ($sameLangs): ?>
+			<span class="ms-2">Language:</span>
+			<span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? $lang_right_label ?? 'Autodetect') ?></span>
+		  <?php else: ?>
+			<span class="ms-2">Languages:</span>
+			<span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? 'Autodetect') ?></span>
+			<span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? 'Autodetect') ?></span>
+		  <?php endif; ?>
 
-      <?php if ($no_changes): ?>
-        <span class="badge bg-success ms-2" title="No differences between left and right">No changes</span>
-      <?php else: ?>
-        <span class="badge bg-success ms-2" title="Added lines">+<?= $changes_add ?></span>
-        <span class="badge bg-danger  ms-1" title="Deleted lines">-<?= $changes_del ?></span>
-        <span class="badge bg-secondary-subtle ms-1" title="Total changed lines">±<?= $changes_total ?></span>
-      <?php endif; ?>
-    </div>
+		  <?php if (!empty($engine_badge_html)): ?>
+			<span class="ms-2"><?= $engine_badge_html /* safe HTML */ ?></span>
+		  <?php endif; ?>
+		</div>
 
-    <div class="form-check form-switch">
-      <input class="form-check-input" type="checkbox" id="optWrap" <?= !empty($wrap) ? 'checked':'' ?>>
-      <label class="form-check-label" for="optWrap">Wrap</label>
-    </div>
-    <div class="form-check form-switch">
-      <input class="form-check-input" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
-      <label class="form-check-label" for="optLine">Line #</label>
-    </div>
+		<?php if ($no_changes): ?>
+		  <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis ms-2">No changes</span>
+		<?php else: ?>
+		  <div class="d-flex align-items-center gap-1 ms-2">
+			<span class="badge bg-success-subtle border border-success-subtle text-success-emphasis" title="Added lines">+<?= $changes_add ?></span>
+			<span class="badge bg-danger-subtle  border border-danger-subtle  text-danger-emphasis"  title="Deleted lines">-<?= $changes_del ?></span>
+			<span class="badge bg-secondary-subtle" title="Total changed lines">±<?= $changes_total ?></span>
+		  </div>
+		  <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Jump">
+			<button class="btn btn-outline-secondary" id="btnPrevChange" type="button" title="Previous change">
+			  <i class="bi bi-chevron-up" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Prev</span>
+			</button>
+			<button class="btn btn-outline-secondary" id="btnNextChange" type="button" title="Next change">
+			  <i class="bi bi-chevron-down" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Next</span>
+			</button>
+		  </div>
+		<?php endif; ?>
+	  </div>
 
-    <a class="btn btn-outline-secondary btn-sm" id="btnWS"
-       href="<?= $h($ws_toggle_url) ?>"
-       role="button"
-       title="Toggle ignoring trailing whitespace">
-      <?= $ws_on ? 'Whitespace: Ignored' : 'Whitespace: Shown' ?>
-    </a>
+	  <!-- Right: controls -->
+	  <div class="btn-toolbar flex-wrap gap-2 ms-lg-auto">
+		<!-- Wrap / Line / Only changes -->
+		<div class="btn-group btn-group-sm" role="group" aria-label="View toggles">
+		  <input class="btn-check" type="checkbox" id="optWrap" <?= !empty($wrap) ? 'checked':'' ?>>
+		  <label class="btn btn-outline-secondary" for="optWrap">Wrap</label>
 
-    <div class="btn-group" role="group">
-      <button type="button" class="btn btn-outline-secondary btn-sm <?= ($view_mode ?? '')==='side'?'active':'' ?>" id="btnSide">Side-by-side</button>
-      <button type="button" class="btn btn-outline-secondary btn-sm <?= ($view_mode ?? '')==='unified'?'active':'' ?>" id="btnUni">Unified</button>
-    </div>
+		  <input class="btn-check" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
+		  <label class="btn btn-outline-secondary" for="optLine">Line #</label>
 
-    <button class="btn btn-primary btn-sm" id="btnDownload" type="button">Download .diff</button>
-  </div>
+		  <!-- Client-side filter -->
+		  <input class="btn-check" type="checkbox" id="btnOnlyChangesCheck" autocomplete="off">
+		  <label class="btn btn-outline-secondary" id="btnOnlyChanges" for="btnOnlyChangesCheck" aria-pressed="false">
+			Only changes
+		  </label>
+		</div>
 
-  <!-- Language selectors -->
-  <div class="diff-toolbar mt-2">
-    <div class="langbar">
-      <div class="d-flex gap-2 align-items-center">
-        <small class="text-muted">Left language</small>
-        <select class="form-select form-select-sm lang-select" id="leftLang">
-          <option value="autodetect" <?= (strtolower($lang_left ?? '')==='autodetect')?'selected':''; ?>>Autodetect</option>
-          <option disabled>──────────</option>
-          <?php
-            $printed = [];
-            foreach ($popular_langs as $pid):
-                $lid = strtolower($pid);
-                if (!isset($language_map[$lid])) continue;
-                $printed[$lid] = true;
-                $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
-          ?>
-                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
-          <?php endforeach; ?>
-          <option disabled>──────────</option>
-          <?php foreach ($language_map as $lid => $label):
-                if (isset($printed[$lid])) continue;
-                $sel = ($lid === strtolower($lang_left ?? '')) ? ' selected' : '';
-          ?>
-                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
+		<a class="btn btn-outline-secondary btn-sm" id="btnWS"
+		   href="<?= $h($ws_toggle_url) ?>"
+		   role="button"
+		   title="Toggle ignoring trailing whitespace">
+		  <i class="bi bi-slash-circle" aria-hidden="true"></i>
+		  <span class="ms-1"><?= $ws_on ? 'Whitespace: Ignored' : 'Whitespace: Shown' ?></span>
+		</a>
 
-      <div class="d-flex gap-2 align-items-center">
-        <small class="text-muted">Right language</small>
-        <select class="form-select form-select-sm lang-select" id="rightLang">
-          <option value="autodetect" <?= (strtolower($lang_right ?? '')==='autodetect')?'selected':''; ?>>Autodetect</option>
-          <option disabled>──────────</option>
-          <?php
-            $printed = [];
-            foreach ($popular_langs as $pid):
-                $lid = strtolower($pid);
-                if (!isset($language_map[$lid])) continue;
-                $printed[$lid] = true;
-                $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
-          ?>
-                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
-          <?php endforeach; ?>
-          <option disabled>──────────</option>
-          <?php foreach ($language_map as $lid => $label):
-                if (isset($printed[$lid])) continue;
-                $sel = ($lid === strtolower($lang_right ?? '')) ? ' selected' : '';
-          ?>
-                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-    </div>
+        <?php if ($only_toggle_url !== ''): ?>
+        <a class="btn btn-outline-secondary btn-sm" id="btnOnlyServer"
+           href="<?= $h($only_toggle_url) ?>"
+           role="button"
+           title="Server-side filter: show only changed lines">
+          <i class="bi bi-filter-square" aria-hidden="true"></i>
+          <span class="ms-1"><?= $only_on ? 'Only: On' : 'Only: Off' ?></span>
+        </a>
+        <?php endif; ?>
 
-    <div class="d-flex flex-column gap-2 ms-2">
-      <button class="btn btn-outline-secondary btn-sm" id="btnSwap" type="button">Swap</button>
-      <button class="btn btn-success btn-sm" id="btnCompare" type="button">Compare</button>
-    </div>
-  </div>
+		<div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+		  <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='side'?'active':'' ?>" id="btnSide">
+			<i class="bi bi-layout-three-columns" aria-hidden="true"></i>
+			<span class="d-none d-sm-inline ms-1">Side-by-side</span>
+		  </button>
+		  <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='unified'?'active':'' ?>" id="btnUni">
+			<i class="bi bi-menu-button-wide" aria-hidden="true"></i>
+			<span class="d-none d-sm-inline ms-1">Unified</span>
+		  </button>
+		</div>
+
+		<button class="btn btn-primary btn-sm" id="btnDownload" type="button">
+		  <i class="bi bi-download" aria-hidden="true"></i><span class="ms-1">Download .diff</span>
+		</button>
+		<button class="btn btn-outline-primary btn-sm" id="btnPatch" type="button">
+		  <i class="bi bi-git" aria-hidden="true"></i><span class="ms-1">Download .patch</span>
+		</button>
+	  </div>
+	</div>
+
+	<!-- Language selector + actions -->
+	<div class="diff-toolbar btn-toolbar mt-2 gap-2 flex-wrap align-items-center">
+	  <div class="input-group input-group-sm w-auto" style="min-width: 14rem;">
+		<span class="input-group-text">Language</span>
+		<select class="form-select form-select-sm" id="langAll" aria-label="Diff language">
+		  <option value="autodetect" <?= ($single_id==='autodetect')?'selected':''; ?>>Autodetect</option>
+		  <option disabled>──────────</option>
+		  <?php
+			$printed = [];
+			foreach ($popular_langs as $pid):
+				$lid = strtolower($pid);
+				if (!isset($language_map[$lid])) continue;
+				$printed[$lid] = true;
+				$sel = ($lid === $single_id) ? ' selected' : '';
+		  ?>
+				<option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
+		  <?php endforeach; ?>
+		  <option disabled>──────────</option>
+		  <?php foreach ($language_map as $lid => $label):
+				if (isset($printed[$lid])) continue;
+				$sel = ($lid === $single_id) ? ' selected' : '';
+		  ?>
+				<option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
+		  <?php endforeach; ?>
+		</select>
+	  </div>
+
+	  <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Actions">
+		<button class="btn btn-outline-secondary" id="btnSwap" type="button" title="Swap panes">
+		  <i class="bi bi-arrow-left-right" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Swap</span>
+		</button>
+		<button class="btn btn-success" id="btnCompare" type="button" title="Recompute diff">
+		  <i class="bi bi-play" aria-hidden="true"></i><span class="ms-1">Compare</span>
+		</button>
+	  </div>
+	</div>
 
   <!-- Editors -->
   <div class="diff-toolbar mt-2">
@@ -157,7 +199,7 @@ $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $ch
         <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize"></div>
       </div>
 
-      <!-- side-by-side: [l#][lcode][r#][rcode] -->
+      <!-- side-by-side -->
       <table class="diff-table <?= !empty($wrap) ? 'wrap-on':'wrap-off' ?> <?= !empty($lineno) ? '':'lineoff' ?>" id="tblSide" <?= ($view_mode ?? '')==='unified'?'style="display:none"':'' ?>>
         <colgroup id="sideCols">
           <col class="col-lno-l" />
@@ -198,13 +240,14 @@ $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $ch
       <!-- unified -->
       <table class="diff-table unified <?= !empty($wrap) ? 'wrap-on':'wrap-off' ?> <?= !empty($lineno) ? '':'lineoff' ?>" id="tblUni" <?= ($view_mode ?? '')==='side'?'style="display:none"':'' ?>>
         <tbody>
+        <?php $lang_unified = ($lang_right ?: $lang_left) ?? 'text'; ?>
         <?php foreach ($uniRows as $r): ?>
           <tr>
             <td class="no"><?= $h($r['lno']) ?></td>
             <td class="no"><?= $h($r['rno']) ?></td>
             <td class="code <?= $r['class'] ?>"><div class="code-inner">
               <?php if ($r['class'] === 'ctx'): ?>
-                <?= hl_render_line((string)$r['html'], ($lang_right ?: $lang_left) ?? 'text') ?>
+                <?= hl_render_line((string)$r['html'], $lang_unified) ?>
               <?php else: ?>
                 <?php if ($r['html'] !== ''): ?>
                   <span class="marker"><?= $r['class']==='add' ? '+' : ($r['class']==='del' ? '–' : '') ?></span>
@@ -240,10 +283,9 @@ $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $ch
     tblSide.classList.contains('lineoff') ? 0 :
       (parseFloat(getComputedStyle(root).getPropertyValue('--lno')) || 56);
 
-  // Swap
+  // Swap (swap textareas only; one language applies to both)
   $('#btnSwap')?.addEventListener('click', ()=>{
     const a=$('#leftText'), b=$('#rightText'); const t=a.value; a.value=b.value; b.value=t;
-    const la=$('#leftLang'), lb=$('#rightLang'); if (la&&lb){ const tv=la.value; la.value=lb.value; lb.value=tv; }
   });
 
   // Compare
@@ -251,30 +293,53 @@ $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $ch
     const f=document.createElement('form'); f.method='POST';
     const url=new URL(location.href); url.searchParams.delete('download'); f.action=url.pathname+url.search;
     const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
+    const lang = $('#langAll')?.value ?? 'autodetect';
     f.appendChild(mk('left_text',$('#leftText').value));
     f.appendChild(mk('right_text',$('#rightText').value));
-    f.appendChild(mk('left_lang',$('#leftLang').value));
-    f.appendChild(mk('right_lang',$('#rightLang').value));
+    f.appendChild(mk('left_lang',lang));
+    f.appendChild(mk('right_lang',lang));
     f.appendChild(mk('split_pct',String(splitPct)));
     document.body.appendChild(f); f.submit();
   });
 
-  // Download
+  // Download .diff
   $('#btnDownload')?.addEventListener('click', ()=>{
     const f=document.createElement('form'); f.method='POST';
     const url=new URL(location.href); url.searchParams.set('download','1'); f.action=url.pathname+'?'+url.searchParams.toString();
     const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
+    const lang = $('#langAll')?.value ?? 'autodetect';
     f.appendChild(mk('left_text',$('#leftText').value));
     f.appendChild(mk('right_text',$('#rightText').value));
-    f.appendChild(mk('left_lang',$('#leftLang').value));
-    f.appendChild(mk('right_lang',$('#rightLang').value));
-    f.appendChild(mk('left_label','<?= $h($leftLabel ?? "Old") ?>'));
-    f.appendChild(mk('right_label','<?= $h($rightLabel ?? "New") ?>'));
+    f.appendChild(mk('left_lang',lang));
+    f.appendChild(mk('right_lang',lang));
+    f.appendChild(mk('left_label','<?= $h($leftLabel) ?>'));
+    f.appendChild(mk('right_label','<?= $h($rightLabel) ?>'));
     f.appendChild(mk('split_pct',String(splitPct)));
     document.body.appendChild(f); f.submit();
   });
 
-  // Layout
+  // Download .patch
+  $('#btnPatch')?.addEventListener('click', ()=>{
+    const f=document.createElement('form'); f.method='POST';
+    const url=new URL(location.href);
+    url.searchParams.set('download','patch');       // only a tiny GET flag
+    f.action = url.pathname+'?'+url.searchParams.toString();
+
+    const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
+    const lang = $('#langAll')?.value ?? 'autodetect';
+
+    f.appendChild(mk('left_text',$('#leftText').value));
+    f.appendChild(mk('right_text',$('#rightText').value));
+    f.appendChild(mk('left_lang',lang));
+    f.appendChild(mk('right_lang',lang));
+    f.appendChild(mk('left_label','<?= $h($leftLabel) ?>'));
+    f.appendChild(mk('right_label','<?= $h($rightLabel) ?>'));
+    f.appendChild(mk('split_pct',String(splitPct)));
+
+    document.body.appendChild(f); f.submit();
+  });
+
+  // Layout helpers
   function placeBar(px){
     bar.style.marginLeft = '0';
     bar.style.transform  = 'none';
@@ -328,6 +393,131 @@ $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $ch
     [tblSide, tblUni].forEach(t=> t && t.classList.toggle('lineoff', !e.target.checked));
     requestAnimationFrame(layoutSideTable);
   });
+
+	// Only-changes toggle (client-side quick filter)
+	(function(){
+	  const btn = document.getElementById('btnOnlyChanges');
+	  if (!btn) return;
+
+	  let only = false;
+	  const toggle = () => {
+		only = !only;
+		btn.setAttribute('aria-pressed', only ? 'true' : 'false');
+		btn.classList.toggle('active', only);
+
+		// side-by-side: hide rows where both sides are context
+		document.querySelectorAll('#tblSide tbody tr').forEach(tr => {
+		  const l = tr.querySelector('.code.left');
+		  const r = tr.querySelector('.code.right');
+		  const hide = l?.classList.contains('ctx') && r?.classList.contains('ctx');
+		  tr.style.display = (only && hide) ? 'none' : '';
+		});
+
+		// unified: hide rows with class ctx
+		document.querySelectorAll('#tblUni tbody tr').forEach(tr => {
+		  const cell = tr.querySelector('.code');
+		  const hide = cell?.classList.contains('ctx');
+		  tr.style.display = (only && hide) ? 'none' : '';
+		});
+	  };
+
+	  btn.addEventListener('click', toggle);
+	})();
+
+  (function(){
+    const qs = s => Array.from(document.querySelectorAll(s));
+    function changeRows() {
+      const side = qs('#tblSide tbody tr').filter(tr => {
+        const l = tr.querySelector('.code.left');
+        const r = tr.querySelector('.code.right');
+        return l?.classList.contains('del') || r?.classList.contains('add');
+      });
+      const uni  = qs('#tblUni  tbody tr').filter(tr => {
+        const c = tr.querySelector('.code');
+        return c?.classList.contains('add') || c?.classList.contains('del');
+      });
+      // whichever table is visible
+      const tblSide = document.getElementById('tblSide');
+      return (tblSide && tblSide.style.display !== 'none') ? side : uni;
+    }
+
+    function scrollToRow(row) {
+      if (!row) return;
+      row.classList.add('jump-flash');
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(()=> row.classList.remove('jump-flash'), 600);
+    }
+
+    let idx = -1;
+    function jump(dir) {
+      const rows = changeRows();
+      if (!rows.length) return;
+      idx = (idx + dir + rows.length) % rows.length;
+      scrollToRow(rows[idx]);
+    }
+
+    document.getElementById('btnNextChange')?.addEventListener('click', ()=>jump(+1));
+    document.getElementById('btnPrevChange')?.addEventListener('click', ()=>jump(-1));
+
+    // keyboard: n / p (and ] / [ as alternates)
+    document.addEventListener('keydown', e => {
+      if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      if (e.key === 'n' || e.key === ']') { e.preventDefault(); jump(+1); }
+      if (e.key === 'p' || e.key === '[') { e.preventDefault(); jump(-1); }
+    });
+  })();
+
+  // Tab / Shift+Tab indentation in editors
+  (function(){
+    const INDENT = '    '; // 4 spaces; switch to '\t' to insert real tabs
+    const reOutdent = /^(?: {1,4}|\t)/;
+
+    document.querySelectorAll('textarea[data-editor="true"]').forEach(ta => {
+      ta.addEventListener('keydown', e => {
+        if (e.key !== 'Tab') return;
+        e.preventDefault();
+
+        const s = ta.selectionStart;
+        const ed = ta.selectionEnd;
+        const val = ta.value;
+
+        const lineStart = val.lastIndexOf('\n', s - 1) + 1;
+        const nextNL = val.indexOf('\n', ed);
+        const lineEnd = nextNL === -1 ? val.length : nextNL;
+
+        const block = val.slice(lineStart, lineEnd);
+
+        if (s !== ed) {
+          if (e.shiftKey) {
+            const out = block.replace(/^/gm, m => '');
+            const out2 = block.replace(reOutdent, '');
+            const replaced = block.split('\n').map(l => l.replace(reOutdent, '')).join('\n');
+            ta.setRangeText(replaced, lineStart, lineEnd, 'preserve');
+            const delta = block.length - replaced.length;
+            ta.selectionStart = s - Math.min(4, s - lineStart);
+            ta.selectionEnd   = ed - delta;
+          } else {
+            const indented = block.replace(/^/gm, INDENT);
+            ta.setRangeText(indented, lineStart, lineEnd, 'preserve');
+            const lines = (block.match(/\n/g) || []).length + 1;
+            ta.selectionStart = s + INDENT.length;
+            ta.selectionEnd   = ed + INDENT.length * lines;
+          }
+        } else {
+          if (e.shiftKey) {
+            const before = val.slice(lineStart, s);
+            const m = reOutdent.exec(before);
+            if (m) {
+              ta.setRangeText('', lineStart, lineStart + m[0].length, 'end');
+              ta.selectionStart = ta.selectionEnd = s - m[0].length;
+            }
+          } else {
+            ta.setRangeText(INDENT, s, s, 'end');
+          }
+        }
+      });
+    });
+  })();
 
   // Dragging
   (function(){

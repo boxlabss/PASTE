@@ -9,21 +9,19 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
 declare(strict_types=1);
-
 ob_start();
 $__clean = function () {
     if (ob_get_level() > 0 && ob_get_length() !== false) { @ob_clean(); }
 };
-
 require_once 'includes/session.php';
+
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
@@ -32,10 +30,10 @@ require_once 'includes/password.php';
 require_once 'includes/functions.php';
 require_once 'mail/mail.php';
 require_once 'includes/recaptcha.php';
+require_once 'includes/turnstile.php';
 
 $error = null;
 $success = null;
-
 // OAuth deps (soft)
 $oauth_ready = true;
 $oauth_autoloader = __DIR__ . '/oauth/vendor/autoload.php';
@@ -45,9 +43,11 @@ if (!file_exists($oauth_autoloader)) {
     require_once $oauth_autoloader;
     if (!class_exists('League\OAuth2\Client\Provider\Google')) $oauth_ready = false;
 }
+
 // ensure defined for header.php
 $enablegoog = $enablegoog ?? 'no';
-$enablefb   = $enablefb   ?? 'no';
+$enablefb = $enablefb ?? 'no';
+
 if (!$oauth_ready) { $enablegoog = 'no'; $enablefb = 'no'; }
 
 // DB (PDO)
@@ -64,25 +64,46 @@ try {
     $error = "Unable to connect to database.";
 }
 
-// Captcha session bootstrap (reads captcha table into $_SESSION) ---
+// Captcha session bootstrap (reads captcha table into $_SESSION)
 try {
     if (
         empty($_SESSION['cap_e']) ||
         empty($_SESSION['mode']) ||
         empty($_SESSION['recaptcha_version']) ||
         empty($_SESSION['recaptcha_sitekey']) ||
-        empty($_SESSION['recaptcha_secretkey'])
+        empty($_SESSION['recaptcha_secretkey']) ||
+        empty($_SESSION['turnstile_sitekey']) ||
+        empty($_SESSION['turnstile_secretkey'])
     ) {
-        $row = $pdo->query("SELECT cap_e, mode, recaptcha_version, recaptcha_sitekey, recaptcha_secretkey FROM captcha WHERE id = 1")
+        $row = $pdo->query("SELECT cap_e, mode, recaptcha_version, recaptcha_sitekey, recaptcha_secretkey, turnstile_sitekey, turnstile_secretkey FROM captcha WHERE id = 1")
                    ->fetch(PDO::FETCH_ASSOC) ?: [];
-        foreach (['cap_e','mode','recaptcha_version','recaptcha_sitekey','recaptcha_secretkey'] as $k) {
+        foreach (['cap_e', 'mode', 'recaptcha_version', 'recaptcha_sitekey', 'recaptcha_secretkey', 'turnstile_sitekey', 'turnstile_secretkey'] as $k) {
             if (!isset($_SESSION[$k]) && isset($row[$k])) {
                 $_SESSION[$k] = $row[$k];
             }
         }
     }
+	
+    // Set captcha_mode for consistency with index.php
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($_SESSION['cap_e'] === 'on') {
+            if ($_SESSION['mode'] === 'reCAPTCHA') {
+                $_SESSION['captcha_mode'] = ($_SESSION['recaptcha_version'] === 'v3') ? 'recaptcha_v3' : 'recaptcha';
+                $_SESSION['captcha'] = $_SESSION['recaptcha_sitekey'];
+            } elseif ($_SESSION['mode'] === 'turnstile') {
+                $_SESSION['captcha_mode'] = 'turnstile';
+                $_SESSION['captcha'] = $_SESSION['turnstile_sitekey'];
+            } else {
+                $_SESSION['captcha_mode'] = 'internal';
+                $_SESSION['captcha'] = captcha($color, $mode, $mul, $allowed); // Assumes $color, $mul, $allowed are defined
+            }
+        } else {
+            $_SESSION['captcha_mode'] = 'none';
+        }
+    }
 } catch (Throwable $e) {
-    // best-effort; if this fails, require_human() will no-op unless cap_e==='on' and secrets exist
+    // verification will fail gracefully
+    error_log("login.php: Captcha session bootstrap failed: " . $e->getMessage());
 }
 
 // Site info
@@ -90,52 +111,40 @@ try {
     $stmt = $pdo->query("SELECT * FROM site_info WHERE id = 1");
     $site = $stmt->fetch() ?: [];
 } catch (Throwable $e) { $site = []; }
-$title       = trim($site['title'] ?? 'Paste');
-$des         = trim($site['des'] ?? '');
-$baseurl     = trim($site['baseurl'] ?? '');
-$keyword     = trim($site['keyword'] ?? '');
-$site_name   = trim($site['site_name'] ?? 'Paste');
-$email       = trim($site['email'] ?? '');
-$admin_mail  = $email;
-$admin_name  = $site_name;
-$mod_rewrite = (string)($site['mod_rewrite'] ?? ($mod_rewrite ?? '1')); // avoid undefined in header
+$title = trim($site['title'] ?? 'Paste');
+$des = trim($site['des'] ?? '');
+$baseurl = trim($site['baseurl'] ?? '');
+$keyword = trim($site['keyword'] ?? '');
+$site_name = trim($site['site_name'] ?? 'Paste');
+$email = trim($site['email'] ?? '');
+$admin_mail = $email;
+$admin_name = $site_name;
+$mod_rewrite = (string)($site['mod_rewrite'] ?? ($mod_rewrite ?? '1'));
 
 // next resolver
 function safe_next_url(string $baseurl): string {
     $rawNext = (string)($_GET['next'] ?? $_POST['next'] ?? $_SESSION['login_next'] ?? '');
     $next = trim(html_entity_decode($rawNext, ENT_QUOTES, 'UTF-8'));
     if ($next === '') return '';
-
     $base = rtrim($baseurl ?: './', '/');
     $pBase = parse_url($base);
     if (!$pBase || empty($pBase['host']) || empty($pBase['scheme'])) return '';
-
-    // protocol-relative > force site scheme
     if (strpos($next, '//') === 0) {
         $next = $pBase['scheme'] . ':' . $next;
     }
-
-    // absolute URL → must be same host; force site scheme
     if (preg_match('~^[a-z][a-z0-9+.-]*://~i', $next)) {
         $pNext = parse_url($next);
         if (!$pNext) return '';
         if (strcasecmp($pNext['host'] ?? '', $pBase['host']) !== 0) return '';
-        // normalize scheme to site scheme, keep path/query/fragment
         $scheme = $pBase['scheme'];
-        $host   = $pBase['host'];
-        $path   = $pNext['path'] ?? '/';
-        $query  = isset($pNext['query']) ? ('?' . $pNext['query']) : '';
-        $frag   = isset($pNext['fragment']) ? ('#' . $pNext['fragment']) : '';
+        $host = $pBase['host'];
+        $path = $pNext['path'] ?? '/';
+        $query = isset($pNext['query']) ? ('?' . $pNext['query']) : '';
+        $frag = isset($pNext['fragment']) ? ('#' . $pNext['fragment']) : '';
         return "{$scheme}://{$host}{$path}{$query}{$frag}";
     }
-
-    // site-absolute path
     if ($next[0] === '/') return $next;
-
-    // fragment-only → apply to base
     if ($next[0] === '#') return $base . '/' . ltrim($next, '#');
-
-    // relative path
     return $base . '/' . ltrim($next, '/');
 }
 
@@ -150,11 +159,12 @@ $next_url = safe_next_url($baseurl);
 try {
     $iface = $pdo->query("SELECT * FROM interface WHERE id = 1")->fetch() ?: [];
 } catch (Throwable $e) { $iface = []; }
-$default_lang  = trim($iface['lang'] ?? 'en.php');
+$default_lang = trim($iface['lang'] ?? 'en.php');
 $default_theme = trim($iface['theme'] ?? 'default');
 require_once("langs/$default_lang");
 
-// Page title (avoid undefined in header)
+// Page title
+
 $p_title = $lang['login/register'] ?? 'Login / Register';
 
 // Ads
@@ -162,8 +172,8 @@ try {
     $ads = $pdo->query("SELECT * FROM ads WHERE id = 1")->fetch() ?: [];
 } catch (Throwable $e) { $ads = []; }
 $text_ads = trim($ads['text_ads'] ?? '');
-$ads_1    = trim($ads['ads_1'] ?? '');
-$ads_2    = trim($ads['ads_2'] ?? '');
+$ads_1 = trim($ads['ads_1'] ?? '');
+$ads_2 = trim($ads['ads_2'] ?? '');
 
 // CSRF / basics
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
@@ -184,7 +194,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'logout') {
     exit;
 }
 
-// Already logged in? 
+// Already logged in?
 if (isset($_SESSION['token']) && !(isset($_GET['action']) && $_GET['action'] === 'logout')) {
     $__clean();
     $dest = $next_url ?: ($baseurl ?: './');
@@ -239,165 +249,200 @@ if (isset($_GET['action'], $_GET['code'], $_GET['username']) && $_GET['action'] 
 // resend (POST)
 if (isset($_GET['action']) && $_GET['action'] === 'resend'
     && isset($_POST['email'], $_POST['csrf_token']) && $valid_csrf($_POST['csrf_token'])) {
-    require_human('resend');
-    $email_in = filter_var((string)$_POST['email'], FILTER_SANITIZE_EMAIL);
-    try {
-        $stmt = $pdo->prepare("SELECT username, full_name, verified FROM users WHERE email_id = ?");
-        $stmt->execute([$email_in]);
-        $user = $stmt->fetch();
-        if ($user && (string)$user['verified'] === '0') {
-            $code = bin2hex(random_bytes(16));
-            $pdo->prepare("UPDATE users SET verification_code = ? WHERE email_id = ?")->execute([$code, $email_in]);
-            $verify_url = rtrim($baseurl, '/') . "/login.php?action=verify&username=" . urlencode($user['username']) . "&code=" . urlencode($code);
-            $subject = $lang['mail_acc_con'] ?? 'Account Confirmation';
-            $body    = "Hello " . htmlspecialchars((string)$user['full_name']) . ", please verify your account:<br><br><a href='$verify_url' target='_self'>$verify_url</a>";
-            send_mail($email_in, $subject, $body, $site_name, $_SESSION['csrf_token']);
-            $success = $lang['mail_suc'] ?? 'Verification email sent.';
-        } else {
-            $success = $lang['mail_suc'] ?? 'Verification email sent.'; // avoid enumeration
+    if ($_SESSION['captcha_mode'] === 'turnstile') {
+        if (!require_human_turnstile('resend')) {
+            $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Please try again.';
         }
-    } catch (Throwable $e) { $error = "Could not resend verification."; }
+    } else {
+        require_human('resend');
+    }
+    if (!$error) {
+        $email_in = filter_var((string)$_POST['email'], FILTER_SANITIZE_EMAIL);
+        try {
+            $stmt = $pdo->prepare("SELECT username, full_name, verified FROM users WHERE email_id = ?");
+            $stmt->execute([$email_in]);
+            $user = $stmt->fetch();
+            if ($user && (string)$user['verified'] === '0') {
+                $code = bin2hex(random_bytes(16));
+                $pdo->prepare("UPDATE users SET verification_code = ? WHERE email_id = ?")->execute([$code, $email_in]);
+                $verify_url = rtrim($baseurl, '/') . "/login.php?action=verify&username=" . urlencode($user['username']) . "&code=" . urlencode($code);
+                $subject = $lang['mail_acc_con'] ?? 'Account Confirmation';
+                $body = "Hello " . htmlspecialchars((string)$user['full_name']) . ", please verify your account:<br><br><a href='$verify_url' target='_self'>$verify_url</a>";
+                send_mail($email_in, $subject, $body, $site_name, $_SESSION['csrf_token']);
+                $success = $lang['mail_suc'] ?? 'Verification email sent.';
+            } else {
+                $success = $lang['mail_suc'] ?? 'Verification email sent.'; // avoid enumeration
+            }
+        } catch (Throwable $e) { $error = "Could not resend verification."; }
+    }
 }
 
 // forgot (POST)
 if (isset($_GET['action']) && $_GET['action'] === 'forgot'
     && isset($_POST['email'], $_POST['csrf_token']) && $valid_csrf($_POST['csrf_token'])) {
-    require_human('forgot');
-    $email_in = filter_var((string)$_POST['email'], FILTER_SANITIZE_EMAIL);
-    try {
-        $stmt = $pdo->prepare("SELECT username FROM users WHERE email_id = ?");
-        $stmt->execute([$email_in]);
-        $user = $stmt->fetch();
-        if ($user) {
-            $code = bin2hex(random_bytes(16));
-            $exp  = date('Y-m-d H:i:s', strtotime('+1 hour'));
-            $pdo->prepare("UPDATE users SET reset_code = ?, reset_expiry = ? WHERE email_id = ?")->execute([$code, $exp, $email_in]);
-            $reset_url = rtrim($baseurl, '/') . "/login.php?action=reset&username=" . urlencode($user['username']) . "&code=" . urlencode($code);
-            $subject = "$site_name Password Reset";
-            $body    = "To reset your password, click:<br><br><a href='$reset_url' target='_self'>$reset_url</a><br><br>This link expires in 1 hour.";
-            send_mail($email_in, $subject, $body, $site_name, $_SESSION['csrf_token']);
+    if ($_SESSION['captcha_mode'] === 'turnstile') {
+        if (!require_human_turnstile('forgot')) {
+            $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Please try again.';
         }
-        $success = $lang['pass_change'] ?? 'Password reset link sent. Check your email.';
-    } catch (Throwable $e) { $error = "Could not start reset process."; }
+    } else {
+        require_human('forgot');
+    }
+    if (!$error) {
+        $email_in = filter_var((string)$_POST['email'], FILTER_SANITIZE_EMAIL);
+        try {
+            $stmt = $pdo->prepare("SELECT username FROM users WHERE email_id = ?");
+            $stmt->execute([$email_in]);
+            $user = $stmt->fetch();
+            if ($user) {
+                $code = bin2hex(random_bytes(16));
+                $exp = date('Y-m-d H:i:s', strtotime('+1 hour'));
+                $pdo->prepare("UPDATE users SET reset_code = ?, reset_expiry = ? WHERE email_id = ?")->execute([$code, $exp, $email_in]);
+                $reset_url = rtrim($baseurl, '/') . "/login.php?action=reset&username=" . urlencode($user['username']) . "&code=" . urlencode($code);
+                $subject = "$site_name Password Reset";
+                $body = "To reset your password, click:<br><br><a href='$reset_url' target='_self'>$reset_url</a><br><br>This link expires in 1 hour.";
+                send_mail($email_in, $subject, $body, $site_name, $_SESSION['csrf_token']);
+            }
+            $success = $lang['pass_change'] ?? 'Password reset link sent. Check your email.';
+        } catch (Throwable $e) { $error = "Could not start reset process."; }
+    }
 }
 
 // reset (POST)
 if (isset($_GET['action'], $_GET['username'], $_GET['code']) && $_GET['action'] === 'reset'
     && isset($_POST['password'], $_POST['csrf_token']) && $valid_csrf($_POST['csrf_token'])) {
-    require_human('reset');
-    $u = filter_var((string)$_GET['username'], FILTER_SANITIZE_SPECIAL_CHARS);
-    $c = filter_var((string)$_GET['code'], FILTER_SANITIZE_SPECIAL_CHARS);
-    $pw = (string)$_POST['password'];
-    try {
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ? AND reset_code = ? AND reset_expiry > ?");
-        $stmt->execute([$u, $c, date('Y-m-d H:i:s')]);
-        if ($stmt->fetch()) {
-            $hash = password_hash($pw, PASSWORD_DEFAULT);
-            $pdo->prepare("UPDATE users SET password = ?, reset_code = NULL, reset_expiry = NULL WHERE username = ?")->execute([$hash, $u]);
-            $success = $lang['pass_reset'] ?? 'Password reset successful. You can now log in.';
-        } else { $error = $lang['invalid_code'] ?? 'Invalid or expired reset code.'; }
-    } catch (Throwable $e) { $error = "Could not reset password."; }
+    if ($_SESSION['captcha_mode'] === 'turnstile') {
+        if (!require_human_turnstile('reset')) {
+            $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Please try again.';
+        }
+    } else {
+        require_human('reset');
+    }
+    if (!$error) {
+        $u = filter_var((string)$_GET['username'], FILTER_SANITIZE_SPECIAL_CHARS);
+        $c = filter_var((string)$_GET['code'], FILTER_SANITIZE_SPECIAL_CHARS);
+        $pw = (string)$_POST['password'];
+        try {
+            $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ? AND reset_code = ? AND reset_expiry > ?");
+            $stmt->execute([$u, $c, date('Y-m-d H:i:s')]);
+            if ($stmt->fetch()) {
+                $hash = password_hash($pw, PASSWORD_DEFAULT);
+                $pdo->prepare("UPDATE users SET password = ?, reset_code = NULL, reset_expiry = NULL WHERE username = ?")->execute([$hash, $u]);
+                $success = $lang['pass_reset'] ?? 'Password reset successful. You can now log in.';
+            } else { $error = $lang['invalid_code'] ?? 'Invalid or expired reset code.'; }
+        } catch (Throwable $e) { $error = "Could not reset password."; }
+    }
 }
 
-// Login / Signup (POST) — hard gate with reCAPTCHA
+// Login / Signup (POST)
 $valid_post = (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
     && isset($_POST['csrf_token']) && $valid_csrf($_POST['csrf_token']));
-
 if ($valid_post) {
     // LOGIN
     if (isset($_POST['signin'])) {
-        require_human('login');
-        $u = filter_var((string)($_POST['username'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
-        $p = (string)($_POST['password'] ?? '');
-        if ($u !== '' && $p !== '') {
-            try {
-                $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-                $stmt->execute([$u]);
-                $user = $stmt->fetch();
-                if ($user && password_verify($p, (string)$user['password'])) {
-                    if ((string)$user['verified'] === '1') {
-                        $new_token = bin2hex(random_bytes(32));
-                        $pdo->prepare("UPDATE users SET token = ? WHERE username = ?")->execute([$new_token, $u]);
-                        $_SESSION['token']     = $new_token;
-                        $_SESSION['oauth_uid'] = $user['oauth_uid'];
-                        $_SESSION['username']  = $u;
-
-                        $redir = safe_next_url($baseurl);
-                        if ($redir === '') {
-                            $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
-                            $redir = (stripos($ref, 'login.php') === false && $ref !== '') ? $ref : ($baseurl ?: './');
+        if ($_SESSION['captcha_mode'] === 'turnstile') {
+            if (!require_human_turnstile('login')) {
+                $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Please try again.';
+            }
+        } else {
+            require_human('login');
+        }
+        if (!$error) {
+            $u = filter_var((string)($_POST['username'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
+            $p = (string)($_POST['password'] ?? '');
+            if ($u !== '' && $p !== '') {
+                try {
+                    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
+                    $stmt->execute([$u]);
+                    $user = $stmt->fetch();
+                    if ($user && password_verify($p, (string)$user['password'])) {
+                        if ((string)$user['verified'] === '1') {
+                            $new_token = bin2hex(random_bytes(32));
+                            $pdo->prepare("UPDATE users SET token = ? WHERE username = ?")->execute([$new_token, $u]);
+                            $_SESSION['token'] = $new_token;
+                            $_SESSION['oauth_uid'] = $user['oauth_uid'];
+                            $_SESSION['username'] = $u;
+                            $redir = safe_next_url($baseurl);
+                            if ($redir === '') {
+                                $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
+                                $redir = (stripos($ref, 'login.php') === false && $ref !== '') ? $ref : ($baseurl ?: './');
+                            }
+                            unset($_SESSION['login_next']);
+                            $__clean();
+                            header('Location: ' . $redir);
+                            exit;
                         }
-                        unset($_SESSION['login_next']); // one-shot
-                        $__clean();
-                        header('Location: ' . $redir);
-                        exit;
-                    }
-                    $error = ((string)$user['verified'] === '2')
-                        ? ($lang['banned'] ?? 'Your account is banned.')
-                        : ($lang['notverified'] ?? 'Account not verified.');
-                } else { $error = $lang['incorrect'] ?? 'Incorrect username or password.'; }
-            } catch (Throwable $e) { $error = "Login failed due to a server error."; }
-        } else { $error = $lang['missingfields'] ?? 'Please fill in all fields.'; }
+                        $error = ((string)$user['verified'] === '2')
+                            ? ($lang['banned'] ?? 'Your account is banned.')
+                            : ($lang['notverified'] ?? 'Account not verified.');
+                    } else { $error = $lang['incorrect'] ?? 'Incorrect username or password.'; }
+                } catch (Throwable $e) { $error = "Login failed due to a server error."; }
+            } else { $error = $lang['missingfields'] ?? 'Please fill in all fields.'; }
+        }
     }
-
     // SIGNUP
     if (isset($_POST['signup'])) {
-        require_human('signup');
-        $u  = filter_var((string)($_POST['username'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
-        $p  = (string)($_POST['password'] ?? '');
-        $em = filter_var((string)($_POST['email'] ?? ''), FILTER_SANITIZE_EMAIL);
-        $fn = filter_var((string)($_POST['full'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
-
-        if ($u && $p && $em && $fn) {
-            if (isValidUsername($u)) {
-                try {
-                    // username unique
-                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
-                    $stmt->execute([$u]);
-                    if ((int)$stmt->fetchColumn() > 0) {
-                        $error = $lang['userexists'] ?? 'Username already exists.';
-                    } else {
-                        // email unique
-                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE email_id = ?");
-                        $stmt->execute([$em]);
+        if ($_SESSION['captcha_mode'] === 'turnstile') {
+            if (!require_human_turnstile('signup')) {
+                $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Please try again.';
+            }
+        } else {
+            require_human('signup');
+        }
+        if (!$error) {
+            $u = filter_var((string)($_POST['username'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
+            $p = (string)($_POST['password'] ?? '');
+            $em = filter_var((string)($_POST['email'] ?? ''), FILTER_SANITIZE_EMAIL);
+            $fn = filter_var((string)($_POST['full'] ?? ''), FILTER_SANITIZE_SPECIAL_CHARS);
+            if ($u && $p && $em && $fn) {
+                if (isValidUsername($u)) {
+                    try {
+                        // username unique
+                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
+                        $stmt->execute([$u]);
                         if ((int)$stmt->fetchColumn() > 0) {
-                            $error = $lang['emailexists'] ?? 'Email already exists.';
+                            $error = $lang['userexists'] ?? 'Username already exists.';
                         } else {
-                            $hash     = password_hash($p, PASSWORD_DEFAULT);
-                            $verified = ($verification === 'disabled') ? '1' : '0';
-                            $vcode    = ($verification === 'disabled') ? null : bin2hex(random_bytes(16));
-                            $pdo->prepare("
-                                INSERT INTO users (oauth_uid, username, email_id, full_name, platform, password, verified, picture, date, ip, verification_code)
-                                VALUES ('0', ?, ?, ?, 'Direct', ?, ?, 'NONE', ?, ?, ?)
-                            ")->execute([$u, $em, $fn, $hash, $verified, date('Y-m-d H:i:s'), $ip, $vcode]);
-
-                            if ($verification !== 'disabled') {
-                                $verify_url = rtrim($baseurl, '/') . "/login.php?action=verify&username=" . urlencode($u) . "&code=" . urlencode($vcode);
-                                $subject = $lang['mail_acc_con'] ?? 'Account Confirmation';
-                                $body    = "Hello $fn, verify your $site_name account:<br><br><a href='$verify_url' target='_self'>$verify_url</a>";
-                                $res = send_mail($em, $subject, $body, $site_name, $_SESSION['csrf_token']);
-                                if (($res['status'] ?? 'error') !== 'success') {
-                                    $error = ($lang['mail_error'] ?? 'Failed to send verification email.');
+                            // email unique
+                            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE email_id = ?");
+                            $stmt->execute([$em]);
+                            if ((int)$stmt->fetchColumn() > 0) {
+                                $error = $lang['emailexists'] ?? 'Email already exists.';
+                            } else {
+                                $hash = password_hash($p, PASSWORD_DEFAULT);
+                                $verified = ($verification === 'disabled') ? '1' : '0';
+                                $vcode = ($verification === 'disabled') ? null : bin2hex(random_bytes(16));
+                                $pdo->prepare("
+                                    INSERT INTO users (oauth_uid, username, email_id, full_name, platform, password, verified, picture, date, ip, verification_code)
+                                    VALUES ('0', ?, ?, ?, 'Direct', ?, ?, 'NONE', ?, ?, ?)
+                                ")->execute([$u, $em, $fn, $hash, $verified, date('Y-m-d H:i:s'), $ip, $vcode]);
+                                if ($verification !== 'disabled') {
+                                    $verify_url = rtrim($baseurl, '/') . "/login.php?action=verify&username=" . urlencode($u) . "&code=" . urlencode($vcode);
+                                    $subject = $lang['mail_acc_con'] ?? 'Account Confirmation';
+                                    $body = "Hello $fn, verify your $site_name account:<br><br><a href='$verify_url' target='_self'>$verify_url</a>";
+                                    $res = send_mail($em, $subject, $body, $site_name, $_SESSION['csrf_token']);
+                                    if (($res['status'] ?? 'error') !== 'success') {
+                                        $error = ($lang['mail_error'] ?? 'Failed to send verification email.');
+                                    }
+                                }
+                                if (!$error) {
+                                    $success = ($lang['registered'] ?? 'Registration successful.')
+                                        . ($verification !== 'disabled' ? ' Please check your email to verify your account.' : '');
                                 }
                             }
-                            if (!$error) {
-                                $success = ($lang['registered'] ?? 'Registration successful.')
-                                    . ($verification !== 'disabled' ? ' Please check your email to verify your account.' : '');
-                            }
                         }
-                    }
-                } catch (Throwable $e) { $error = "Registration failed due to a server error."; }
-            } else { $error = $lang['usrinvalid'] ?? 'Invalid username. Use only letters, numbers, .#$'; }
-        } else { $error = $lang['missingfields'] ?? 'Please fill in all fields.'; }
+                    } catch (Throwable $e) { $error = "Registration failed due to a server error."; }
+                } else { $error = $lang['usrinvalid'] ?? 'Invalid username. Use only letters, numbers, .#$'; }
+            } else { $error = $lang['missingfields'] ?? 'Please fill in all fields.'; }
+        }
     }
 }
 
-// Mirror messages for theme (which reads $_GET) 
-if (!empty($error))   { $_GET['error']   = $error; }
+// Mirror messages for theme (which reads $_GET)
+if (!empty($error)) { $_GET['error'] = $error; }
 if (!empty($success)) { $_GET['success'] = $success; }
-if ($next_url !== '') { $_GET['next']    = $next_url; } // expose next to theme/forms
+if ($next_url !== '') { $_GET['next'] = $next_url; } // expose next to theme/forms
 
-// OAuth launch (only if enabled & deps ok) -----
+// OAuth launch (only if enabled & deps ok)
 if ($oauth_ready && isset($_GET['login']) && ($enablegoog === 'yes' || $enablefb === 'yes')) {
     $n = safe_next_url($baseurl);
     $qnext = $n ? '&next=' . rawurlencode($n) : '';

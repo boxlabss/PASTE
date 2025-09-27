@@ -9,10 +9,10 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
 declare(strict_types=1);
@@ -26,11 +26,12 @@ if (session_status() === PHP_SESSION_NONE) {
         'cookie_samesite' => 'Strict',
     ]);
 }
+
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
-error_log("configuration.php: Session started, ID: " . session_id() . ", CSRF token: {$_SESSION['csrf_token']}, HTTPS: " . (isset($_SERVER['HTTPS']) ? 'on' : 'off'));
 
+error_log("configuration.php: Session started, ID: " . session_id() . ", CSRF token: {$_SESSION['csrf_token']}, HTTPS: " . (isset($_SERVER['HTTPS']) ? 'on' : 'off'));
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
     error_log("configuration.php: Session validation failed - admin_login or admin_id not set. Session: " . json_encode($_SESSION));
     ob_end_clean();
@@ -40,21 +41,18 @@ if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
 
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
-
 $date = date('Y-m-d H:i:s');
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 require_once '../config.php';
 // Dependency guards if vendor trees missing
 $OAUTH_VENDOR = __DIR__ . '/../oauth/vendor/autoload.php';
-$OAUTH_READY  = is_file($OAUTH_VENDOR) && is_file(__DIR__ . '/../oauth/vendor/composer/autoload_real.php');
+$OAUTH_READY = is_file($OAUTH_VENDOR) && is_file(__DIR__ . '/../oauth/vendor/composer/autoload_real.php');
 $OAUTH_WARNING_HTML = $OAUTH_READY ? '' :
     'OAuth libraries not installed. Install: <code>cd oauth && composer require google/apiclient:^2.17 league/oauth2-client:^2.7 league/oauth2-google:^4.0</code>';
-
 $MAIL_VENDOR = __DIR__ . '/../mail/vendor/autoload.php';
-$MAIL_READY  = is_file($MAIL_VENDOR) && is_file(__DIR__ . '/../mail/vendor/composer/autoload_real.php');
+$MAIL_READY = is_file($MAIL_VENDOR) && is_file(__DIR__ . '/../mail/vendor/composer/autoload_real.php');
 $MAIL_WARNING_HTML = $MAIL_READY ? '' :
     'Mail libraries not installed. Install: <code>cd mail && composer require phpmailer/phpmailer:^6.9</code>';
-
 function is_ajax(): bool {
     return isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 }
@@ -66,7 +64,7 @@ function require_oauth_vendor_or_json_error(): void {
     if (is_ajax()) {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
-            'status'  => 'error',
+            'status' => 'error',
             'message' => 'OAuth libraries not installed. Run: cd oauth && composer require google/apiclient:^2.17 league/oauth2-client:^2.7 league/oauth2-google:^4.0'
         ]);
         exit;
@@ -84,7 +82,7 @@ function require_mail_vendor_or_json_error(): void {
     }
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
-        'status'  => 'error',
+        'status' => 'error',
         'message' => 'Mail libraries not installed. Run: cd mail && composer require phpmailer/phpmailer:^6.9'
     ]);
     exit;
@@ -96,7 +94,6 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
-
     $stmt = $pdo->prepare("SELECT id FROM admin WHERE user = ?");
     $stmt->execute([$_SESSION['admin_login']]);
     $admin = $stmt->fetch();
@@ -108,7 +105,6 @@ try {
         header('Location: index.php');
         exit;
     }
-
     $stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
     $last_id = $stmt->fetch()['last_id'] ?? null;
     if ($last_id) {
@@ -122,7 +118,6 @@ try {
         $stmt = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
         $stmt->execute([$date, $ip]);
     }
-
     $stmt = $pdo->query("SELECT * FROM site_info WHERE id = 1");
     $row = $stmt->fetch() ?: [];
     $title = trim($row['title'] ?? '');
@@ -136,7 +131,6 @@ try {
     $gplus = trim($row['gplus'] ?? '');
     $ga = trim($row['ga'] ?? '');
     $additional_scripts = trim($row['additional_scripts'] ?? '');
-
     $stmt = $pdo->query("SELECT * FROM captcha WHERE id = 1");
     $row = $stmt->fetch() ?: [];
     $cap_e = $row['cap_e'] ?? '';
@@ -147,12 +141,12 @@ try {
     $color = $row['color'] ?? '';
     $recaptcha_sitekey = $row['recaptcha_sitekey'] ?? '';
     $recaptcha_secretkey = $row['recaptcha_secretkey'] ?? '';
-
+    $turnstile_sitekey = $row['turnstile_sitekey'] ?? '';
+    $turnstile_secretkey = $row['turnstile_secretkey'] ?? '';
     $stmt = $pdo->query("SELECT * FROM site_permissions WHERE id = 1");
     $row = $stmt->fetch() ?: [];
     $disableguest = trim($row['disableguest'] ?? '');
     $siteprivate = trim($row['siteprivate'] ?? '');
-
     $stmt = $pdo->query("SELECT * FROM mail WHERE id = 1");
     $row = $stmt->fetch() ?: [];
     $required_fields = ['verification', 'smtp_host', 'smtp_username', 'smtp_password', 'smtp_port', 'protocol', 'auth', 'socket', 'oauth_client_id', 'oauth_client_secret', 'oauth_refresh_token'];
@@ -174,19 +168,13 @@ try {
     $oauth_refresh_token = trim($row['oauth_refresh_token'] ?? '');
     $oauth_status = $oauth_refresh_token ? 'OAuth refresh token is set.' : 'OAuth refresh token not set. Configure Gmail OAuth if using smtp.gmail.com.';
     $redirect_uri = $baseurl ? rtrim($baseurl, '/') . '/oauth/google_smtp.php' : '';
-
     $msg = '';
     if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         error_log("configuration.php: POST request received with CSRF token: " . ($_POST['csrf_token'] ?? 'none') . ", Session CSRF: {$_SESSION['csrf_token']}, Session ID: " . session_id());
         if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
             error_log("configuration.php: CSRF validation failed. Received: " . ($_POST['csrf_token'] ?? 'none') . ", Expected: {$_SESSION['csrf_token']}, Session: " . json_encode($_SESSION));
-            $msg = '<div class="alert alert-danger text-center">CSRF validation failed. Please try again.</div>';
-            if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-                ob_end_clean();
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['status' => 'error', 'message' => $msg]);
-                exit;
-            }
+            $msg_plain = 'CSRF validation failed. Please try again.';
+            $msg_type = 'error';
         } else {
             error_log("configuration.php: CSRF validation passed");
             if (isset($_POST['test_recaptcha'])) {
@@ -226,13 +214,71 @@ try {
                         }
                     }
                 }
-                if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+                if (is_ajax()) {
+                    ob_end_clean();
+                    header('Content-Type: application/json; charset=utf-8');
+                    echo json_encode(['message' => $msg]);
+                    exit;
+                }
+            } elseif (isset($_POST['test_turnstile'])) {
+                error_log("configuration.php: Test Turnstile requested");
+                $turnstile_sitekey = trim($_POST['turnstile_sitekey'] ?? '');
+                $turnstile_secretkey = trim($_POST['turnstile_secretkey'] ?? '');
+                if (empty($turnstile_sitekey) || empty($turnstile_secretkey)) {
+                    $msg = '<div class="alert alert-danger text-center">Turnstile Site Key and Secret Key are required for testing.</div>';
+                    error_log("configuration.php: Missing Turnstile keys for test");
+                } else {
+                    // Use an empty token to trigger 'missing-input-response' if secret is valid
+                    $token = '';
+                    $data = [
+                        'secret' => $turnstile_secretkey,
+                        'response' => $token,
+                    ];
+                    $ch = curl_init('https://challenges.cloudflare.com/turnstile/v0/siteverify');
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+                    $response = curl_exec($ch);
+                    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curl_error = curl_error($ch);
+                    curl_close($ch);
+                    if ($response === false || $http_code != 200) {
+                        $msg = '<div class="alert alert-danger text-center">Failed to verify Turnstile keys: ' . htmlspecialchars($curl_error ?: 'No response', ENT_QUOTES, 'UTF-8') . '</div>';
+                        error_log("configuration.php: Turnstile test failed: HTTP Code: $http_code, Error: " . ($curl_error ?: 'No response'));
+                    } else {
+                        $result = json_decode($response, true);
+                        if (!$result || !is_array($result)) {
+                            $msg = '<div class="alert alert-danger text-center">Invalid response from Turnstile API.</div>';
+                            error_log("configuration.php: Turnstile test invalid JSON: " . $response);
+                        } elseif ($result['success']) {
+                            // Unexpected with empty token, but valid
+                            $msg = '<div class="alert alert-success text-center">Turnstile keys are valid.</div>';
+                            error_log("configuration.php: Turnstile test successful (unexpected success)");
+                        } else {
+                            $errors = $result['error-codes'] ?? [];
+                            if (in_array('invalid-input-secret', $errors)) {
+                                $msg = '<div class="alert alert-danger text-center">Invalid Turnstile Secret Key.</div>';
+                                error_log("configuration.php: Turnstile test failed: Invalid secret key");
+                            } elseif (in_array('missing-input-response', $errors)) {
+                                $msg = '<div class="alert alert-success text-center">Turnstile keys are valid.</div>';
+                                error_log("configuration.php: Turnstile test successful");
+                            } else {
+                                $msg = '<div class="alert alert-danger text-center">Turnstile verification failed. Error codes: ' . htmlspecialchars(implode(', ', $errors), ENT_QUOTES, 'UTF-8') . '</div>';
+                                error_log("configuration.php: Turnstile test failed: " . implode(', ', $errors));
+                            }
+                        }
+                    }
+                }
+                if (is_ajax()) {
                     ob_end_clean();
                     header('Content-Type: application/json; charset=utf-8');
                     echo json_encode(['message' => $msg]);
                     exit;
                 }
             } elseif (isset($_POST['test_smtp'])) {
+                require_mail_vendor_or_json_error();
                 error_log("configuration.php: Test SMTP requested");
                 header('Content-Type: application/json; charset=utf-8');
                 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -278,16 +324,20 @@ try {
                     exit;
                 }
             } elseif (isset($_POST['save_oauth_credentials'])) {
+                require_oauth_vendor_or_json_error();
                 $client_id = trim($_POST['client_id'] ?? '');
                 $client_secret = trim($_POST['client_secret'] ?? '');
                 if (empty($client_id) || empty($client_secret)) {
-                    $msg = '<div class="alert alert-danger text-center">Please fill in both Client ID and Client Secret.</div>';
+                    $msg_plain = 'Please fill in both Client ID and Client Secret.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Missing OAuth Client ID or Secret");
                 } elseif (!preg_match('/^[0-9a-zA-Z\-]+\.apps\.googleusercontent\.com$/', $client_id)) {
-                    $msg = '<div class="alert alert-danger text-center">Invalid Client ID format. It should look like \'1234567890-abcdef.apps.googleusercontent.com\'.</div>';
+                    $msg_plain = 'Invalid Client ID format. It should look like \'1234567890-abcdef.apps.googleusercontent.com\'.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Invalid OAuth Client ID format: $client_id");
                 } elseif (!preg_match('/^[0-9a-zA-Z\-_]+$/', $client_secret)) {
-                    $msg = '<div class="alert alert-danger text-center">Invalid Client Secret format. It should contain only letters, numbers, hyphens, and underscores.</div>';
+                    $msg_plain = 'Invalid Client Secret format. It should contain only letters, numbers, hyphens, and underscores.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Invalid OAuth Client Secret format: $client_secret");
                 } else {
                     try {
@@ -295,15 +345,18 @@ try {
                         $rows_affected = $stmt->execute([$client_id, $client_secret]);
                         error_log("configuration.php: OAuth credentials update attempted. Rows affected: $rows_affected, client_id: $client_id");
                         if ($rows_affected === 0) {
-                            $msg = '<div class="alert alert-danger text-center">Failed to update OAuth credentials in database. No rows affected.</div>';
+                            $msg_plain = 'Failed to update OAuth credentials in database. No rows affected.';
+                            $msg_type = 'error';
                         } else {
                             $oauth_client_id = $client_id;
                             $oauth_client_secret = $client_secret;
-                            $msg = '<div class="alert alert-success text-center">OAuth credentials saved successfully.</div>';
+                            $msg_plain = 'OAuth credentials saved successfully.';
+                            $msg_type = 'success';
                         }
                     } catch (PDOException $e) {
                         error_log("configuration.php: OAuth credentials update error: " . $e->getMessage());
-                        $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+                        $msg_plain = $e->getMessage();
+                        $msg_type = 'error';
                     }
                 }
             } elseif (isset($_POST['cap'])) {
@@ -315,18 +368,27 @@ try {
                 $color = trim($_POST['color'] ?? '');
                 $recaptcha_sitekey = trim($_POST['recaptcha_sitekey'] ?? '');
                 $recaptcha_secretkey = trim($_POST['recaptcha_secretkey'] ?? '');
+                $turnstile_sitekey = trim($_POST['turnstile_sitekey'] ?? '');
+                $turnstile_secretkey = trim($_POST['turnstile_secretkey'] ?? '');
                 if ($cap_e == 'on' && $mode == 'reCAPTCHA' && (empty($recaptcha_sitekey) || empty($recaptcha_secretkey))) {
-                    $msg = '<div class="alert alert-danger text-center">reCAPTCHA Site Key and Secret Key are required when reCAPTCHA is enabled.</div>';
+                    $msg_plain = 'reCAPTCHA Site Key and Secret Key are required when reCAPTCHA is enabled.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Missing reCAPTCHA keys for mode: $mode");
+                } elseif ($cap_e == 'on' && $mode == 'turnstile' && (empty($turnstile_sitekey) || empty($turnstile_secretkey))) {
+                    $msg_plain = 'Turnstile Site Key and Secret Key are required when Turnstile is enabled.';
+                    $msg_type = 'error';
+                    error_log("configuration.php: Missing Turnstile keys for mode: $mode");
                 } else {
                     try {
-                        $stmt = $pdo->prepare("UPDATE captcha SET cap_e = ?, mode = ?, recaptcha_version = ?, mul = ?, allowed = ?, color = ?, recaptcha_sitekey = ?, recaptcha_secretkey = ? WHERE id = 1");
-                        $stmt->execute([$cap_e, $mode, $recaptcha_version, $mul, $allowed, $color, $recaptcha_sitekey, $recaptcha_secretkey]);
-                        $msg = '<div class="alert alert-success text-center">Captcha settings saved</div>';
+                        $stmt = $pdo->prepare("UPDATE captcha SET cap_e = ?, mode = ?, recaptcha_version = ?, mul = ?, allowed = ?, color = ?, recaptcha_sitekey = ?, recaptcha_secretkey = ?, turnstile_sitekey = ?, turnstile_secretkey = ? WHERE id = 1");
+                        $stmt->execute([$cap_e, $mode, $recaptcha_version, $mul, $allowed, $color, $recaptcha_sitekey, $recaptcha_secretkey, $turnstile_sitekey, $turnstile_secretkey]);
+                        $msg_plain = 'Captcha settings saved';
+                        $msg_type = 'success';
                         error_log("configuration.php: Captcha settings updated successfully");
                     } catch (PDOException $e) {
                         error_log("configuration.php: Captcha update error: " . $e->getMessage());
-                        $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+                        $msg_plain = $e->getMessage();
+                        $msg_type = 'error';
                     }
                 }
             } elseif (isset($_POST['manage'])) {
@@ -344,11 +406,13 @@ try {
                 try {
                     $stmt = $pdo->prepare("UPDATE site_info SET title = ?, des = ?, baseurl = ?, keyword = ?, site_name = ?, email = ?, twit = ?, face = ?, gplus = ?, ga = ?, additional_scripts = ? WHERE id = 1");
                     $stmt->execute([$title, $des, $baseurl, $keyword, $site_name, $email, $twit, $face, $gplus, $ga, $additional_scripts]);
-                    $msg = '<div class="alert alert-success text-center">Configuration saved</div>';
+                    $msg_plain = 'Configuration saved';
+                    $msg_type = 'success';
                     error_log("configuration.php: Site info updated successfully");
                 } catch (PDOException $e) {
                     error_log("configuration.php: Site info update error: " . $e->getMessage());
-                    $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+                    $msg_plain = $e->getMessage();
+                    $msg_type = 'error';
                 }
             } elseif (isset($_POST['permissions'])) {
                 $disableguest = trim($_POST['disableguest'] ?? '');
@@ -356,11 +420,13 @@ try {
                 try {
                     $stmt = $pdo->prepare("UPDATE site_permissions SET disableguest = ?, siteprivate = ? WHERE id = 1");
                     $stmt->execute([$disableguest, $siteprivate]);
-                    $msg = '<div class="alert alert-success text-center">Site permissions saved</div>';
+                    $msg_plain = 'Site permissions saved';
+                    $msg_type = 'success';
                     error_log("configuration.php: Site permissions updated successfully");
                 } catch (PDOException $e) {
                     error_log("configuration.php: Permissions update error: " . $e->getMessage());
-                    $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+                    $msg_plain = $e->getMessage();
+                    $msg_type = 'error';
                 }
             } elseif (isset($_POST['smtp_code'])) {
                 $verification = trim($_POST['verification'] ?? '');
@@ -372,43 +438,54 @@ try {
                 $auth = trim($_POST['auth'] ?? '');
                 $protocol = trim($_POST['protocol'] ?? '');
                 if ($protocol === '2' && $smtp_host !== 'smtp.gmail.com' && $auth === 'true' && (empty($smtp_username) || empty($smtp_password))) {
-                    $msg = '<div class="alert alert-danger text-center">SMTP Username and Password are required for non-Gmail SMTP servers with authentication.</div>';
+                    $msg_plain = 'SMTP Username and Password are required for non-Gmail SMTP servers with authentication.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Missing SMTP username or password for $smtp_host");
                 } elseif ($protocol === '1' && !ini_get('sendmail_path')) {
-                    $msg = '<div class="alert alert-danger text-center">PHP Mail selected, but sendmail_path is not configured in php.ini.</div>';
+                    $msg_plain = 'PHP Mail selected, but sendmail_path is not configured in php.ini.';
+                    $msg_type = 'error';
                     error_log("configuration.php: sendmail_path not configured in php.ini");
                 } elseif ($protocol === '2' && empty($smtp_host)) {
-                    $msg = '<div class="alert alert-danger text-center">SMTP Host is required for SMTP protocol.</div>';
+                    $msg_plain = 'SMTP Host is required for SMTP protocol.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Missing SMTP host");
                 } elseif ($protocol === '2' && empty($smtp_port)) {
-                    $msg = '<div class="alert alert-danger text-center">SMTP Port is required for SMTP protocol.</div>';
+                    $msg_plain = 'SMTP Port is required for SMTP protocol.';
+                    $msg_type = 'error';
                     error_log("configuration.php: Missing SMTP port");
                 } else {
                     try {
                         $stmt = $pdo->prepare("UPDATE mail SET verification = ?, smtp_host = ?, smtp_port = ?, smtp_username = ?, smtp_password = ?, socket = ?, protocol = ?, auth = ? WHERE id = 1");
                         $stmt->execute([$verification, $smtp_host, $smtp_port, $smtp_username, $smtp_password, $socket, $protocol, $auth]);
-                        $msg = '<div class="alert alert-success text-center">Mail settings updated</div>';
+                        $msg_plain = 'Mail settings updated';
+                        $msg_type = 'success';
                         error_log("configuration.php: Mail settings updated successfully");
                     } catch (PDOException $e) {
                         error_log("configuration.php: Mail settings update error: " . $e->getMessage());
-                        $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+                        $msg_plain = $e->getMessage();
+                        $msg_type = 'error';
                     }
                 }
             }
-            if (strpos($msg, 'alert-success') !== false) {
-                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-                error_log("configuration.php: CSRF token regenerated: {$_SESSION['csrf_token']}, Session ID: " . session_id());
+            if (isset($msg_plain)) {
+                if ($msg_type === 'success') {
+                    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+                    error_log("configuration.php: CSRF token regenerated: {$_SESSION['csrf_token']}, Session ID: " . session_id());
+                }
+                if (!is_ajax()) {
+                    ob_end_clean();
+                    header("Location: {$_SERVER['PHP_SELF']}?$msg_type=" . urlencode($msg_plain) . "#$activeTab");
+                    exit;
+                }
             }
         }
         // For non-AJAX requests, fall through to render
     }
-
     if (isset($_GET['msg'])) {
         $msg = '<div class="alert alert-success text-center">' . htmlspecialchars(urldecode($_GET['msg'] ?? ''), ENT_QUOTES, 'UTF-8') . '</div>';
     } elseif (isset($_GET['error'])) {
         $msg = '<div class="alert alert-danger text-center">' . htmlspecialchars(urldecode($_GET['error'] ?? ''), ENT_QUOTES, 'UTF-8') . '</div>';
     }
-
 } catch (PDOException $e) {
     error_log("configuration.php: Database error: " . $e->getMessage());
     ob_end_clean();
@@ -417,7 +494,6 @@ try {
     // Keep variables like $baseurl/$site_name in scope for HTML; we only close PDO connection here.
     $pdo = null;
 }
-
 // --- Active tab persistence (server-side default) ---
 $activeTab = $_POST['active_tab'] ?? $_GET['tab'] ?? '';
 $validTabs = ['siteinfo','permissions','captcha','mail'];
@@ -470,7 +546,6 @@ if (!in_array($activeTab, $validTabs, true)) {
     </style>
 </head>
 <body>
-
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
     <div class="d-flex align-items-center gap-2">
@@ -497,7 +572,6 @@ if (!in_array($activeTab, $validTabs, true)) {
     </div>
   </div>
 </nav>
-
 <!-- Mobile offcanvas nav -->
 <div class="offcanvas offcanvas-start offcanvas-nav" tabindex="-1" id="navOffcanvas">
   <div class="offcanvas-header">
@@ -521,7 +595,6 @@ if (!in_array($activeTab, $validTabs, true)) {
     </div>
   </div>
 </div>
-
 <div class="container-fluid my-2">
   <div class="row g-2">
     <!-- Desktop sidebar -->
@@ -543,7 +616,6 @@ if (!in_array($activeTab, $validTabs, true)) {
         </div>
       </div>
     </div>
-
     <div class="col-lg-10">
       <div class="card">
         <div class="card-body">
@@ -554,7 +626,6 @@ if (!in_array($activeTab, $validTabs, true)) {
           <?php if (!empty($MAIL_WARNING_HTML)): ?>
             <div class="alert alert-warning text-center mb-3"><?php echo $MAIL_WARNING_HTML; ?></div>
           <?php endif; ?>
-
           <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
             <li class="nav-item" role="presentation">
               <button class="nav-link <?php echo $activeTab==='siteinfo'?'active':''; ?>" id="siteinfo-tab" data-bs-toggle="tab" data-bs-target="#siteinfo" type="button" role="tab" aria-controls="siteinfo" aria-selected="<?php echo $activeTab==='siteinfo'?'true':'false'; ?>">Site Info</button>
@@ -569,7 +640,6 @@ if (!in_array($activeTab, $validTabs, true)) {
               <button class="nav-link <?php echo $activeTab==='mail'?'active':''; ?>" id="mail-tab" data-bs-toggle="tab" data-bs-target="#mail" type="button" role="tab" aria-controls="mail" aria-selected="<?php echo $activeTab==='mail'?'true':'false'; ?>">Mail Settings</button>
             </li>
           </ul>
-
           <div class="tab-content">
             <!-- Site Info -->
             <div class="tab-pane fade <?php echo $activeTab==='siteinfo'?'show active':''; ?>" id="siteinfo" role="tabpanel" aria-labelledby="siteinfo-tab">
@@ -625,7 +695,6 @@ if (!in_array($activeTab, $validTabs, true)) {
                 <button type="submit" class="btn btn-primary">Save</button>
               </form>
             </div>
-
             <!-- Permissions -->
             <div class="tab-pane fade <?php echo $activeTab==='permissions'?'show active':''; ?>" id="permissions" role="tabpanel" aria-labelledby="permissions-tab">
               <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
@@ -643,7 +712,6 @@ if (!in_array($activeTab, $validTabs, true)) {
                 <button type="submit" class="btn btn-primary">Save</button>
               </form>
             </div>
-
             <!-- Captcha -->
             <div class="tab-pane fade <?php echo $activeTab==='captcha'?'show active':''; ?>" id="captcha" role="tabpanel" aria-labelledby="captcha-tab">
               <form id="captcha-form" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
@@ -660,43 +728,59 @@ if (!in_array($activeTab, $validTabs, true)) {
                     <option value="Normal" <?php if ($mode == 'Normal') echo 'selected'; ?>>Normal</option>
                     <option value="Tough" <?php if ($mode == 'Tough') echo 'selected'; ?>>Tough</option>
                     <option value="reCAPTCHA" <?php if ($mode == 'reCAPTCHA') echo 'selected'; ?>>reCAPTCHA</option>
+                    <option value="turnstile" <?php if ($mode == 'turnstile') echo 'selected'; ?>>Cloudflare Turnstile</option>
                   </select>
                 </div>
-                <div class="mb-3">
-                  <label for="recaptcha_version" class="form-label">reCAPTCHA Version</label>
-                  <select class="form-select" id="recaptcha_version" name="recaptcha_version">
-                    <option value="v2" <?php if ($recaptcha_version == 'v2') echo 'selected'; ?>>reCAPTCHA v2</option>
-                    <option value="v3" <?php if ($recaptcha_version == 'v3') echo 'selected'; ?>>reCAPTCHA v3</option>
-                  </select>
+                <div id="internal-settings" style="<?php echo in_array($mode, ['Easy', 'Normal', 'Tough']) ? '' : 'display: none;'; ?>">
+                  <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" name="mul" id="mul" <?php if ($mul == 'on') echo 'checked'; ?>>
+                    <label class="form-check-label" for="mul">Multiplication Captcha</label>
+                  </div>
+                  <div class="mb-3">
+                    <label for="allowed" class="form-label">Allowed Characters</label>
+                    <input type="text" class="form-control" id="allowed" name="allowed" value="<?php echo htmlspecialchars($allowed ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="form-text">Characters to use for non-reCAPTCHA captchas</div>
+                  </div>
+                  <div class="mb-3">
+                    <label for="color" class="form-label">Captcha Color</label>
+                    <input type="color" class="form-control form-control-color" id="color" name="color" value="<?php echo htmlspecialchars($color ?? '#000000', ENT_QUOTES, 'UTF-8'); ?>">
+                  </div>
                 </div>
-                <div class="form-check mb-3">
-                  <input class="form-check-input" type="checkbox" name="mul" id="mul" <?php if ($mul == 'on') echo 'checked'; ?>>
-                  <label class="form-check-label" for="mul">Multiplication Captcha</label>
+                <div id="recaptcha-settings" style="<?php echo $mode == 'reCAPTCHA' ? '' : 'display: none;'; ?>">
+                  <div class="mb-3">
+                    <label for="recaptcha_version" class="form-label">reCAPTCHA Version</label>
+                    <select class="form-select" id="recaptcha_version" name="recaptcha_version">
+                      <option value="v2" <?php if ($recaptcha_version == 'v2') echo 'selected'; ?>>reCAPTCHA v2</option>
+                      <option value="v3" <?php if ($recaptcha_version == 'v3') echo 'selected'; ?>>reCAPTCHA v3</option>
+                    </select>
+                  </div>
+                  <div class="mb-3">
+                    <label for="recaptcha_sitekey" class="form-label">reCAPTCHA Site Key</label>
+                    <input type="text" class="form-control" id="recaptcha_sitekey" name="recaptcha_sitekey" value="<?php echo htmlspecialchars($recaptcha_sitekey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="form-text">Obtain from <a href="https://www.google.com/recaptcha/admin" target="_blank" rel="noopener">Google reCAPTCHA Admin</a></div>
+                  </div>
+                  <div class="mb-3">
+                    <label for="recaptcha_secretkey" class="form-label">reCAPTCHA Secret Key</label>
+                    <input type="text" class="form-control" id="recaptcha_secretkey" name="recaptcha_secretkey" value="<?php echo htmlspecialchars($recaptcha_secretkey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                  </div>
                 </div>
-                <div class="mb-3">
-                  <label for="allowed" class="form-label">Allowed Characters</label>
-                  <input type="text" class="form-control" id="allowed" name="allowed" value="<?php echo htmlspecialchars($allowed ?? '', ENT_QUOTES, 'UTF-8'); ?>">
-                  <div class="form-text">Characters to use for non-reCAPTCHA captchas</div>
-                </div>
-                <div class="mb-3">
-                  <label for="color" class="form-label">Captcha Color</label>
-                  <input type="color" class="form-control form-control-color" id="color" name="color" value="<?php echo htmlspecialchars($color ?? '#000000', ENT_QUOTES, 'UTF-8'); ?>">
-                </div>
-                <div class="mb-3">
-                  <label for="recaptcha_sitekey" class="form-label">reCAPTCHA Site Key</label>
-                  <input type="text" class="form-control" id="recaptcha_sitekey" name="recaptcha_sitekey" value="<?php echo htmlspecialchars($recaptcha_sitekey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
-                  <div class="form-text">Obtain from <a href="https://www.google.com/recaptcha/admin" target="_blank" rel="noopener">Google reCAPTCHA Admin</a></div>
-                </div>
-                <div class="mb-3">
-                  <label for="recaptcha_secretkey" class="form-label">reCAPTCHA Secret Key</label>
-                  <input type="text" class="form-control" id="recaptcha_secretkey" name="recaptcha_secretkey" value="<?php echo htmlspecialchars($recaptcha_secretkey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                <div id="turnstile-settings" style="<?php echo $mode == 'turnstile' ? '' : 'display: none;'; ?>">
+                  <div class="mb-3">
+                    <label for="turnstile_sitekey" class="form-label">Turnstile Site Key</label>
+                    <input type="text" class="form-control" id="turnstile_sitekey" name="turnstile_sitekey" value="<?php echo htmlspecialchars($turnstile_sitekey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="form-text">Obtain from <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare Dashboard</a></div>
+                  </div>
+                  <div class="mb-3">
+                    <label for="turnstile_secretkey" class="form-label">Turnstile Secret Key</label>
+                    <input type="text" class="form-control" id="turnstile_secretkey" name="turnstile_secretkey" value="<?php echo htmlspecialchars($turnstile_secretkey ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                  </div>
                 </div>
                 <input type="hidden" name="cap" value="cap" />
                 <button type="submit" class="btn btn-primary">Save</button>
-                <button type="button" id="test-recaptcha" class="btn btn-outline-primary ms-2">Test reCAPTCHA</button>
+                <button type="button" id="test-recaptcha" class="btn btn-outline-primary ms-2" style="<?php echo $mode == 'reCAPTCHA' ? '' : 'display: none;'; ?>">Test reCAPTCHA</button>
+                <button type="button" id="test-turnstile" class="btn btn-outline-primary ms-2" style="<?php echo $mode == 'turnstile' ? '' : 'display: none;'; ?>">Test Turnstile</button>
               </form>
             </div>
-
             <!-- Mail -->
             <div class="tab-pane fade <?php echo $activeTab==='mail'?'show active':''; ?>" id="mail" role="tabpanel" aria-labelledby="mail-tab">
               <form id="mail-form" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
@@ -753,7 +837,6 @@ if (!in_array($activeTab, $validTabs, true)) {
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" id="test-smtp" class="btn btn-outline-primary ms-2">Test SMTP</button>
               </form>
-
               <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" class="mt-4">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="active_tab" value="<?php echo htmlspecialchars($activeTab, ENT_QUOTES, 'UTF-8'); ?>">
@@ -785,14 +868,12 @@ if (!in_array($activeTab, $validTabs, true)) {
           </div><!-- /.tab-content -->
         </div>
       </div>
-
       <div class="text-muted small mt-3">
         Powered by <a class="text-decoration-none" href="https://phpaste.sourceforge.io" target="_blank">Paste</a>
       </div>
     </div><!-- /.col-lg-10 -->
   </div><!-- /.row -->
 </div><!-- /.container -->
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
 <script>
   // reCAPTCHA TEST
@@ -819,7 +900,30 @@ if (!in_array($activeTab, $validTabs, true)) {
       }
     });
   });
-
+  // Turnstile TEST
+  $('#test-turnstile').on('click', function(e) {
+    e.preventDefault();
+    var $button = $(this);
+    $button.prop('disabled', true).text('Testing...');
+    var formData = $('#captcha-form').serialize() + '&test_turnstile=1&csrf_token=' + encodeURIComponent($('input[name="csrf_token"]').val());
+    $.ajax({
+      url: '<?php echo htmlspecialchars($_SERVER['PHP_SELF'] ?? '', ENT_QUOTES, 'UTF-8'); ?>',
+      type: 'POST',
+      data: formData,
+      dataType: 'json',
+      success: function(response) {
+        $('#message-container').html(response.message);
+        setTimeout(function() { $('#message-container').empty(); }, 6000);
+      },
+      error: function(xhr, status, error) {
+        $('#message-container').html('<div class="alert alert-danger text-center">Failed to test Turnstile: ' + error + '</div>');
+        setTimeout(function() { $('#message-container').empty(); }, 6000);
+      },
+      complete: function() {
+        $button.prop('disabled', false).text('Test Turnstile');
+      }
+    });
+  });
   // SMTP TEST
   $('#test-smtp').on('click', function(e) {
     e.preventDefault();
@@ -844,7 +948,17 @@ if (!in_array($activeTab, $validTabs, true)) {
       }
     });
   });
-
+  // Toggle captcha settings based on mode
+  function toggleCaptchaSettings() {
+    const mode = $('#mode').val();
+    $('#internal-settings').toggle(['Easy', 'Normal', 'Tough'].includes(mode));
+    $('#recaptcha-settings').toggle(mode === 'reCAPTCHA');
+    $('#turnstile-settings').toggle(mode === 'turnstile');
+    $('#test-recaptcha').toggle(mode === 'reCAPTCHA');
+    $('#test-turnstile').toggle(mode === 'turnstile');
+  }
+  $('#mode').on('change', toggleCaptchaSettings);
+  toggleCaptchaSettings(); // Initial toggle on load
   // Keep active tab after Save + support URL hashes
   document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.getElementById('configTabs');
@@ -853,14 +967,12 @@ if (!in_array($activeTab, $validTabs, true)) {
     };
     const initial = '<?php echo htmlspecialchars($activeTab, ENT_QUOTES, "UTF-8"); ?>';
     setHiddenInputs(initial);
-
     tabs?.addEventListener('shown.bs.tab', (e) => {
       const id = e.target?.getAttribute('data-bs-target')?.replace('#','') || 'siteinfo';
       setHiddenInputs(id);
       history.replaceState(null, '', '#' + id);
       try { localStorage.setItem('config.activeTab', id); } catch(e){}
     });
-
     // If URL has hash on load, Bootstrap will handle via markup; localStorage fallback not required here.
   });
 </script>
