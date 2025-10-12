@@ -1,3 +1,38 @@
+[![Download PASTE](https://a.fsdn.com/con/app/sf-download-button)](https://sourceforge.net/projects/phpaste/files/latest/download)
+
+[![Download PASTE](https://img.shields.io/sourceforge/dw/phpaste.svg)](https://sourceforge.net/projects/phpaste/files/latest/download)
+[![Download PASTE](https://img.shields.io/sourceforge/dt/phpaste.svg)](https://sourceforge.net/projects/phpaste/files/latest/download)
+
+Paste is forked from the original source pastebin.com used before it was bought.
+The original source is available from the previous owner's **[GitHub repository](https://github.com/lordelph/pastebin)**
+
+A public version can be found **[here](https://paste.boxlabs.uk/)**
+
+<table>
+  <tr>
+    <td><img src="https://paste.boxlabs.uk/demoimg/editor.png" alt="editormobile" width = 279px height = auto></td>
+    <td><img src="https://paste.boxlabs.uk/demoimg/editor2.png" alt="editor" width = 288px height = auto></td>  
+    <td><img src="https://paste.boxlabs.uk/demoimg/diff.png" alt="diff" width = 279px height = auto></td>
+    <td><img src="https://paste.boxlabs.uk/demoimg/login.png" alt="login" width = 279px height = auto></td>
+    <td><img src="https://paste.boxlabs.uk/demoimg/settings.png" alt="settings" width = 279px height = auto></td>
+    <td><img src="https://paste.boxlabs.uk/demoimg/admin.png" alt="admin panel" width = 279px height = auto></td>
+  </tr>
+</table>
+
+IRC: If you would like support or want to contribute to Paste connect to irc.afternet.org in channel #PASTE
+
+Any bugs can be reported at:
+https://github.com/boxlabss/PASTE/issues/new
+
+Requirements
+===
+ - PHP 8.1 or higher with `pdo_mysql`, `openssl`, and `curl` extensions. `GD` for internal CAPTCHA.
+  - MySQL or MariaDB
+  - Composer for dependency management
+  - Web server (e.g., Apache/Nginx) with HTTPS enabled (if OAuth enabled as below)
+
+See docs/CHANGELOG
+
 Paste 3.2
 =======
 * diff viewer reintegration
@@ -55,36 +90,6 @@ Previous version - 3.0
 * Update Parsedown for Markdown
 * All pastes encrypted in the database with AES-256 by default
 
-[![Download PASTE](https://a.fsdn.com/con/app/sf-download-button)](https://sourceforge.net/projects/phpaste/files/latest/download)
-
-[![Download PASTE](https://img.shields.io/sourceforge/dw/phpaste.svg)](https://sourceforge.net/projects/phpaste/files/latest/download)
-[![Download PASTE](https://img.shields.io/sourceforge/dt/phpaste.svg)](https://sourceforge.net/projects/phpaste/files/latest/download)
-
-Paste is forked from the original source pastebin.com used before it was bought.
-The original source is available from the previous owner's **[GitHub repository](https://github.com/lordelph/pastebin)**
-
-A public version can be found **[here](https://paste.boxlabs.uk/)**
-
-<table style="padding:10px">
-  <tr>
-    <td><img src="https://i.imgur.com/Yrjl8w1.png" align="left" alt="1" width = 279px height = 496px></td>
-    <td><img src="https://i.imgur.com/VleCHjh.png" alt="2" width = 288px height = 512px></td>  
-  </tr>
-</table>
-
-IRC: If you would like support or want to contribute to Paste connect to irc.collectiveirc.net in channel #PASTE
-
-Any bugs can be reported at:
-https://github.com/boxlabss/PASTE/issues/new
-
-Requirements
-===
- - PHP 8.1 or higher with `pdo_mysql`, `openssl`, and `curl` extensions
-  - MySQL or MariaDB
-  - Composer for dependency management
-  - Web server (e.g., Apache/Nginx) with HTTPS enabled (if OAuth enabled as below)
-
-See docs/CHANGELOG
 ---
 Install
 ===
