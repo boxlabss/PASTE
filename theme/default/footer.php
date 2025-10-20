@@ -125,22 +125,130 @@ $captcha_enabled = ($cap_e === 'on' && in_array($mode, ['reCAPTCHA', 'turnstile'
   </div>
 </div>
 <!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js">// Client side passphrase</script>
 <script>
-// Suppress Turnstile-related console logs
-(function() {
-    const originalWarn = console.warn;
-    const originalError = console.error;
-    console.warn = function(...args) {
-        const msg = args[0] || '';
-        if (msg.includes('challenges.cloudflare.com') || msg.includes('preloaded') || msg.includes('401') || msg.includes('default-src') || msg.includes('Private Access Token')) return;
-        originalWarn.apply(console, args);
-    };
-    console.error = function(...args) {
-        const msg = args[0] || '';
-        if (msg.includes('challenges.cloudflare.com') || msg.includes('preloaded') || msg.includes('401') || msg.includes('default-src') || msg.includes('Private Access Token')) return;
-        originalError.apply(console, args);
-    };
-})();
+document.addEventListener('DOMContentLoaded', function() {
+  var encryptModalEl = document.getElementById('encryptPassModal');
+  var encryptModal = new bootstrap.Modal(encryptModalEl);
+  var encryptChk = document.getElementById('client_encrypt');
+  var encryptInput = document.getElementById('encryptPassInput');
+  var strengthBar = document.getElementById('passStrengthBar');
+  var strengthText = document.getElementById('passStrengthText');
+  var encryptConfirm = document.getElementById('encryptConfirm');
+  var toggleEncryptPass = document.getElementById('toggleEncryptPass');
+  var encryptPassIcon = document.getElementById('encryptPassIcon');
+  var mainForm = document.getElementById('mainForm');
+  var clientPass = ''; // Temporary store for client passphrase (cleared after use)
+
+  // Show modal on checkbox tick
+  encryptChk.addEventListener('change', function() {
+    if (this.checked) {
+      encryptModal.show();
+      encryptInput.focus();
+    } else {
+      encryptModal.hide();
+      document.getElementById('is_client_encrypted').value = '0'; // Reset flag
+    }
+  });
+
+  // Toggle password visibility
+  toggleEncryptPass.addEventListener('click', function() {
+    if (encryptInput.type === 'password') {
+      encryptInput.type = 'text';
+      encryptPassIcon.className = 'bi bi-eye-slash'; // Hide icon
+    } else {
+      encryptInput.type = 'password';
+      encryptPassIcon.className = 'bi bi-eye'; // Show icon
+    }
+  });
+
+  // Strength meter
+  encryptInput.addEventListener('input', function() {
+    var val = this.value;
+    var result = zxcvbn(val);
+    var strength = result.score;
+    var labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    var colors = ['bg-danger', 'bg-warning', 'bg-info', 'bg-primary', 'bg-success'];
+    var widths = [20, 40, 60, 80, 100];
+    
+    strengthBar.style.width = widths[strength] + '%';
+    strengthBar.className = 'progress-bar ' + colors[strength];
+    strengthText.textContent = 'Strength: ' + labels[strength];
+    
+    encryptConfirm.disabled = (val.length < 12 || strength < 2);
+  });
+
+  // Clear on hide ONLY if not encrypted
+  encryptModalEl.addEventListener('hidden.bs.modal', function() {
+    encryptInput.value = '';
+    strengthBar.style.width = '0%';
+    strengthText.textContent = 'Strength: Weak';
+    encryptConfirm.disabled = true;
+    if (encryptChk.checked && document.getElementById('is_client_encrypted').value !== '1') {
+      encryptChk.checked = false; // Untick only if cancelled (flag not set)
+      document.getElementById('is_client_encrypted').value = '0';
+    }
+    // Reset password type and icon
+    encryptInput.type = 'password';
+    encryptPassIcon.className = 'bi bi-eye';
+  });
+
+  // Confirm: Encrypt
+  encryptConfirm.addEventListener('click', async function() {
+    var pass = encryptInput.value.trim();
+    if (encryptConfirm.disabled) return;
+    clientPass = pass; // Store for later #pass= append (client-side only)
+    var dataField = document.querySelector('[name="paste_data"]');
+    var data = new TextEncoder().encode(dataField.value);
+    
+    // Derive key (PBKDF2)
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var keyMaterial = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits', 'deriveKey']
+    );
+    var key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      keyMaterial, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
+    );
+    
+    // Encrypt
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    var encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+    
+    // Combine
+    var combined = new Uint8Array(salt.byteLength + iv.byteLength + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.byteLength);
+    combined.set(new Uint8Array(encrypted), salt.byteLength + iv.byteLength);
+    
+    dataField.value = btoa(String.fromCharCode(...combined));
+    document.getElementById('is_client_encrypted').value = '1';
+    encryptModal.hide();
+  });
+
+  // Intercept submit for client-encrypted pastes: Use fetch to get redirect URL, append #pass= client-side
+  mainForm.addEventListener('submit', function(e) {
+    if (document.getElementById('is_client_encrypted').value === '1' && clientPass) {
+      e.preventDefault();
+      fetch(this.action, {
+        method: 'POST',
+        body: new FormData(this),
+        credentials: 'same-origin' // Include cookies/sessions
+      }).then(res => {
+        if (res.redirected || res.ok) {
+          let url = res.url;
+          window.location.href = url + '#pass=' + encodeURIComponent(clientPass);
+          clientPass = ''; // Clear sensitive data
+        } else {
+          return res.text().then(text => { throw new Error(text || 'Submit failed'); });
+        }
+      }).catch(err => {
+        alert('Error creating paste: ' + err.message);
+      });
+    }
+    // For non-client-encrypted, normal submit (with server password if set)
+  });
+});
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script src="<?php echo htmlspecialchars($baseurl . 'theme/' . ($default_theme ?? 'default') . '/js/paste.min.js', ENT_QUOTES, 'UTF-8'); ?>"></script>

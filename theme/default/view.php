@@ -418,11 +418,35 @@ if (!function_exists('render_comment_node')) {
               <!-- Code block: movable into fullscreen modal -->
               <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
               <span id="code-content-home"></span>
+			<!-- Decryption Passphrase Modal -->
+			<div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
+			  <div class="modal-dialog">
+				<div class="modal-content">
+				  <div class="modal-header">
+					<h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				  </div>
+				  <div class="modal-body">
+					<p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
+					<div class="input-group mb-3">
+					  <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
+					  <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
+						<i class="bi bi-eye" id="decryptPassIcon"></i>
+					  </button>
+					</div>
+				  </div>
+				  <div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
+				  </div>
+				</div>
+			  </div>
+			</div>
             <?php endif; ?>
 
             <!-- Raw paste (lazy load; JS wraps textarea later) -->
             <div class="mb-3 position-relative" id="raw-block"
-                 data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? '')), ENT_QUOTES, 'UTF-8'); ?>">
+                 data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? ''))); ?>">
               <p><?php echo htmlspecialchars($lang['rawpaste'] ?? 'Raw Paste'); ?></p>
             <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm"><?php echo htmlspecialchars($lang['loadraw'] ?? 'Load Raw', ENT_QUOTES, 'UTF-8'); ?></button>
               <textarea class="form-control d-none" rows="15" id="code" readonly></textarea>
@@ -470,76 +494,103 @@ if (!function_exists('render_comment_node')) {
                               $geshiformats     = $geshiformats ?? [];
                               $popular_formats  = $popular_formats ?? [];
                               foreach ($geshiformats as $code => $name) {
-                                  if (in_array($code, $popular_formats)) {
-                                      $sel = ($effective_code === $code) ? 'selected' : '';
-                                      echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+                              if (in_array($code, $popular_formats)) {
+                                  $sel = ($effective_code === $code) ? 'selected' : '';
+                                  echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
                                   }
                               }
                               echo '<option value="text">-------------------------------------</option>';
                               foreach ($geshiformats as $code => $name) {
                                   if (!in_array($code, $popular_formats)) {
-                                      $sel = ($effective_code === $code) ? 'selected' : '';
-                                      echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+                                  $sel = ($effective_code === $code) ? 'selected' : '';
+                                  echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
                                   }
                               }
                             ?>
                           </select>
                         </div>
-						<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
-						  <a class="btn btn-secondary btn-sm highlight-line" href="#" title="Highlight selected lines">
-							<i class="bi bi-text-indent-left"></i> Highlight
-						  </a>
-						  <!-- Load file -->
-						  <button type="button" class="btn btn-outline-secondary btn-sm" id="load_file_btn" title="Load file into editor (no upload)">
-							<i class="bi bi-upload"></i> Load
-						  </button>
-						  
-							<!-- Clear -->
-								<button type="button" class="btn btn-outline-secondary btn-sm" id="clear_file_btn" title="Clear editor">
-								  <i class="bi bi-x-circle"></i> Clear
-								</button>
-								
-						  <!-- Accepted formats -->
-						  <input type="file" id="code_file" class="visually-hidden"
-								 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
-						</div>
+                        <div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+                          <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines">
+                            <i class="bi bi-text-indent-left"></i> Highlight
+                          </a>
+                          <!-- Load file -->
+                          <button type="button" class="btn btn-outline-secondary" id="load_file_btn" title="Load file into editor (no upload)">
+                            <i class="bi bi-upload"></i> Load
+                          </button>
+                          <!-- Clear -->
+                          <button type="button" class="btn btn-outline-secondary" id="clear_file_btn" title="Clear editor">
+                            <i class="bi bi-x-circle"></i> Clear
+                          </button>
+                          <!-- Accepted formats -->
+                          <input type="file" id="code_file" class="visually-hidden"
+                                 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+                        </div>
                       </div>
-
+                      <!-- For screen readers -->
+                      <div id="file-announce" class="visually-hidden" aria-live="polite"></div>
                       <div class="mb-3">
-                        <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="helloworld"><?php echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                        <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world" data-max-bytes="<?php echo 1024*1024*($pastelimit ?? 10); ?>"><?php echo htmlspecialchars($paste_data ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                       </div>
-
                       <div class="row mb-3">
                         <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['expiration'] ?? 'Expiration'); ?></label>
                         <div class="col-sm-10">
                           <select class="form-select" name="paste_expire_date">
-                            <option value="N"    <?php echo ($p_expire_date ?? 'N')  == "N"    ? 'selected' : ''; ?>>Never</option>
-                            <option value="self" <?php echo ($p_expire_date ?? 'N')  == "self" ? 'selected' : ''; ?>>View Once</option>
-                            <option value="10M"  <?php echo ($p_expire_date ?? 'N')  == "10M"  ? 'selected' : ''; ?>>10 Minutes</option>
-                            <option value="1H"   <?php echo ($p_expire_date ?? 'N')  == "1H"   ? 'selected' : ''; ?>>1 Hour</option>
-                            <option value="1D"   <?php echo ($p_expire_date ?? 'N')  == "1D"   ? 'selected' : ''; ?>>1 Day</option>
-                            <option value="1W"   <?php echo ($p_expire_date ?? 'N')  == "1W"   ? 'selected' : ''; ?>>1 Week</option>
-                            <option value="2W"   <?php echo ($p_expire_date ?? 'N')  == "2W"   ? 'selected' : ''; ?>>2 Weeks</option>
-                            <option value="1M"   <?php echo ($p_expire_date ?? 'N')  == "1M"   ? 'selected' : ''; ?>>1 Month</option>
+                            <option value="N" <?php echo ($paste_expire_date ?? 'N') == "N" ? 'selected' : ''; ?>>Never</option>
+                            <option value="self" <?php echo ($paste_expire_date ?? 'N') == "self" ? 'selected' : ''; ?>>View Once</option>
+                            <option value="10M" <?php echo ($paste_expire_date ?? 'N') == "10M" ? 'selected' : ''; ?>>10 Minutes</option>
+                            <option value="1H" <?php echo ($paste_expire_date ?? 'N') == "1H" ? 'selected' : ''; ?>>1 Hour</option>
+                            <option value="1D" <?php echo ($paste_expire_date ?? 'N') == "1D" ? 'selected' : ''; ?>>1 Day</option>
+                            <option value="1W" <?php echo ($paste_expire_date ?? 'N') == "1W" ? 'selected' : ''; ?>>1 Week</option>
+                            <option value="2W" <?php echo ($paste_expire_date ?? 'N') == "2W" ? 'selected' : ''; ?>>2 Weeks</option>
+                            <option value="1M" <?php echo ($paste_expire_date ?? 'N') == "1M" ? 'selected' : ''; ?>>1 Month</option>
                           </select>
                         </div>
                       </div>
-
                       <div class="row mb-3">
                         <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                         <div class="col-sm-10">
                           <select class="form-select" name="visibility">
-							  <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
-							  <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
-							  <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
+                            <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
+                            <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
+                            <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
                           </select>
                         </div>
                       </div>
-
                       <div class="mb-3">
                         <div class="input-group">
                           <span class="input-group-text"><i class="bi bi-lock"></i></span>
                           <input type="text" class="form-control" name="pass" id="pass" placeholder="<?php echo htmlspecialchars($lang['pwopt'] ?? 'Optional Password'); ?>">
+                        </div>
+                      </div>
+                      <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="client_encrypt" name="client_encrypt">
+                        <label class="form-check-label" for="client_encrypt">Client side encryption?</label>
+                      </div>
+                      <input type="hidden" name="is_client_encrypted" id="is_client_encrypted" value="0">
+                      <!-- Encryption Passphrase Modal -->
+                      <div class="modal fade" id="encryptPassModal" tabindex="-1" aria-labelledby="encryptPassLabel" aria-hidden="true">
+                        <div class="modal-dialog">
+                          <div class="modal-content">
+                            <div class="modal-header">
+                              <h5 class="modal-title" id="encryptPassLabel">Set Encryption Passphrase</h5>
+                              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                              <p>Enter a strong passphrase (and remember it):</p>
+                              <input type="password" class="form-control" name="encrypt_pass" id="encryptPassInput" autocomplete="off">
+                              <div class="mt-2">
+                                <div class="progress" style="--height: 5px;">
+                                  <div id="passStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                                </div>
+                                <small id="passStrengthText" class="text-muted">Strength: Weak</small>
+                              </div>
+                              <small class="text-muted d-block mt-1">Min 12 characters; mix upper/lower, numbers, symbols.</small>
+                            </div>
+                            <div class="modal-footer">
+                              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                              <button type="button" class="btn btn-primary" id="encryptConfirm" disabled>Encrypt</button>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
@@ -555,7 +606,7 @@ if (!function_exists('render_comment_node')) {
                           <a class="btn btn-outline-secondary paste-button"
                              href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
                              title="View differences from parent">
-							<i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
+                          <i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                           </a>
                         <?php endif; ?>
                       </div>
@@ -573,17 +624,17 @@ if (!function_exists('render_comment_node')) {
                 <div class="modal-header">
                   <h5 class="modal-title" id="fullscreenModalLabel"><?php echo htmlspecialchars($p_title ?? 'Untitled'); ?></h5>
                   <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
-                  <div class="ms-2" style="min-width:180px">
-                    <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                      <?php foreach ($hl_theme_options as $opt): 
-                            $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
-                      ?>
-                        <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
-                          <?php echo htmlspecialchars($opt['name']); ?>
-                        </option>
-                      <?php endforeach; ?>
-                    </select>
-                  </div>
+                    <div class="ms-2" style="min-width:180px">
+                      <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
+                        <?php foreach ($hl_theme_options as $opt): 
+                              $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
+                        ?>
+                          <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
+                            <?php echo htmlspecialchars($opt['name']); ?>
+                          </option>
+                        <?php endforeach; ?>
+                      </select>
+                    </div>
                   <?php endif; ?>
                   <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
@@ -622,8 +673,7 @@ if (!function_exists('render_comment_node')) {
             </div>
           </div>
           <?php endif; ?>
-
-        </div>
+      </div>
 
         <!-- ===== Comments (Private) ===== -->
         <?php if ($show_comments_ui): ?>
@@ -802,7 +852,7 @@ if (!function_exists('render_comment_node')) {
       <?php endif; ?>
     </div>
 
-    <div class="sidebar-below<?php echo (isset($privatesite) && $privatesite === 'on') ? ' sidebar-below' : ''; ?>">
+    <div class="sidebar-below<?php echo (isset($privatesite) && $privatesite === "on") ? ' sidebar-below' : ''; ?>">
       <?php require_once('theme/' . ($default_theme ?? 'default') . '/sidebar.php'); ?>
     </div>
 
@@ -912,11 +962,34 @@ if (!function_exists('render_comment_node')) {
             <!-- Code block: movable into fullscreen modal -->
             <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
             <span id="code-content-home"></span>
+			<!-- Decryption Passphrase Modal -->
+			<div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
+			  <div class="modal-dialog">
+				<div class="modal-content">
+				  <div class="modal-header">
+					<h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				  </div>
+				  <div class="modal-body">
+					<p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
+					<div class="input-group mb-3">
+					  <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
+					  <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
+						<i class="bi bi-eye" id="decryptPassIcon"></i>
+					  </button>
+					</div>
+				  </div>
+				  <div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
+				  </div>
+				</div>
+			  </div>
+			</div>
           <?php endif; ?>
-
           <!-- Raw paste (lazy load; textarea prefilled as fallback) -->
           <div class="mb-3 position-relative" id="raw-block"
-               data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? '')), ENT_QUOTES, 'UTF-8'); ?>">
+               data-raw-url="<?php echo htmlspecialchars($p_raw ?? ($baseurl . '/raw.php?id=' . ($paste_id ?? ''))); ?>">
             <p><?php echo htmlspecialchars($lang['rawpaste'] ?? 'Raw Paste'); ?></p>
             <button type="button" id="load-raw" class="btn btn-outline-secondary btn-sm"><?php echo htmlspecialchars($lang['loadraw'] ?? 'Load Raw', ENT_QUOTES, 'UTF-8'); ?></button>
             <textarea class="form-control d-none" rows="15" id="code" readonly><?php
@@ -982,53 +1055,49 @@ if (!function_exists('render_comment_node')) {
                           ?>
                         </select>
                       </div>
-
-						<div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
-						  <a class="btn btn-secondary btn-sm highlight-line" href="#" title="Highlight selected lines">
-							<i class="bi bi-text-indent-left"></i> Highlight
-						  </a>
-						<?php if ($diffQuickUrl): ?>
-						  <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
-							 class="btn btn-secondary btn-sm" title="View differences">
-							<i class="bi bi-arrow-left-right"></i> Make.diff
-						  </a>
-						<?php endif; ?>
-						  <!-- Load file -->
-						  <button type="button" class="btn btn-outline-secondary btn-sm" id="load_file_btn" title="Load file into editor (no upload)">
-							<i class="bi bi-upload"></i> Load
-						  </button>
-						  
-							<!-- Clear -->
-								<button type="button" class="btn btn-outline-secondary btn-sm" id="clear_file_btn" title="Clear editor">
-								  <i class="bi bi-x-circle"></i> Clear
-								</button>
-								
-						  <!-- Accepted formats -->
-						  <input type="file" id="code_file" class="visually-hidden"
-								 accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
-						</div>
+                      <div class="col-sm-4 d-flex justify-content-end align-items-center gap-2">
+                        <a class="btn btn-secondary highlight-line" href="#" title="Highlight selected lines">
+                          <i class="bi bi-text-indent-left"></i> Highlight
+                        </a>
+                        <?php if ($diffQuickUrl): ?>
+                          <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                             class="btn btn-secondary" title="View differences">
+                            <i class="bi bi-arrow-left-right"></i> .diff
+                          </a>
+                        <?php endif; ?>
+                        <!-- Load file -->
+                        <button type="button" class="btn btn-outline-secondary" id="load_file_btn" title="Load file into editor (no upload)">
+                          <i class="bi bi-upload"></i> Load
+                        </button>
+                        <!-- Clear -->
+                        <button type="button" class="btn btn-outline-secondary" id="clear_file_btn" title="Clear editor">
+                          <i class="bi bi-x-circle"></i> Clear
+                        </button>
+                        <!-- Accepted formats -->
+                        <input type="file" id="code_file" class="visually-hidden"
+                               accept=".txt,.md,.php,.js,.ts,.jsx,.tsx,.py,.rb,.java,.c,.cpp,.h,.cs,.go,.rs,.kt,.swift,.sh,.ps1,.sql,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.ini,.conf,text/*">
+                      </div>
                     </div>
-					
+                    <!-- For screen readers -->
+                    <div id="file-announce" class="visually-hidden" aria-live="polite"></div>
                     <div class="mb-3">
-                      <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="helloworld"><?php echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
+                      <textarea class="form-control" rows="15" id="edit-code" name="paste_data" placeholder="hello world" data-max-bytes="<?php echo 1024*1024*($pastelimit ?? 10); ?>"><?php echo htmlspecialchars($op_content ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
                     </div>
-
                     <div class="row mb-3">
                       <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['expiration'] ?? 'Expiration'); ?></label>
                       <div class="col-sm-10">
                         <select class="form-select" name="paste_expire_date">
-                          <option value="N"    <?php echo ($p_expire_date ?? 'N')  == "N"    ? 'selected' : ''; ?>>Never</option>
-                          <option value="self" <?php echo ($p_expire_date ?? 'N')  == "self" ? 'selected' : ''; ?>>View Once</option>
-                          <option value="10M"  <?php echo ($p_expire_date ?? 'N')  == "10M"  ? 'selected' : ''; ?>>10 Minutes</option>
-                          <option value="1H"   <?php echo ($p_expire_date ?? 'N')  == "1H"   ? 'selected' : ''; ?>>1 Hour</option>
-                          <option value="1D"   <?php echo ($p_expire_date ?? 'N')  == "1D"   ? 'selected' : ''; ?>>1 Day</option>
-                          <option value="1W"   <?php echo ($p_expire_date ?? 'N')  == "1W"   ? 'selected' : ''; ?>>1 Week</option>
-                          <option value="2W"   <?php echo ($p_expire_date ?? 'N')  == "2W"   ? 'selected' : ''; ?>>2 Weeks</option>
-                          <option value="1M"   <?php echo ($p_expire_date ?? 'N')  == "1M"   ? 'selected' : ''; ?>>1 Month</option>
+                          <option value="N" <?php echo ($paste_expire_date ?? 'N') == "N" ? 'selected' : ''; ?>>Never</option>
+                          <option value="self" <?php echo ($paste_expire_date ?? 'N') == "self" ? 'selected' : ''; ?>>View Once</option>
+                          <option value="10M" <?php echo ($paste_expire_date ?? 'N') == "10M" ? 'selected' : ''; ?>>10 Minutes</option>
+                          <option value="1H" <?php echo ($paste_expire_date ?? 'N') == "1H" ? 'selected' : ''; ?>>1 Hour</option>
+                          <option value="1D" <?php echo ($paste_expire_date ?? 'N') == "1D" ? 'selected' : ''; ?>>1 Day</option>
+                          <option value="1W" <?php echo ($paste_expire_date ?? 'N') == "1W" ? 'selected' : ''; ?>>1 Week</option>
+                          <option value="2W" <?php echo ($paste_expire_date ?? 'N') == "2W" ? 'selected' : ''; ?>>2 Weeks</option>
+                          <option value="1M" <?php echo ($paste_expire_date ?? 'N') == "1M" ? 'selected' : ''; ?>>1 Month</option>
                         </select>
                       </div>
                     </div>
-
                     <div class="row mb-3">
                       <label class="col-sm-2 col-form-label"><?php echo htmlspecialchars($lang['visibility'] ?? 'Visibility'); ?></label>
                       <div class="col-sm-10">
@@ -1039,11 +1108,46 @@ if (!function_exists('render_comment_node')) {
                         </select>
                       </div>
                     </div>
-
                     <div class="mb-3">
                       <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-lock"></i></span>
                         <input type="text" class="form-control" name="pass" id="pass" placeholder="<?php echo htmlspecialchars($lang['pwopt'] ?? 'Optional Password'); ?>">
+                      </div>
+                    </div>
+                    <div class="mb-3 form-check">
+                      <input type="checkbox" class="form-check-input" id="client_encrypt" name="client_encrypt">
+                      <label class="form-check-label" for="client_encrypt">Enable client side encryption? AES-256-GCM</label>
+                    </div>
+                    <input type="hidden" name="is_client_encrypted" id="is_client_encrypted" value="0">
+                    <!-- Encryption Passphrase Modal -->
+                    <div class="modal fade" id="encryptPassModal" tabindex="-1" aria-labelledby="encryptPassLabel" aria-hidden="true">
+                      <div class="modal-dialog">
+                        <div class="modal-content">
+                          <div class="modal-header">
+                            <h5 class="modal-title" id="encryptPassLabel">Set Encryption Passphrase</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                          </div>
+                          <div class="modal-body">
+                            <p>Enter a strong passphrase (and remember it):</p>
+                            <div class="input-group mb-3">
+                              <input type="password" class="form-control" id="encryptPassInput" autocomplete="new-password" placeholder="Enter passphrase">
+                              <button type="button" class="btn btn-outline-secondary" id="toggleEncryptPass" title="Show/Hide Password">
+                                <i class="bi bi-eye" id="encryptPassIcon"></i>
+                              </button>
+                            </div>
+                            <div class="mt-2">
+                              <div class="progress" style="--height: 5px;">
+                                <div id="passStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                              </div>
+                              <small id="passStrengthText" class="text-muted">Strength: Weak</small>
+                            </div>
+                            <small class="text-muted d-block mt-1">Min 12 characters; mix upper/lower, numbers, symbols.</small>
+                          </div>
+                          <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="encryptConfirm" disabled>Encrypt</button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1058,9 +1162,8 @@ if (!function_exists('render_comment_node')) {
                         <!-- Diff link styled like a button -->
                         <a class="btn btn-outline-secondary paste-button"
                            href="<?php echo htmlspecialchars($diffUrl, ENT_QUOTES, 'UTF-8'); ?>"
-						   name="diff"
                            title="View differences from parent">
-						<i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
+                        <i class="bi bi-arrow-left-right"></i> <?php echo htmlspecialchars($lang['viewdifferences'] ?? 'View differences', ENT_QUOTES, 'UTF-8'); ?>
                         </a>
                       <?php endif; ?>
                     </div>
@@ -1078,17 +1181,17 @@ if (!function_exists('render_comment_node')) {
               <div class="modal-header">
                 <h5 class="modal-title" id="fullscreenModalLabel"><?php echo htmlspecialchars($p_title ?? 'Untitled'); ?></h5>
                 <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
-                <div class="ms-2" style="min-width:180px">
-                  <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                    <?php foreach ($hl_theme_options as $opt): 
-                          $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
-                    ?>
-                      <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
-                        <?php echo htmlspecialchars($opt['name']); ?>
-                      </option>
-                    <?php endforeach; ?>
-                  </select>
-                </div>
+                  <div class="ms-2" style="min-width:180px">
+                    <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
+                      <?php foreach ($hl_theme_options as $opt): 
+                            $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
+                      ?>
+                        <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
+                          <?php echo htmlspecialchars($opt['name']); ?>
+                        </option>
+                      <?php endforeach; ?>
+                    </select>
+                  </div>
                 <?php endif; ?>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
@@ -1127,7 +1230,6 @@ if (!function_exists('render_comment_node')) {
           </div>
         </div>
         <?php endif; ?>
-
       </div>
 
       <!-- ===== Comments (Public) ===== -->
@@ -1314,3 +1416,209 @@ if (!function_exists('render_comment_node')) {
 <?php endif; ?>
   </div>
 </div>
+
+<?php if (isset($is_client_encrypted) && $is_client_encrypted): ?>
+<!-- Hidden inputs for raw base64 and original language -->
+<input type="hidden" id="rawEncryptedData" value="<?php echo htmlspecialchars($raw_base64 ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+<input type="hidden" id="originalLanguage" value="<?php echo htmlspecialchars($original_p_code ?? 'plaintext', ENT_QUOTES, 'UTF-8'); ?>">
+
+<!-- Load Highlight.js only for client-encrypted pastes -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+  var decryptModalEl = document.getElementById('decryptPassModal');
+  var decryptModal = new bootstrap.Modal(decryptModalEl, { backdrop: true });
+
+  var decryptInput = document.getElementById('decryptPassInput');
+  var decryptConfirm = document.getElementById('decryptConfirm');
+  var toggleDecryptPass = document.getElementById('toggleDecryptPass');
+  var decryptPassIcon = document.getElementById('decryptPassIcon');
+  var codeEl = document.querySelector('.code-content');
+  var rawEncInput = document.getElementById('rawEncryptedData');
+  var origLangInput = document.getElementById('originalLanguage');
+  var langLabelEl = document.querySelector('.meta .badge.bg-primary');
+
+  if (!codeEl || !rawEncInput || !origLangInput || !langLabelEl) {
+    console.error('Required elements not found');
+    return;
+  }
+
+  // Check for #pass= in URL fragment (client-side only)
+  const urlParams = new URLSearchParams(location.hash.substring(1));
+  const urlPass = urlParams.get('pass') || '';
+
+  // Language mapping
+  function mapToHlLang(code) {
+    const map = {
+      'text': 'plaintext',
+      'html5': 'xml',
+      'html4strict': 'xml',
+      'php-brief': 'php',
+      'pycon': 'python',
+      'postgresql': 'pgsql',
+      'dos': 'dos',
+      'vb': 'vbnet',
+      'autodetect': 'plaintext'
+    };
+    return map[code.toLowerCase()] || code.toLowerCase();
+  }
+
+  // Build line-numbered wrapper
+  function wrapWithLines(highlightedHtml, hlLang) {
+    const lines = highlightedHtml.split('\n');
+    const digits = Math.max(2, lines.length.toString().length);
+    const ol = document.createElement('ol');
+    ol.className = 'hljs-ln';
+    ol.style.setProperty('--ln-digits', digits);
+
+    lines.forEach((lineHtml, i) => {
+      const li = document.createElement('li');
+      li.className = 'hljs-ln-line';
+
+      const n = document.createElement('span');
+      n.className = 'hljs-ln-n';
+      n.textContent = (i + 1);
+
+      const c = document.createElement('span');
+      c.className = 'hljs-ln-c';
+      c.innerHTML = lineHtml;
+
+      li.appendChild(n);
+      li.appendChild(c);
+      ol.appendChild(li);
+    });
+
+    const code = document.createElement('code');
+    code.className = `hljs language-${hlLang}`;
+    code.appendChild(ol);
+
+    const pre = document.createElement('pre');
+    pre.className = 'hljs';
+    pre.appendChild(code);
+
+    return pre;
+  }
+
+  // Decrypt
+  async function performDecryption(pass) {
+    var encBase64 = rawEncInput.value.trim().replace(/^["']|["']$/g, '');
+    try {
+      var combined = Uint8Array.from(atob(encBase64), c => c.charCodeAt(0));
+      if (combined.length < 28) throw new Error('Decoded data too short');
+      var salt = combined.slice(0, 16);
+      var iv = combined.slice(16, 28);
+      var encrypted = combined.slice(28);
+
+      var keyMaterial = await crypto.subtle.importKey(
+        'raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits', 'deriveKey']
+      );
+      var key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+        keyMaterial, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
+      );
+
+      var decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+      var decText = new TextDecoder().decode(decrypted);
+
+      // Highlighting and line numbers
+      var lang = mapToHlLang(origLangInput.value || 'plaintext');
+      var highlightedHtml, hlLang;
+      if (hljs) {
+        try {
+          if (lang === 'plaintext' && origLangInput.value.toLowerCase() === 'autodetect') {
+            const result = hljs.highlightAuto(decText);
+            highlightedHtml = result.value;
+            hlLang = result.language || 'plaintext';
+          } else {
+            highlightedHtml = hljs.highlight(decText, { language: lang }).value;
+            hlLang = lang;
+          }
+        } catch (e) {
+          console.warn('Highlight.js failed for lang:', lang, e);
+          highlightedHtml = decText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          hlLang = 'plaintext';
+        }
+      } else {
+        highlightedHtml = decText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        hlLang = 'plaintext';
+      }
+
+      var wrapped = wrapWithLines(highlightedHtml, hlLang);
+      codeEl.innerHTML = '';
+      codeEl.appendChild(wrapped);
+      langLabelEl.textContent = origLangInput.value.toUpperCase() || 'PLAINTEXT';
+
+      return { success: true };
+    } catch (e) {
+      console.error('Decryption failed:', e.message);
+      return { success: false, error: e.message || 'Wrong passphrase or corrupted data?' };
+    }
+  }
+
+  // Toggle password visibility
+  toggleDecryptPass.addEventListener('click', function() {
+    if (decryptInput.type === 'password') {
+      decryptInput.type = 'text';
+      decryptPassIcon.className = 'bi bi-eye-slash';
+    } else {
+      decryptInput.type = 'password';
+      decryptPassIcon.className = 'bi bi-eye';
+    }
+  });
+
+  // Clear error on modal show
+  decryptModalEl.addEventListener('show.bs.modal', function() {
+    const errorMsg = this.querySelector('.alert-danger');
+    if (errorMsg) errorMsg.remove();
+  });
+
+  // Handle auto-decrypt with #pass= and fallback to modal
+  let decryptionAttempted = false;
+  let autoDecryptError = null;
+  if (urlPass && !decryptionAttempted) {
+    decryptionAttempted = true;
+    const result = await performDecryption(urlPass);
+    if (result.success) {
+      // Auto-decrypt worked, no modal needed
+      return;
+    }
+    autoDecryptError = result.error; // Store error for modal display
+  }
+
+  // Show modal if no valid #pass= or decryption failed
+  if (!decryptionAttempted || autoDecryptError) {
+    decryptModal.show();
+    if (autoDecryptError) {
+      const body = decryptModalEl.querySelector('.modal-body');
+      const errorMsg = document.createElement('div');
+      errorMsg.className = 'alert alert-danger mt-2';
+      errorMsg.textContent = 'Auto-decrypt failed: ' + autoDecryptError;
+      body.appendChild(errorMsg);
+    }
+  }
+
+  decryptConfirm.onclick = async function() {
+    var pass = decryptInput.value.trim();
+    if (pass.length === 0) {
+      alert('Please enter a passphrase.');
+      return;
+    }
+    decryptConfirm.disabled = true;
+    const result = await performDecryption(pass);
+    decryptConfirm.disabled = false;
+    if (result.success) {
+      decryptModal.hide();
+    } else {
+      const body = decryptModalEl.querySelector('.modal-body');
+      let errorMsg = body.querySelector('.alert-danger');
+      if (!errorMsg) {
+        errorMsg = document.createElement('div');
+        errorMsg.className = 'alert alert-danger mt-2';
+        body.appendChild(errorMsg);
+      }
+      errorMsg.textContent = 'Decryption failed: ' + (result.error || 'Wrong passphrase or corrupted data?');
+    }
+  };
+});
+</script>
+<?php endif; ?>

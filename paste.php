@@ -410,18 +410,27 @@ try {
         }
     }
 
-    // decrypt if needed
-    if ($p_encrypt === "1") {
-        if (!defined('SECRET')) {
-            render_error_and_exit(($lang['error'] ?? 'Error') . ': Missing SECRET.', '403');
-        }
-        $dec = decrypt($p_content, hex2bin(SECRET));
-        if ($dec === null || $dec === '') {
-            render_error_and_exit(($lang['error'] ?? 'Error') . ': Decryption failed.', '403');
-        }
-        $p_content = $dec;
-    }
-    $op_content = trim(htmlspecialchars_decode($p_content));
+	// decrypt if needed
+	$original_p_code = $row['code'] ?? 'text'; // Store original language
+	$raw_base64 = null; // Variable for raw base64
+	if ($p_encrypt === "2") { // Clientside encryption (AES-256-GCM)
+		$is_client_encrypted = true;
+		$raw_base64 = $row['content']; // Store raw base64 from database
+		$p_content = $raw_base64; // Initial p_content as raw base64
+		$p_code = 'Clientside Encryption'; // Skip server-side highlighting. Using Highlight.js
+	} else {
+		if ($p_encrypt === "1") {
+			if (!defined('SECRET')) {
+				render_error_and_exit(($lang['error'] ?? 'Error') . ': Missing SECRET.', '403');
+			}
+			$dec = decrypt($p_content, hex2bin(SECRET));
+			if ($dec === null || $dec === '') {
+				render_error_and_exit(($lang['error'] ?? 'Error') . ': Decryption failed.', '403');
+			}
+			$p_content = $dec;
+		}
+	}
+	$op_content = trim(htmlspecialchars_decode($p_content)); // For non-client-encrypted display
 
     // download/raw/embed
     if (isset($_GET['download'])) {
@@ -477,267 +486,242 @@ try {
         $p_content = rtrim($p_content);
     }
 
-    // -------------- transform content --------------
-    $p_code_explain = ''; // will be filled when we detect
+	// -------------- transform content --------------
+	$p_code_explain = ''; // will be filled when we detect
 
-    if ($p_code === "markdown") {
-        // ---------- Markdown (keep using Parsedown, safe) ----------
-        require_once $parsedown_path;
-        $Parsedown = new Parsedown();
+	if ($p_encrypt !== "2") { // Only apply highlighting if not client-encrypted
+		if ($p_code === "markdown") {
+			// ---------- Markdown (keep using Parsedown, safe) ----------
+			require_once $parsedown_path;
+			$Parsedown = new Parsedown();
 
-        $md_input = htmlspecialchars_decode($p_content);
+			$md_input = htmlspecialchars_decode($p_content);
 
-        // Disable raw HTML and sanitize URLs during Markdown rendering
-        if (method_exists($Parsedown, 'setSafeMode')) {
-            $Parsedown->setSafeMode(true);
-            if (method_exists($Parsedown, 'setMarkupEscaped')) {
-                $Parsedown->setMarkupEscaped(true);
-            }
-        } else {
-            // Fallback for very old Parsedown: escape raw HTML tags BEFORE parsing
-            $md_input = preg_replace_callback('/<[^>]*>/', static function($m){
-                return htmlspecialchars($m[0], ENT_QUOTES, 'UTF-8');
-            }, $md_input);
-        }
+			// Disable raw HTML and sanitize URLs during Markdown rendering
+			if (method_exists($Parsedown, 'setSafeMode')) {
+				$Parsedown->setSafeMode(true);
+				if (method_exists($Parsedown, 'setMarkupEscaped')) {
+					$Parsedown->setMarkupEscaped(true);
+				}
+			} else {
+				// Fallback for very old Parsedown: escape raw HTML tags BEFORE parsing
+				$md_input = preg_replace_callback('/<[^>]*>/', static function($m){
+					return htmlspecialchars($m[0], ENT_QUOTES, 'UTF-8');
+				}, $md_input);
+			}
 
-        $rendered  = $Parsedown->text($md_input);
-        $p_content = '<div class="md-body">'.sanitize_allowlist_html($rendered).'</div>';
+			$rendered = $Parsedown->text($md_input);
+			$p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
 
-        $p_code_effective = 'markdown';
-        $p_code_label     = $geshiformats['markdown'] ?? 'Markdown';
-        $p_code_source    = 'explicit';
-        $p_code_explain   = 'Language was explicitly chosen by the author.';
+			$p_code_effective = 'markdown';
+			$p_code_label = $geshiformats['markdown'] ?? 'Markdown';
+			$p_code_source = 'explicit';
+			$p_code_explain = 'Language was explicitly chosen by the author.';
+		} else {
+			// ---------- Code (choose engine) ----------
+			$code_input = htmlspecialchars_decode($p_content);
 
-    } else {
-        // ---------- Code (choose engine) ----------
-        $code_input = htmlspecialchars_decode($p_content);
+			if (($highlighter ?? 'geshi') === 'highlight') {
+				// ---- Highlight.php ----
+				$hlId = map_to_hl_lang($p_code);
+				$use_auto = ($hlId === 'auto' || $hlId === 'autodetect' || $hlId === '' || $hlId === 'text');
 
-        if (($highlighter ?? 'geshi') === 'highlight') {
-            // ---- Highlight.php ----
-            $hlId     = map_to_hl_lang($p_code);          // map geshi -> hljs ids
-            $use_auto = ($hlId === 'auto' || $hlId === 'autodetect' || $hlId === '' || $hlId === 'text');
+				try {
+					$hl = function_exists('make_highlighter') ? make_highlighter() : null;
+					if (!$hl) { throw new \RuntimeException('Highlighter not available'); }
 
-            try {
-                $hl = function_exists('make_highlighter') ? make_highlighter() : null;
-                if (!$hl) { throw new \RuntimeException('Highlighter not available'); }
+					// 1) Filename strong hint if auto
+					if ($use_auto) {
+						$fname = paste_pick_from_filename($p_title ?? '', 'highlight', $hl);
+						if ($fname) {
+							$langTry = $fname;
+							$p_code_source = 'filename';
+							$p_code_explain = paste_build_explain('filename', $p_title ?? '', $code_input, $langTry);
+							$res = $hl->highlight($langTry, $code_input);
+							$inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+							$p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
+							$p_code_effective = $langTry;
+							$p_code_label = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
+							goto HL_DONE;
+						}
+					}
 
-                // 1) Filename strong hint if auto
-                if ($use_auto) {
-                    $fname = paste_pick_from_filename($p_title ?? '', 'highlight', $hl);
-                    if ($fname) {
-                        $langTry          = $fname;
-                        $p_code_source    = 'filename';
-                        $p_code_explain   = paste_build_explain('filename', $p_title ?? '', $code_input, $langTry);
-                        $res              = $hl->highlight($langTry, $code_input);
-                        $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                        $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
-                        $p_code_effective = $langTry;
-                        $p_code_label     = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
-                        goto HL_DONE;
-                    }
-                }
+					// 2) PHP tag hard rule if auto
+					if ($use_auto && is_probable_php_tag($code_input)) {
+						$langTry = 'php';
+						$p_code_source = 'php-tag';
+						$p_code_explain = paste_build_explain('php-tag', $p_title ?? '', $code_input, $langTry);
+						$res = $hl->highlight($langTry, $code_input);
+						$inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+						$p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
+						$p_code_effective = $langTry;
+						$p_code_label = $geshiformats[$langTry] ?? 'PHP';
+						goto HL_DONE;
+					}
 
-                // 2) PHP tag hard rule if auto
-                if ($use_auto && is_probable_php_tag($code_input)) {
-                    $langTry          = 'php';
-                    $p_code_source    = 'php-tag';
-                    $p_code_explain   = paste_build_explain('php-tag', $p_title ?? '', $code_input, $langTry);
-                    $res              = $hl->highlight($langTry, $code_input);
-                    $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                    $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
-                    $p_code_effective = $langTry;
-                    $p_code_label     = $geshiformats[$langTry] ?? 'PHP';
-                    goto HL_DONE;
-                }
+					if ($use_auto && function_exists('paste_autodetect_language')) {
+						$det = paste_autodetect_language($code_input, 'highlight', $hl);
+						$langTry = $det['id'];
+						$p_code_effective = $langTry;
+						$p_code_label = $geshiformats[$langTry] ?? $det['label'];
+						$p_code_source = $det['source'];
+						$p_code_explain = $det['explain'] ?? '';
+						if ($p_code_explain === '') {
+							$p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
+						}
 
-                if ($use_auto && function_exists('paste_autodetect_language')) {
-                    // Unified autodetect
-                    $det = paste_autodetect_language($code_input, 'highlight', $hl);
-                    $langTry          = $det['id'];
-                    $p_code_effective = $langTry;
-                    $p_code_label     = $geshiformats[$langTry] ?? $det['label'];
-                    $p_code_source    = $det['source'];
-                    $p_code_explain   = $det['explain'] ?? '';
-                    if ($p_code_explain === '') {
-                        $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
-                    }
+						if ($langTry === 'markdown') {
+							require_once $parsedown_path;
+							$Parsedown = new Parsedown();
+							if (method_exists($Parsedown, 'setSafeMode')) {
+								$Parsedown->setSafeMode(true);
+								if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+							}
+							$rendered = $Parsedown->text($code_input);
+							$p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+						} else {
+							$res = $hl->highlight($langTry, $code_input);
+							$inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+							$p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
+						}
+					} else {
+						$langTry = function_exists('paste_normalize_lang') ? paste_normalize_lang($hlId, 'highlight', $hl) : $hlId;
+						$p_code_source = 'explicit';
+						try {
+							$res = $hl->highlight($langTry, $code_input);
+						} catch (\Throwable $e) {
+							if ($langTry === 'pgsql') {
+								$res = $hl->highlight('sql', $code_input);
+							} elseif (function_exists('paste_autodetect_language')) {
+								$det = paste_autodetect_language($code_input, 'highlight', $hl);
+								$langTry = $det['id'];
+								$p_code_label = $geshiformats[$langTry] ?? $det['label'];
+								$p_code_source = $det['source'];
+								$p_code_explain = $det['explain'] ?? '';
+								if ($p_code_explain === '') {
+									$p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
+								}
 
-                    if ($langTry === 'markdown') {
-                        // Render Markdown via Parsedown
-                        require_once $parsedown_path;
-                        $Parsedown = new Parsedown();
-                        if (method_exists($Parsedown, 'setSafeMode')) {
-                            $Parsedown->setSafeMode(true);
-                            if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
-                        }
-                        $rendered  = $Parsedown->text($code_input);
-                        $p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
-                    } else {
-                        $res   = $hl->highlight($langTry, $code_input);
-                        $inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                        $p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
-                    }
-                } else {
-                    // Explicit language requested OR fallback to built-in auto
-                    $langTry = function_exists('paste_normalize_lang') ? paste_normalize_lang($hlId, 'highlight', $hl) : $hlId;
-                    $p_code_source = 'explicit';
-                    try {
-                        $res = $hl->highlight($langTry, $code_input);
-                    } catch (\Throwable $e) {
-                        // Fallbacks: pgsql -> sql, otherwise shared autodetect
-                        if ($langTry === 'pgsql') {
-                            $res = $hl->highlight('sql', $code_input);
-                        } elseif (function_exists('paste_autodetect_language')) {
-                            $det = paste_autodetect_language($code_input, 'highlight', $hl);
-                            $langTry          = $det['id'];
-                            $p_code_label     = $geshiformats[$langTry] ?? $det['label'];
-                            $p_code_source    = $det['source'];
-                            $p_code_explain   = $det['explain'] ?? '';
-                            if ($p_code_explain === '') {
-                                $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $langTry);
-                            }
+								if ($langTry === 'markdown') {
+									require_once $parsedown_path;
+									$Parsedown = new Parsedown();
+									if (method_exists($Parsedown, 'setSafeMode')) {
+										$Parsedown->setSafeMode(true);
+										if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+									}
+									$rendered = $Parsedown->text($code_input);
+									$p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+									$p_code_effective = 'markdown';
+									goto HL_DONE;
+								} else {
+									$res = $hl->highlight($langTry, $code_input);
+								}
+							} else {
+								$p_code_source = 'hljs';
+								$res = $hl->highlightAuto($code_input);
+								$langTry = strtolower((string)($res->language ?? $langTry));
+								$p_code_explain = paste_build_explain('hljs', $p_title ?? '', $code_input, $langTry ?: 'plaintext');
+							}
+						}
+						$inner = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+						$p_content = hl_wrap_with_lines($inner, $langTry, $highlight);
+						$p_code_effective = $langTry;
+						$p_code_label = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
+					}
+					HL_DONE: ;
+				} catch (\Throwable $t) {
+					$esc = htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
+					$p_content = hl_wrap_with_lines($esc, 'plaintext', $highlight);
+					$p_code_effective = 'plaintext';
+					$p_code_label = $geshiformats['plaintext'] ?? 'Plain Text';
+					$p_code_source = $p_code_source ?? 'fallback';
+					$p_code_explain = $p_code_explain ?: paste_build_explain('fallback', $p_title ?? '', $code_input, 'plaintext');
+				}
+			} else {
+				// ---- GeSHi ----
+				$use_auto = ($p_code === 'auto' || $p_code === 'autodetect' || $p_code === '' || $p_code === 'text');
+				$lang_for_geshi = $p_code;
 
-                            if ($langTry === 'markdown') {
-                                require_once $parsedown_path;
-                                $Parsedown = new Parsedown();
-                                if (method_exists($Parsedown, 'setSafeMode')) {
-                                    $Parsedown->setSafeMode(true);
-                                    if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
-                                }
-                                $rendered         = $Parsedown->text($code_input);
-                                $p_content        = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
-                                $p_code_effective = 'markdown';
-                                goto HL_DONE;
-                            } else {
-                                $res = $hl->highlight($langTry, $code_input);
-                            }
-                        } else {
-                            // last resort: hljs auto
-                            $p_code_source = 'hljs';
-                            $res    = $hl->highlightAuto($code_input);
-                            $langTry = strtolower((string)($res->language ?? $langTry));
-                            $p_code_explain = paste_build_explain('hljs', $p_title ?? '', $code_input, $langTry ?: 'plaintext');
-                        }
-                    }
-                    $inner            = $res->value ?: htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                    $p_content        = hl_wrap_with_lines($inner, $langTry, $highlight);
-                    $p_code_effective = $langTry;
-                    $p_code_label     = $geshiformats[$langTry] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($langTry) : strtoupper($langTry));
-                }
-                HL_DONE: ;
-            } catch (\Throwable $t) {
-                // Last resort: plain escaped
-                $esc              = htmlspecialchars($code_input, ENT_QUOTES, 'UTF-8');
-                $p_content        = hl_wrap_with_lines($esc, 'plaintext', $highlight);
-                $p_code_effective = 'plaintext';
-                $p_code_label     = $geshiformats['plaintext'] ?? 'Plain Text';
-                $p_code_source    = $p_code_source ?? 'fallback';
-                $p_code_explain   = $p_code_explain ?: paste_build_explain('fallback', $p_title ?? '', $code_input, 'plaintext');
-            }
+				if ($use_auto) {
+					$fname = paste_pick_from_filename($p_title ?? '', 'geshi', null);
+					if ($fname) {
+						$lang_for_geshi = $fname;
+						$p_code_effective = $lang_for_geshi;
+						$p_code_label = $geshiformats[$lang_for_geshi] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($lang_for_geshi) : strtoupper($lang_for_geshi));
+						$p_code_source = 'filename';
+						$p_code_explain = paste_build_explain('filename', $p_title ?? '', $code_input, $lang_for_geshi);
+					}
+				}
+				if ($use_auto && empty($p_code_source) && is_probable_php_tag($code_input)) {
+					$lang_for_geshi = function_exists('paste_normalize_lang') ? paste_normalize_lang('php', 'geshi', null) : 'php';
+					$p_code_effective = $lang_for_geshi;
+					$p_code_label = $geshiformats[$lang_for_geshi] ?? 'PHP';
+					$p_code_source = 'php-tag';
+					$p_code_explain = paste_build_explain('php-tag', $p_title ?? '', $code_input, $lang_for_geshi);
+				}
 
-        } else {
-            // ---- GeSHi ----
-            $use_auto = ($p_code === 'auto' || $p_code === 'autodetect' || $p_code === '' || $p_code === 'text');
-            $lang_for_geshi = $p_code;
+				if ($use_auto && empty($p_code_source) && function_exists('paste_autodetect_language')) {
+					$det = paste_autodetect_language($code_input, 'geshi', null);
+					$lang_for_geshi = $det['id'];
+					$p_code_effective = $lang_for_geshi;
+					$p_code_label = $det['label'];
+					$p_code_source = $det['source'];
+					$p_code_explain = $det['explain'] ?? '';
+					if ($p_code_explain === '') {
+						$p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $lang_for_geshi);
+					}
+					if ($lang_for_geshi === 'markdown') {
+						require_once $parsedown_path;
+						$Parsedown = new Parsedown();
+						if (method_exists($Parsedown, 'setSafeMode')) {
+							$Parsedown->setSafeMode(true);
+							if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+						}
+						$rendered = $Parsedown->text($code_input);
+						$p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+						goto GESHI_DONE;
+					}
+				} elseif ($use_auto && empty($p_code_source) && function_exists('paste_probable_markdown') && paste_probable_markdown($code_input)) {
+					require_once $parsedown_path;
+					$Parsedown = new Parsedown();
+					if (method_exists($Parsedown, 'setSafeMode')) {
+						$Parsedown->setSafeMode(true);
+						if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
+					}
+					$rendered = $Parsedown->text($code_input);
+					$p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
+					$p_code_effective = 'markdown';
+					$p_code_label = 'Markdown';
+					$p_code_source = 'markdown';
+					$p_code_explain = "Markdown probability based on headings/lists/links; rendering as Markdown.";
+					goto GESHI_DONE;
+				}
 
-            // 1) Filename hint if auto
-            if ($use_auto) {
-                $fname = paste_pick_from_filename($p_title ?? '', 'geshi', null);
-                if ($fname) {
-                    $lang_for_geshi   = $fname;
-                    $p_code_effective = $lang_for_geshi;
-                    $p_code_label     = $geshiformats[$lang_for_geshi] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($lang_for_geshi) : strtoupper($lang_for_geshi));
-                    $p_code_source    = 'filename';
-                    $p_code_explain   = paste_build_explain('filename', $p_title ?? '', $code_input, $lang_for_geshi);
-                }
-            }
-            // 2) PHP tag hard rule if auto and not already set by filename
-            if ($use_auto && empty($p_code_source) && is_probable_php_tag($code_input)) {
-                $lang_for_geshi   = function_exists('paste_normalize_lang') ? paste_normalize_lang('php', 'geshi', null) : 'php';
-                $p_code_effective = $lang_for_geshi;
-                $p_code_label     = $geshiformats[$lang_for_geshi] ?? 'PHP';
-                $p_code_source    = 'php-tag';
-                $p_code_explain   = paste_build_explain('php-tag', $p_title ?? '', $code_input, $lang_for_geshi);
-            }
+				$geshi = new GeSHi($code_input, $lang_for_geshi, $path);
+				if (method_exists($geshi, 'enable_classes')) $geshi->enable_classes();
+				if (method_exists($geshi, 'set_header_type')) $geshi->set_header_type(GESHI_HEADER_DIV);
+				if (method_exists($geshi, 'enable_line_numbers')) $geshi->enable_line_numbers(GESHI_NORMAL_LINE_NUMBERS);
+				if (!empty($highlight) && method_exists($geshi, 'highlight_lines_extra')) {
+					$geshi->highlight_lines_extra($highlight);
+				}
+				if (method_exists($geshi, 'set_line_number_format')) {
+					$geshi->set_line_number_format('%d', 0);
+				}
+				$p_content = $geshi->parse_code();
+				if (!empty($highlight)) {
+					$p_content = geshi_add_line_highlight_class($p_content, $highlight, 'hljs-hl');
+				}
+				$ges_style = '';
+				$p_code_effective = $lang_for_geshi;
+				if (!isset($p_code_label)) {
+					$p_code_label = $geshiformats[$p_code_effective] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($p_code_effective) : strtoupper($p_code_effective));
+				}
+				GESHI_DONE: ;
+			}
+		}
+	}
 
-            if ($use_auto && empty($p_code_source) && function_exists('paste_autodetect_language')) {
-                $det = paste_autodetect_language($code_input, 'geshi', null);
-                $lang_for_geshi   = $det['id'];                // GeSHi id (mapped)
-                $p_code_effective = $lang_for_geshi;
-                $p_code_label     = $det['label'];
-                $p_code_source    = $det['source'];
-                $p_code_explain   = $det['explain'] ?? '';
-                if ($p_code_explain === '') {
-                    $p_code_explain = paste_build_explain($p_code_source, $p_title ?? '', $code_input, $lang_for_geshi);
-                }
-                if ($lang_for_geshi === 'markdown') {
-                    // For Markdown, keep Parsedown path for consistent rendering
-                    require_once $parsedown_path;
-                    $Parsedown = new Parsedown();
-                    if (method_exists($Parsedown, 'setSafeMode')) {
-                        $Parsedown->setSafeMode(true);
-                        if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
-                    }
-                    $rendered  = $Parsedown->text($code_input);
-                    $p_content = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
-                    goto GESHI_DONE;
-                }
-            } elseif ($use_auto && empty($p_code_source) && function_exists('paste_probable_markdown') && paste_probable_markdown($code_input)) {
-                // Minimal fallback
-                require_once $parsedown_path;
-                $Parsedown = new Parsedown();
-                if (method_exists($Parsedown, 'setSafeMode')) {
-                    $Parsedown->setSafeMode(true);
-                    if (method_exists($Parsedown, 'setMarkupEscaped')) $Parsedown->setMarkupEscaped(true);
-                }
-                $rendered         = $Parsedown->text($code_input);
-                $p_content        = '<div class="md-body">' . sanitize_allowlist_html($rendered) . '</div>';
-                $p_code_effective = 'markdown';
-                $p_code_label     = 'Markdown';
-                $p_code_source    = 'markdown';
-                $p_code_explain   = "Markdown probability based on headings/lists/links; rendering as Markdown.";
-                goto GESHI_DONE;
-            }
-
-            $geshi = new GeSHi($code_input, $lang_for_geshi, $path);
-
-            // Use classes, not inline CSS; let theme CSS style everything
-            if (method_exists($geshi, 'enable_classes')) $geshi->enable_classes();
-            if (method_exists($geshi, 'set_header_type')) $geshi->set_header_type(GESHI_HEADER_DIV);
-
-            // Line numbers (NORMAL to avoid rollovers). No inline style.
-            if (method_exists($geshi, 'enable_line_numbers')) $geshi->enable_line_numbers(GESHI_NORMAL_LINE_NUMBERS);
-            if (!empty($highlight) && method_exists($geshi, 'highlight_lines_extra')) {
-                $geshi->highlight_lines_extra($highlight);
-            }
-
-            // force plain integer formatting
-            if (method_exists($geshi, 'set_line_number_format')) {
-                $geshi->set_line_number_format('%d', 0);
-            }
-
-            // Parse HTML (class-based markup)
-            $p_content = $geshi->parse_code();
-
-            // Add a class to the requested lines so theme CSS can style them
-            if (!empty($highlight)) {
-                $p_content = geshi_add_line_highlight_class($p_content, $highlight, 'hljs-hl');
-            }
-
-            // No stylesheet injection here; theme CSS handles it.
-            $ges_style = '';
-
-            // Effective values for UI
-            $p_code_effective = $lang_for_geshi;
-            if (!isset($p_code_label)) {
-                $p_code_label = $geshiformats[$p_code_effective] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($p_code_effective) : strtoupper($p_code_effective));
-            }
-
-            GESHI_DONE: ;
-        }
-    }
-
-    // ======= New comment submit (PRG) — supports parent_id for replies =======
+    // ======= Comment submit (PRG) — supports parent_id for replies =======
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_comment') {
         if (!$paste_id) {
             $comment_error = 'Invalid paste.';

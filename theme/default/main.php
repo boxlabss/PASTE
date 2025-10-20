@@ -38,10 +38,10 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
           <div class="card">
             <div class="card-header">
               <h1><?php echo htmlspecialchars($lang['newpaste'] ?? 'New Paste'); ?></h1>
-				<?php
-				// Quick diff
-				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
-				?>
+			<?php
+			// Quick diff
+			$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
+			?>
               <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
                  title="View differences">
                 <i class="bi bi-arrow-left-right"></i> .diff
@@ -71,16 +71,16 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 					$geshiformats = $geshiformats ?? [];
 					$popular_formats = $popular_formats ?? [];
 					foreach ($geshiformats as $code => $name) {
-						if (in_array($code, $popular_formats)) {
-							$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
-							echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+					if (in_array($code, $popular_formats)) {
+						$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+						echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
 						}
 					}
 					echo '<option value="text">-------------------------------------</option>';
 					foreach ($geshiformats as $code => $name) {
 						if (!in_array($code, $popular_formats)) {
-							$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
-							echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+						$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+						echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
 						}
 					}
 					?>
@@ -142,6 +142,38 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                 <div class="row mb-3">
                   <p class="text-muted"><small><?php echo htmlspecialchars($lang['encrypt'] ?? 'Encryption', ENT_QUOTES, 'UTF-8'); ?></small></p>
                 </div>
+				<div class="mb-3 form-check">
+				  <input type="checkbox" class="form-check-input" id="client_encrypt" name="client_encrypt">
+				  <label class="form-check-label" for="client_encrypt">Client side encryption?</label>
+				</div>
+				<input type="hidden" name="is_client_encrypted" id="is_client_encrypted" value="0">
+				<!-- Encryption Passphrase Modal -->
+				<div class="modal fade" id="encryptPassModal" tabindex="-1" aria-labelledby="encryptPassLabel" aria-hidden="true">
+				  <div class="modal-dialog">
+					<div class="modal-content">
+					  <div class="modal-header">
+						<h5 class="modal-title" id="encryptPassLabel">Set Encryption Passphrase</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					  </div>
+					  <div class="modal-body">
+						<p>Enter a strong passphrase (and remember it):</p>
+						<input type="password" class="form-control" name="encrypt_pass" id="encryptPassInput" autocomplete="off">
+						<div class="mt-2">
+						  <div class="progress" style="--height: 5px;">
+							<div id="passStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+						  </div>
+						  <small id="passStrengthText" class="text-muted">Strength: Weak</small>
+						</div>
+						<small class="text-muted d-block mt-1">Min 12 characters; mix upper/lower, numbers, symbols.</small>
+					  </div>
+					  <div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+						<button type="button" class="btn btn-primary" id="encryptConfirm" disabled>Encrypt</button>
+					  </div>
+					</div>
+				  </div>
+				</div>
+
                 <?php
                 // Debug CAPTCHA condition
                 $captcha_condition = $cap_e == "on" && !isset($_SESSION['username']) && (!isset($disableguest) || $disableguest !== "on");
@@ -214,15 +246,18 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
     <?php else: ?>
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
-        <!--
         <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
           <div class="card guest-welcome text-center">
-            <div class="btn-group" role="group" aria-label="Login or Register">
-              <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#signin">Login</a>
-              <a href="#" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#signup">Register</a>
+            <div class="btn-group" role="group" aria-label="Download Paste">
+              <a href="https://sourceforge.net/projects/phpaste/files/latest/download" class="btn btn-success">Get Paste <?=$currentversion?></a>
+              <a href="https://github.com/boxlabss/PASTE" class="btn btn-dark">
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-github" viewBox="0 0 16 16">
+					<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8">
+					</path>
+				</svg> 
+				GitHub</a>
             </div>
           </div>
-        -->
         <?php endif; ?>
         <?php if (!isset($_SESSION['username']) && ($disableguest === "on")): ?>
           <div class="card">
@@ -238,10 +273,10 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
           <div class="card">
             <div class="card-header">
               <h1><?php echo htmlspecialchars($lang['newpaste'] ?? 'New Paste'); ?></h1>
-				<?php
-				// Quick diff
-				$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
-				?>
+			<?php
+			// Quick diff
+			$diffQuickUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=oldpaste&b=newpaste';
+			?>
               <a href="<?php echo htmlspecialchars($diffQuickUrl, ENT_QUOTES, 'UTF-8'); ?>"
                  title="View differences">
                 <i class="bi bi-arrow-left-right"></i> .diff
@@ -271,16 +306,16 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 					$geshiformats = $geshiformats ?? [];
 					$popular_formats = $popular_formats ?? [];
 					foreach ($geshiformats as $code => $name) {
-						if (in_array($code, $popular_formats)) {
-							$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
-							echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+					if (in_array($code, $popular_formats)) {
+						$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+						echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
 						}
 					}
 					echo '<option value="text">-------------------------------------</option>';
-					foreach ($geshiformats as $code => $name) {
+						foreach ($geshiformats as $code => $name) {
 						if (!in_array($code, $popular_formats)) {
-							$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
-							echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
+						$sel = ($p_code ?? 'autodetect') == $code ? 'selected' : '';
+						echo '<option ' . $sel . ' value="' . htmlspecialchars($code) . '">' . htmlspecialchars($name) . '</option>';
 						}
 					}
 					?>
@@ -339,6 +374,42 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                     <input type="text" class="form-control" name="pass" id="pass" placeholder="<?php echo htmlspecialchars($lang['pwopt'] ?? 'Optional Password'); ?>">
                   </div>
                 </div>
+				<div class="mb-3 form-check">
+				  <input type="checkbox" class="form-check-input" id="client_encrypt" name="client_encrypt">
+				  <label class="form-check-label" for="client_encrypt">Enable client side encryption? AES-256-GCM</label>
+				</div>
+				<input type="hidden" name="is_client_encrypted" id="is_client_encrypted" value="0">
+				<!-- Encryption Passphrase Modal -->
+				<div class="modal fade" id="encryptPassModal" tabindex="-1" aria-labelledby="encryptPassLabel" aria-hidden="true">
+				  <div class="modal-dialog">
+					<div class="modal-content">
+					  <div class="modal-header">
+						<h5 class="modal-title" id="encryptPassLabel">Set Encryption Passphrase</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					  </div>
+					  <div class="modal-body">
+						<p>Enter a strong passphrase (and remember it):</p>
+						<div class="input-group mb-3">
+						  <input type="password" class="form-control" id="encryptPassInput" autocomplete="new-password" placeholder="Enter passphrase">
+						  <button type="button" class="btn btn-outline-secondary" id="toggleEncryptPass" title="Show/Hide Password">
+							<i class="bi bi-eye" id="encryptPassIcon"></i>
+						  </button>
+						</div>
+						<div class="mt-2">
+						  <div class="progress" style="--height: 5px;">
+							<div id="passStrengthBar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+						  </div>
+						  <small id="passStrengthText" class="text-muted">Strength: Weak</small>
+						</div>
+						<small class="text-muted d-block mt-1">Min 12 characters; mix upper/lower, numbers, symbols.</small>
+					  </div>
+					  <div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+						<button type="button" class="btn btn-primary" id="encryptConfirm" disabled>Encrypt</button>
+					  </div>
+					</div>
+				  </div>
+				</div>
                 <div class="row mb-3">
                   <p class="text-muted"><small><?php echo htmlspecialchars($lang['encrypt'] ?? 'Encryption', ENT_QUOTES, 'UTF-8'); ?></small></p>
                 </div>

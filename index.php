@@ -251,22 +251,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $p_date = date('Y-m-d H:i:s');
     $now_time = mktime(date("H"), date("i"), date("s"), date("n"), date("j"), date("Y"));
     $s_date = date('Y-m-d');
-    // encrypt content
-    try {
-        if (!defined('SECRET')) {
-            error_log("index.php: SECRET undefined");
-            $error = $lang['error'] ?? 'Server configuration error.';
-            goto OutPut;
-        }
-        $p_content = encrypt($p_content, hex2bin(SECRET));
-        if ($p_content === null) {
-            $error = $lang['error'] ?? 'Encryption failed.';
-            goto OutPut;
-        }
-    } catch (RuntimeException $e) {
-        $error = ($lang['error'] ?? 'Error') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
-        goto OutPut;
-    }
+	
+	// Client-side encrypted? Skip server encryption
+	$is_client_encrypted = isset($_POST['is_client_encrypted']) && $_POST['is_client_encrypted'] === '1';
+	if ($is_client_encrypted) {
+		$p_encrypt = '2'; // Client-encrypted flag
+		$p_content = $_POST['paste_data']; // Already encrypted (base64 blob), no htmlspecialchars
+	} else {
+		// encrypt content
+		try {
+			if (!defined('SECRET')) {
+				error_log("index.php: SECRET undefined");
+				$error = $lang['error'] ?? 'Server configuration error.';
+				goto OutPut;
+			}
+			$p_content = encrypt($p_content, hex2bin(SECRET));
+			if ($p_content === null) {
+				$error = $lang['error'] ?? 'Encryption failed.';
+				goto OutPut;
+			}
+		} catch (RuntimeException $e) {
+			$error = ($lang['error'] ?? 'Error') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+			goto OutPut;
+		}
+	}
     // hash password if provided
     if ($p_password !== "NONE") {
         $p_password = password_hash($p_password, PASSWORD_DEFAULT);
@@ -295,10 +303,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if ($p_visible === '0') {
             addToSitemap($pdo, (int)$paste_id, $priority, $changefreq, $mod_rewrite == '1');
         }
-        // redirect to paste
-        $paste_url = ($mod_rewrite == '1') ? ($baseurl . $paste_id) : ($baseurl . 'paste.php?id=' . $paste_id);
-        header("Location: " . $paste_url);
-        exit;
+		// redirect to paste
+		$paste_url = ($mod_rewrite == '1') ? ($baseurl . $paste_id) : ($baseurl . 'paste.php?id=' . $paste_id);
+		header("Location: " . $paste_url);
+		exit;
     } catch (PDOException $e) {
         error_log("index.php: insert err ".$e->getMessage());
         $error = ($lang['paste_db_error'] ?? 'Database error.') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');

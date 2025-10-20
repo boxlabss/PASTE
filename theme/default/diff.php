@@ -19,7 +19,7 @@ declare(strict_types=1);
 
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
 
-/* Engine badge -+changes + ignore WS toggle */
+/* Engine badge -+changes + ignore WS toggle (provided by controller) */
 $engine_badge_html = $GLOBALS['diff_engine_badge'] ?? '';
 $ws_on             = !empty($GLOBALS['ignore_ws_on']);
 $ws_toggle_url     = (string)($GLOBALS['ignore_ws_toggle'] ?? '#');
@@ -29,7 +29,7 @@ $changes_add       = (int)($GLOBALS['diff_changes_add'] ?? 0);
 $changes_del       = (int)($GLOBALS['diff_changes_del'] ?? 0);
 $changes_total     = (int)($GLOBALS['diff_changes_total'] ?? ($changes_add + $changes_del));
 
-/* server-side "only changes" toggle */
+/* Optional server-side "only changes" toggle (set by controller if enabled) */
 $only_on           = !empty($GLOBALS['only_on']);
 $only_toggle_url   = (string)($GLOBALS['only_toggle_url'] ?? '');
 
@@ -96,7 +96,7 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
 		  <input class="btn-check" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
 		  <label class="btn btn-outline-secondary" for="optLine">Line #</label>
 
-		  <!-- Client-side filter -->
+		  <!-- Client-side filter (kept for instant toggle) -->
 		  <input class="btn-check" type="checkbox" id="btnOnlyChangesCheck" autocomplete="off">
 		  <label class="btn btn-outline-secondary" id="btnOnlyChanges" for="btnOnlyChangesCheck" aria-pressed="false">
 			Only changes
