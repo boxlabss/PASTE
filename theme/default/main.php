@@ -247,6 +247,7 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
         <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
+		 <!--
           <div class="card guest-welcome text-center">
             <div class="btn-group" role="group" aria-label="Download Paste">
               <a href="https://sourceforge.net/projects/phpaste/files/latest/download" class="btn btn-success">Get Paste <?=$currentversion?></a>
@@ -258,6 +259,7 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 				GitHub</a>
             </div>
           </div>
+		  -->
         <?php endif; ?>
         <?php if (!isset($_SESSION['username']) && ($disableguest === "on")): ?>
           <div class="card">
