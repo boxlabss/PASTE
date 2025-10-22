@@ -416,6 +416,11 @@ document.addEventListener('DOMContentLoaded', function() {
               'reset-form': 'reset',
               'resend-form': 'resend'
             };
+			setInterval(function() {
+			  grecaptcha.execute(window.pasteConfig.siteKey, { action: 'keepalive' })
+				.then(function(t) { console.log('[reCAPTCHA] keepalive token generated'); })
+				.catch(function(e) { logErr('[reCAPTCHA] keepalive failed: ' + e); });
+			}, 110000); // Every ~1.8 minutes
             function ensureHidden(form) {
               var h = form.querySelector('input[name="g-recaptcha-response"]');
               if (!h) {
@@ -446,9 +451,6 @@ document.addEventListener('DOMContentLoaded', function() {
               }, { capture: true });
               window.__rcBoundSubmit = true;
             }
-            grecaptcha.execute(window.pasteConfig.siteKey, { action: 'page_load' })
-              .then(function (t) { console.log('[reCAPTCHA] action="page_load" token: %s…', t.slice(0, 28)); })
-              .catch(function (e3) { logErr('[reCAPTCHA] page_load token failed: ' + (e3 && e3.message || e3)); });
           });
         };
         s.onerror = function() { logErr('[reCAPTCHA] failed to load api.js'); };
@@ -492,7 +494,7 @@ document.addEventListener('DOMContentLoaded', function() {
               var turnstileWidget = form.querySelector('.cf-turnstile');
               if (!turnstileWidget) return;
               e.preventDefault();
-              turnstile.execute(turnstileWidget, { action: action });
+			  turnstile.execute(turnstileWidget, { action: action, retry: 'never' });
             }, { capture: true });
           });
         }
