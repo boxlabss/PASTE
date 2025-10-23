@@ -216,7 +216,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         goto OutPut;
                     }
                 } elseif ($mode === "turnstile") {
-                    // Replace the entire inline cURL block with this:
                     require_once __DIR__ . '/includes/turnstile.php';
                     if (!require_human_turnstile('create_paste')) {
                         $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Refresh and try again.';

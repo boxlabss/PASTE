@@ -95,7 +95,7 @@ try {
                 $_SESSION['captcha'] = $_SESSION['turnstile_sitekey'];
             } else {
                 $_SESSION['captcha_mode'] = 'internal';
-                $_SESSION['captcha'] = captcha($color, $mode, $mul, $allowed); // Assumes $color, $mul, $allowed are defined
+                $_SESSION['captcha'] = captcha($color, $mode, $mul, $allowed);
             }
         } else {
             $_SESSION['captcha_mode'] = 'none';

@@ -467,6 +467,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Global callbacks for all forms
         window.onTurnstileSuccess = window.onTurnstileSuccess || function(t) { setToken('cf-turnstile-response', t); };
         window.onTurnstileSuccessDirectSignin = window.onTurnstileSuccessDirectSignin || function(t) { setToken('cf-turnstile-response-direct-signin', t); };
+        window.onTurnstileSuccessSignin = window.onTurnstileSuccessSignin || function(t) { setToken('cf-turnstile-response-signin', t); };
         window.onTurnstileSuccessSignup = window.onTurnstileSuccessSignup || function(t) { setToken('cf-turnstile-response-signup', t); };
         window.onTurnstileSuccessForgot = window.onTurnstileSuccessForgot || function(t) { setToken('cf-turnstile-response-forgot', t); };
         window.onTurnstileSuccessResend = window.onTurnstileSuccessResend || function(t) { setToken('cf-turnstile-response-resend', t); };

@@ -139,9 +139,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                     <input type="text" class="form-control" name="pass" id="pass" placeholder="<?php echo htmlspecialchars($lang['pwopt'] ?? 'Optional Password'); ?>">
                   </div>
                 </div>
-                <div class="row mb-3">
-                  <p class="text-muted"><small><?php echo htmlspecialchars($lang['encrypt'] ?? 'Encryption', ENT_QUOTES, 'UTF-8'); ?></small></p>
-                </div>
 				<div class="mb-3 form-check">
 				  <input type="checkbox" class="form-check-input" id="client_encrypt" name="client_encrypt">
 				  <label class="form-check-label" for="client_encrypt">Client side encryption?</label>
@@ -173,7 +170,9 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 					</div>
 				  </div>
 				</div>
-
+                <div class="row mb-3">
+                  <p class="text-muted"><small><?php echo htmlspecialchars($lang['encrypt'] ?? 'Encryption', ENT_QUOTES, 'UTF-8'); ?></small></p>
+                </div>
                 <?php
                 // Debug CAPTCHA condition
                 $captcha_condition = $cap_e == "on" && !isset($_SESSION['username']) && (!isset($disableguest) || $disableguest !== "on");
@@ -186,15 +185,14 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                          data-callback="onRecaptchaSuccess"></div>
                     <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response">
                   <?php elseif ($captcha_mode === "recaptcha_v3"): ?>
-                    <!-- v3: hidden field only; token populated by footer -->
+                    <!-- reCAPTCHA v3 -->
                     <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response">
                   <?php elseif ($captcha_mode === "turnstile"): ?>
                     <!-- Cloudflare Turnstile -->
-                    <div class="cf-turnstile mb-3"
+                    <div id="turnstile-main" class="cf-turnstile mb-3"
                          data-sitekey="<?php echo htmlspecialchars($main_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
                          data-callback="onTurnstileSuccess"
                          data-action="create_paste"
-                         data-appearance="execute"
                          data-retry-interval="1000"></div>
                     <input type="hidden" name="cf-turnstile-response" id="cf-turnstile-response">
                   <?php else: ?>
@@ -209,31 +207,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                 </div>
               </form>
             </div>
-            <?php if ($captcha_mode === "turnstile"): ?>
-              <!-- Explicit Turnstile rendering for mainForm as fallback -->
-              <script>
-              (function() {
-                  if (typeof turnstile !== 'undefined') {
-                      turnstile.ready(function() {
-                          document.getElementById('mainForm').addEventListener('submit', function(e) {
-                              var tokenInput = document.getElementById('cf-turnstile-response');
-                              if (!tokenInput.value) {
-                                  e.preventDefault();
-                                  turnstile.render('.cf-turnstile', {
-                                      sitekey: '<?php echo htmlspecialchars($main_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                      callback: function(token) { tokenInput.value = token; document.getElementById('mainForm').submit(); },
-                                      action: 'create_paste',
-                                      size: 'compact',
-                                      retry: 'auto',
-                                      'retry-interval': 1000
-                                  });
-                              }
-                          });
-                      });
-                  }
-              })();
-              </script>
-            <?php endif; ?>
           </div>
         <?php endif; ?>
       </div>
@@ -247,7 +220,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
         <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
-		 <!--
           <div class="card guest-welcome text-center">
             <div class="btn-group" role="group" aria-label="Download Paste">
               <a href="https://sourceforge.net/projects/phpaste/files/latest/download" class="btn btn-success">Get Paste <?=$currentversion?></a>
@@ -259,7 +231,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 				GitHub</a>
             </div>
           </div>
-		  -->
         <?php endif; ?>
         <?php if (!isset($_SESSION['username']) && ($disableguest === "on")): ?>
           <div class="card">
@@ -427,7 +398,7 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                          data-callback="onRecaptchaSuccess"></div>
                     <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response">
                   <?php elseif ($captcha_mode === "recaptcha_v3"): ?>
-                    <!-- v3: hidden field only; token populated by footer -->
+                    <!-- reCAPTCHA v3 -->
                     <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response">
                   <?php elseif ($captcha_mode === "turnstile"): ?>
                     <!-- Cloudflare Turnstile -->
@@ -450,31 +421,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                 </div>
               </form>
             </div>
-            <?php if ($captcha_mode === "turnstile"): ?>
-              <!-- Explicit Turnstile rendering for mainForm as fallback -->
-              <script>
-              (function() {
-                  if (typeof turnstile !== 'undefined') {
-                      turnstile.ready(function() {
-                          document.getElementById('mainForm').addEventListener('submit', function(e) {
-                              var tokenInput = document.getElementById('cf-turnstile-response');
-                              if (!tokenInput.value) {
-                                  e.preventDefault();
-                                  turnstile.render('.cf-turnstile', {
-                                      sitekey: '<?php echo htmlspecialchars($main_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                      callback: function(token) { tokenInput.value = token; document.getElementById('mainForm').submit(); },
-                                      action: 'create_paste',
-                                      size: 'compact',
-                                      retry: 'auto',
-                                      'retry-interval': 1000
-                                  });
-                              }
-                          });
-                      });
-                  }
-              })();
-              </script>
-            <?php endif; ?>
           </div>
         <?php endif; ?>
       </div>

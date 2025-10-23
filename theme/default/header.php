@@ -153,40 +153,62 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
                         <input type="hidden" name="signin" value="1">
                         <input type="hidden" name="ajax" value="1">
                         <input type="hidden" name="redirect" value="<?= htmlspecialchars($_SERVER['REQUEST_URI'] ?? $baseurl, ENT_QUOTES, 'UTF-8') ?>">
+                        <div class="mb-3">
+                            <label for="signinModalUsername" class="form-label"><?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                <input type="text" name="username" class="form-control" id="signinModalUsername" placeholder="<?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?>" autocomplete="username" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="signinModalPassword" class="form-label"><?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-key"></i></span>
+                                <input type="password" name="password" class="form-control" id="signinModalPassword" placeholder="<?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?>" autocomplete="current-password" required>
+                            </div>
+                        </div>
 						<?php if ($captcha_enabled): ?>
 						<?php if ($captcha_mode === 'recaptcha'): ?>
                         <!-- reCAPTCHA v2 checkbox -->
                         <div class="g-recaptcha mb-3" data-sitekey="<?= htmlspecialchars($recaptcha_sitekey, ENT_QUOTES, 'UTF-8') ?>" data-callback="onRecaptchaSuccessSignin"></div>
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signin">
 						<?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
-                        <!-- reCAPTCHA v3: hidden field only; token populated by footer -->
+                        <!-- reCAPTCHA v3 -->
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signin">
 						<?php elseif ($captcha_mode === 'turnstile'): ?>
                         <!-- Cloudflare Turnstile -->
-                        <div class="cf-turnstile mb-3"
-                             data-sitekey="<?= htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8') ?>"
-                             data-callback="onTurnstileSuccessSignin"
-                             data-action="login"
-                             data-appearance="execute"
-                             data-size="compact"
-                             data-retry-interval="1000"></div>
-                        <input type="hidden" name="cf-turnstile-response" id="cf-turnstile-response-signin">
+						<input type="hidden" id="cf-turnstile-response-signin" name="cf-turnstile-response">
+						<div class="cf-turnstile mb-3"
+						   data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
+						   data-callback="onTurnstileSuccessSignin"
+						   data-error-callback="onTurnstileError"
+						   data-action="login"
+						   data-appearance="execute"
+						   data-retry="auto"></div>
+						<script>
+						(function() {
+						  if (typeof turnstile !== 'undefined') {
+							  turnstile.ready(function() {
+								  document.getElementById('signin-form').addEventListener('submit', function(e) {
+									  var tokenInput = document.getElementById('cf-turnstile-response-signin');
+									  if (!tokenInput.value) {
+										  e.preventDefault();
+										  turnstile.render('.cf-turnstile', {
+											  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
+											  callback: function(token) { tokenInput.value = token; document.getElementById('signin-form').submit(); },
+											  action: 'login',
+											  size: 'compact',
+											  retry: 'auto',
+											  'retry-interval': 1000
+										  });
+									  }
+								  });
+							  });
+						  }
+						})();
+						</script>
 							<?php endif; ?>
 						<?php endif; ?>
-                        <div class="mb-3">
-                            <label for="signinUsername" class="form-label"><?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-person"></i></span>
-                                <input type="text" name="username" class="form-control" id="signinUsername" placeholder="<?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?>" autocomplete="username" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="signinPassword" class="form-label"><?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-key"></i></span>
-                                <input type="password" name="password" class="form-control" id="signinPassword" placeholder="<?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?>" autocomplete="current-password" required>
-                            </div>
-                        </div>
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="signinRememberme" name="rememberme" checked>
                             <label class="form-check-label" for="signinRememberme"><?= htmlspecialchars($lang['rememberme'] ?? 'Keep me signed in.', ENT_QUOTES, 'UTF-8') ?></label>
@@ -217,54 +239,76 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
                         <input type="hidden" name="signup" value="1">
                         <input type="hidden" name="ajax" value="1">
                         <input type="hidden" name="redirect" value="<?= htmlspecialchars($_SERVER['REQUEST_URI'] ?? $baseurl, ENT_QUOTES, 'UTF-8') ?>">
+                        <div class="mb-3">
+                            <label for="signupModalUsername" class="form-label"><?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                <input type="text" class="form-control" id="signupModalUsername" name="username" value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="username" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="signupModalEmail" class="form-label"><?= htmlspecialchars($lang['email'] ?? 'Email', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                                <input type="email" class="form-control" id="signupModalEmail" name="email" value="<?= htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="signupModalFullname" class="form-label"><?= htmlspecialchars($lang['full_name'] ?? 'Full Name', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                <input type="text" class="form-control" id="signupModalFullname" name="full" value="<?= htmlspecialchars($_POST['full'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="name" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="signupModalPassword" class="form-label"><?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?></label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                                <input type="password" class="form-control" id="signupModalPassword" name="password" autocomplete="new-password" required>
+                            </div>
+                        </div>
 						<?php if ($captcha_enabled): ?>
 						<?php if ($captcha_mode === 'recaptcha'): ?>
                         <!-- reCAPTCHA v2 checkbox -->
                         <div class="g-recaptcha mb-3" data-sitekey="<?= htmlspecialchars($recaptcha_sitekey, ENT_QUOTES, 'UTF-8') ?>" data-callback="onRecaptchaSuccessSignup"></div>
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signup">
 						<?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
-                        <!-- reCAPTCHA v3: hidden field only; token populated by footer -->
+                        <!-- reCAPTCHA v3 -->
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signup">
 						<?php elseif ($captcha_mode === 'turnstile'): ?>
                         <!-- Cloudflare Turnstile -->
-                        <div class="cf-turnstile mb-3"
-                             data-sitekey="<?= htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8') ?>"
-                             data-callback="onTurnstileSuccessSignup"
-                             data-action="signup"
-                             data-appearance="execute"
-                             data-size="compact"
-                             data-retry-interval="1000"></div>
-                        <input type="hidden" name="cf-turnstile-response" id="cf-turnstile-response-signup">
+						<input type="hidden" id="cf-turnstile-response-signup" name="cf-turnstile-response">
+						<div class="cf-turnstile mb-3"
+						   data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
+						   data-callback="onTurnstileSuccessSignup"
+						   data-error-callback="onTurnstileError"
+						   data-action="signup"
+						   data-appearance="execute"
+						   data-retry="auto"></div>
+						  <script>
+						  (function() {
+							  if (typeof turnstile !== 'undefined') {
+								  turnstile.ready(function() {
+									  document.getElementById('signup-form').addEventListener('submit', function(e) {
+										  var tokenInput = document.getElementById('cf-turnstile-response-signup');
+										  if (!tokenInput.value) {
+											  e.preventDefault();
+											  turnstile.render('.cf-turnstile', {
+												  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
+												  callback: function(token) { tokenInput.value = token; document.getElementById('signup-form').submit(); },
+												  action: 'signup',
+												  size: 'compact',
+												  retry: 'auto',
+												  'retry-interval': 1000
+											  });
+										  }
+									  });
+								  });
+							  }
+						  })();
+						  </script>
 						<?php endif; ?>
 					<?php endif; ?>
-                        <div class="mb-3">
-                            <label for="signupUsername" class="form-label"><?= htmlspecialchars($lang['username'] ?? 'Username', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-person"></i></span>
-                                <input type="text" class="form-control" id="signupUsername" name="username" value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="username" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="signupEmail" class="form-label"><?= htmlspecialchars($lang['email'] ?? 'Email', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-envelope"></i></span>
-                                <input type="email" class="form-control" id="signupEmail" name="email" value="<?= htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="signupFullname" class="form-label"><?= htmlspecialchars($lang['full_name'] ?? 'Full Name', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-person"></i></span>
-                                <input type="text" class="form-control" id="signupFullname" name="full" value="<?= htmlspecialchars($_POST['full'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="name" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="signupPassword" class="form-label"><?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?></label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-lock"></i></span>
-                                <input type="password" class="form-control" id="signupPassword" name="password" autocomplete="new-password" required>
-                            </div>
-                        </div>
                         <button type="submit" name="signup" id="signupSubmit" class="btn btn-primary btn-perky fw-bold w-100"><?= htmlspecialchars($lang['signup'] ?? 'Register', ENT_QUOTES, 'UTF-8') ?></button>
                     </form>
                 </div>
