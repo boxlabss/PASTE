@@ -85,22 +85,6 @@ try {
         exit();
     }
 
-    // log admin activity (avoid dup row if identical ip+time)
-    $st = $pdo->query("SELECT MAX(id) last_id FROM admin_history");
-    $last_id = $st->fetch()['last_id'] ?? null;
-    $last_ip = $last_date = null;
-    if ($last_id) {
-        $st = $pdo->prepare("SELECT ip,last_date FROM admin_history WHERE id=?");
-        $st->execute([$last_id]);
-        $h = $st->fetch() ?: [];
-        $last_ip   = $h['ip'] ?? null;
-        $last_date = $h['last_date'] ?? null;
-    }
-    if ($last_ip !== $ip || $last_date !== $date) {
-        $st = $pdo->prepare("INSERT INTO admin_history(last_date,ip) VALUES(?,?)");
-        $st->execute([$date,$ip]);
-    }
-
     // read current interface settings
     $st = $pdo->prepare("SELECT theme, lang FROM interface WHERE id=1");
     $st->execute();

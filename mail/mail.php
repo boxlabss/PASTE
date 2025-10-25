@@ -1,9 +1,24 @@
 <?php
-declare(strict_types=1);
 /*
- * Paste <https://github.com/boxlabss/PASTE>
  * Email sending utility using PHPMailer with Gmail OAuth 2.0
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * demo: https://paste.boxlabs.uk/
+ *
+ * https://phpaste.sourceforge.io/
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 3
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License in LICENCE for more details.
  */
+
+declare(strict_types=1);
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start([
         'cookie_secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
@@ -56,7 +71,7 @@ function send_mail(string $to, string $subject, string $message, string $name, s
     error_log("mail.php: send_mail called - To: $to, Subject: $subject, Name: $name, CSRF Token: $csrf_token");
 
 
-    // Validate CSRF token (bypass for installer if site_info is empty)
+    // Validate CSRF token
     try {
         $pdo_temp = new PDO("mysql:host=$dbhost;dbname=$dbname;charset=utf8mb4", $dbuser, $dbpassword);
         $pdo_temp->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -66,7 +81,7 @@ function send_mail(string $to, string $subject, string $message, string $name, s
     } catch (PDOException $e) {
         $site_info_exists = false;
     }
-    if (!$is_installer && $site_info_exists && (empty($csrf_token) || $csrf_token !== $_SESSION['csrf_token'])) {
+    if ($site_info_exists && (empty($csrf_token) || $csrf_token !== $_SESSION['csrf_token'])) {
         error_log("mail.php: CSRF validation failed for email to $to");
         ob_end_clean();
         return ['status' => 'error', 'message' => 'CSRF validation failed. Please try again.'];

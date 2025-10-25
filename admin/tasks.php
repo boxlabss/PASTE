@@ -58,23 +58,6 @@ try {
         exit();
     }
 
-    // Log admin activity
-    $stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-    $last_id = $stmt->fetch()['last_id'] ?? null;
-
-    $last_date = null; $last_ip = null;
-    if ($last_id) {
-        $stmt = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id = ?");
-        $stmt->execute([$last_id]);
-        $row = $stmt->fetch();
-        $last_date = $row['last_date'] ?? null;
-        $last_ip = $row['ip'] ?? null;
-    }
-    if ($last_ip !== $ip || $last_date !== $date) {
-        $stmt = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $stmt->execute([$date, $ip]);
-    }
-
     // Handle maintenance tasks
     $msg = '';
     $msg_type = 'info';

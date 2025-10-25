@@ -211,7 +211,7 @@ try {
   .btn-soft{background:#101521;border:1px solid var(--border);color:#dbe5f5}
   .btn-soft:hover{background:#0e1422;color:#fff}
 
-  /* Quill dark styling override */
+  /* Quill */
   .ql-container.ql-snow{
     border:1px solid var(--border);
     border-radius:8px;
@@ -219,6 +219,9 @@ try {
     background:var(--content);
     color:var(--content-text);
     min-height:360px;
+  }
+  .ql-editor.ql-blank::before {
+    color: var(--muted) !important;
   }
   .ql-editor {
     min-height:360px;

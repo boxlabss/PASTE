@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -177,7 +177,7 @@ if (file_exists($config_file)) {
 $config_content = <<<EOD
 <?php
 /*
- * Paste \$v3.2 2025/09/01 https://github.com/boxlabss/PASTE
+ * Paste \$v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -193,7 +193,7 @@ $config_content = <<<EOD
  * GNU General Public License in LICENCE for more details.
  */
 
-\$currentversion = 3.2;
+\$currentversion = 3.3;
 \$pastelimit = "10"; // 10 MB
 
 // OAuth settings (for signups)

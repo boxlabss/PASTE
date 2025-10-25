@@ -31,10 +31,24 @@ Requirements
   - Composer for dependency management
   - Web server (e.g., Apache/Nginx) with HTTPS enabled (if OAuth enabled as below)
 
-See docs/CHANGELOG
+See docs/CHANGELOG.md
 
-Paste 3.2
-=======
+Paste 3.3
+====
+```
+* Improved autodetection for syntax highlighting for both GeSHi and Highlight.php
+	Fix sluggish behaviour with Highlight.php's autodetection of very large plain text especially.
+	Added more heuristic detection handling, improved efficiency of Paste's autodetect
+* Added Client side encryption with AES-256-GCM
+* Admin panel improvements
+	Add new email field for admins
+	Implemented Password reset in the admin panel (Forgot?)
+	Active tabs fixed in configuration.php/admin.php
+	Add option to "Reset token" for SMTP OAuth2h
+* Fixed an issue with Turnstile not working on the login/signup modals
+* Fixed an issue with reCAPTCHA v3 expiring tokens too soon
+
+Previous version 3.2
 * diff viewer reintegration
 	?diff.php?a=thispaste&b=anotherpaste
 
@@ -58,7 +72,6 @@ $hl_style = 'hybrid.css';
 ```
 * Page navs in header/footer
 * "Cookies" footer
-* See docs/CHANGELOG for more
 
 Previous version 3.1
 * Account deletion
@@ -89,6 +102,7 @@ Previous version - 3.0
 * Improved database schema
 * Update Parsedown for Markdown
 * All pastes encrypted in the database with AES-256 by default
+```
 
 ---
 Install

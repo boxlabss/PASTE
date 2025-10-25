@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -24,6 +24,7 @@
  * $baseurl (string), $default_theme (string), $lang (array)
  * $privatesite (optional: "on"), $mod_rewrite (string "1"/"0")
  */
+ 
 $show_pw = isset($require_password) && $require_password === true;
 
 // Build rewrite-aware action for the password form

@@ -45,19 +45,6 @@ try {
         throw new Exception('Base URL missing. Go to /admin/configuration.php');
     }
 
-    // Log admin activity (lightweight)
-    $last = $pdo->query("SELECT MAX(id) last_id FROM admin_history")->fetch();
-    if ($last && $last['last_id']) {
-        $st = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id=?");
-        $st->execute([$last['last_id']]);
-        $row = $st->fetch();
-        $last_date = $row['last_date'] ?? null;
-        $last_ip   = $row['ip'] ?? null;
-    }
-    if (($last_ip ?? '') !== $ip || ($last_date ?? '') !== $date) {
-        $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)")->execute([$date, $ip]);
-    }
-
 } catch (Throwable $e) {
     die("Unable to connect to database: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
 }

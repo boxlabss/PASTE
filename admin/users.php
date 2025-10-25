@@ -39,27 +39,6 @@ try {
     die("Unable to connect to database: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
 }
 
-/* Admin history (lightweight audit) */
-try {
-    $stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-    $last_id = $stmt->fetch()['last_id'] ?? null;
-
-    $last_ip = $last_date = null;
-    if ($last_id) {
-        $stmt = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id = ?");
-        $stmt->execute([$last_id]);
-        $row = $stmt->fetch();
-        $last_date = $row['last_date'] ?? null;
-        $last_ip   = $row['ip'] ?? null;
-    }
-    if ($last_ip !== $ip || $last_date !== $date) {
-        $stmt = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $stmt->execute([$date, $ip]);
-    }
-} catch (PDOException $e) {
-    // non-fatal
-}
-
 /* Base URL for sidebar links */
 try {
     $st = $pdo->query("SELECT baseurl FROM site_info WHERE id = 1");
@@ -71,7 +50,7 @@ try {
 /* Messages */
 $msg = '';
 
-/* Actions (GET) — keep existing behavior + add Verify */
+/* Actions (GET) */
 if (isset($_GET['delete'])) {
     $delid = (int)filter_var($_GET['delete'], FILTER_SANITIZE_NUMBER_INT);
     try {
@@ -105,7 +84,7 @@ if (isset($_GET['unban'])) {
     }
 }
 
-/* NEW: verify action (for unverified users) */
+/* verify action (for unverified users) */
 if (isset($_GET['verify'])) {
     $verify_id = (int)filter_var($_GET['verify'], FILTER_SANITIZE_NUMBER_INT);
     try {

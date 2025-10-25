@@ -43,19 +43,6 @@ try {
     $baseurl = rtrim((string)($pdo->query("SELECT baseurl FROM site_info WHERE id=1")->fetch()['baseurl'] ?? ''), '/') . '/';
     if (!$baseurl) { throw new Exception('Base URL missing.'); }
 
-    // admin history log (lightweight)
-    $last = $pdo->query("SELECT MAX(id) last_id FROM admin_history")->fetch();
-    if ($last && $last['last_id']) {
-        $row = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id=?");
-        $row->execute([$last['last_id']]);
-        $r = $row->fetch();
-        $last_date = $r['last_date'] ?? null;
-        $last_ip   = $r['ip'] ?? null;
-    }
-    if (($last_ip ?? '') !== $ip || ($last_date ?? '') !== $date) {
-        $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)")->execute([$date, $ip]);
-    }
-
 } catch (Throwable $e) {
     die("Unable to connect to database: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
 }

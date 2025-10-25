@@ -59,22 +59,6 @@ try {
         exit();
     }
 
-    // Log admin activity
-    $st = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-    $last_id = $st->fetch()['last_id'] ?? null;
-    $last_ip = $last_date = null;
-    if ($last_id) {
-        $st = $pdo->prepare("SELECT ip, last_date FROM admin_history WHERE id = ?");
-        $st->execute([$last_id]);
-        $h = $st->fetch();
-        $last_ip = $h['ip'] ?? null;
-        $last_date = $h['last_date'] ?? null;
-    }
-    if ($last_ip !== $ip || $last_date !== $date) {
-        $st = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $st->execute([$date, $ip]);
-    }
-
     // Fetch current ad settings (ensure row exists)
     $st = $pdo->query("SELECT text_ads, ads_1, ads_2 FROM ads WHERE id = 1");
     $adsRow = $st->fetch();
@@ -167,17 +151,43 @@ try {
 
   .footer { margin-top:24px; padding:12px; color:#9fb1d1 }
 
-  /* Quill adjustments */
+  /* Quill */
   .ql-container.ql-snow{
     border:1px solid var(--border);
     border-radius:8px;
+    font-size:16px;
     background:var(--content);
     color:var(--content-text);
-    min-height:200px;
+    min-height:360px;
   }
-  .ql-toolbar.ql-snow{background:var(--toolbar);border:1px solid var(--border);border-radius:8px}
+  .ql-editor.ql-blank::before {
+    color: var(--muted) !important;
+  }
+  .ql-editor {
+    min-height:360px;
+    color:var(--content-text);
+  }
+  .ql-toolbar.ql-snow{
+    background:var(--toolbar);
+    border:1px solid var(--border);
+    border-radius:8px;
+  }
+  .ql-snow .ql-picker, .ql-snow .ql-stroke{ color:#dbe5f5; stroke:#dbe5f5; }
+  .ql-snow .ql-fill{ fill:#dbe5f5; }
+  .ql-snow .ql-picker-options{ background:#0e1422; border-color:var(--border); }
+  .ql-snow .ql-tooltip{ background:#0e1422; border:1px solid var(--border); color:#e6edf3; }
+  .ql-snow .ql-tooltip input[type=text]{ background:#0c1220; color:#e6edf3; border-color:#23304a; }
+  .ql-snow .ql-picker-label:hover, .ql-snow .ql-picker-item:hover{ color:#fff; }
+  .ql-snow .ql-toolbar button:hover .ql-stroke,
+  .ql-snow .ql-toolbar button:hover .ql-fill { color:#fff; stroke:#fff; fill:#fff; }
+  .editor-footer {
+    display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:8px;
+    color:#9fb1d1;font-size:12px;
+  }
+  .editor-footer .status-dot{width:8px;height:8px;background:#2bd576;border-radius:50%;display:inline-block;margin-right:6px}
+  .editor-footer .stats{opacity:.9}
 
-  /* CodeMirror dark fit */
+  /* CodeMirror */
   .CodeMirror {
     height: 260px;
     border: 1px solid var(--border);

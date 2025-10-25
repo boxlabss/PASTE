@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,16 +9,42 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
-require_once 'includes/session.php';
+ 
+require_once __DIR__ . '/includes/session.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/functions.php';
 
-require_once('config.php');
-require_once('includes/functions.php');
+// Search API
+if (isset($_GET['api']) && $_GET['api'] === 'search') {
+  header('Content-Type: application/json');
+  $query = trim($_GET['q'] ?? '');
+  if (strlen($query) < 3) {
+    echo json_encode(['error' => 'Query too short (min 3 chars)']);
+    exit;
+  }
+  $limit = min(50, (int)($_GET['limit'] ?? 10));
+  $offset = max(0, (int)($_GET['offset'] ?? 0));
+  $search_term = '%' . $query . '%';
+  $sql = "SELECT p.id, p.title, p.code, p.date, COUNT(pv.id) AS views
+          FROM pastes p LEFT JOIN paste_views pv ON p.id = pv.paste_id
+          WHERE p.visible = '0' AND p.password = 'NONE' AND (p.title LIKE ? OR p.content LIKE ?)
+          GROUP BY p.id ORDER BY p.date DESC LIMIT ? OFFSET ?";
+  $stmt = $pdo->prepare($sql);
+  $stmt->execute([$search_term, $search_term, $limit, $offset]);
+  $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+  $count_sql = "SELECT COUNT(*) FROM pastes WHERE visible = '0' AND password = 'NONE' AND (title LIKE ? OR content LIKE ?)";
+  $count_stmt = $pdo->prepare($count_sql);
+  $count_stmt->execute([$search_term, $search_term]);
+  $total = (int)$count_stmt->fetchColumn();
+  echo json_encode(['results' => $results, 'total' => $total]);
+  exit;
+}
 
 // Disable non-GET requests
 if ($_SERVER['REQUEST_METHOD'] != 'GET') {

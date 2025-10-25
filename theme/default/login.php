@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * This program is free software; you can redistribute it and/or
@@ -22,6 +22,7 @@
  * $_SESSION['recaptcha_sitekey']
  * $_SESSION['turnstile_sitekey']
  */
+ 
 $cap_e = $_SESSION['cap_e'] ?? 'off';
 $mode = $_SESSION['mode'] ?? 'normal';
 $recaptcha_version = $_SESSION['recaptcha_version'] ?? 'v2';

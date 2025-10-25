@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,6 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
+ 
 $cap_e = $_SESSION['cap_e'] ?? 'off'; // Define $cap_e to avoid PHP errors
 $captcha_mode = $_SESSION['captcha_mode'] ?? 'none'; // 'recaptcha' (v2 checkbox), 'recaptcha_v3', 'turnstile', 'internal', 'none'
 $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set in index during GET)
@@ -220,7 +221,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
         <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on")): ?>
-		<!-- For demo site, but kept as an example
           <div class="card guest-welcome text-center">
             <div class="btn-group" role="group" aria-label="Download Paste">
               <a href="https://sourceforge.net/projects/phpaste/files/latest/download" class="btn btn-success">Get Paste <?=$currentversion?></a>
@@ -232,7 +232,6 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
 				GitHub</a>
             </div>
           </div>
-		  -->
         <?php endif; ?>
         <?php if (!isset($_SESSION['username']) && ($disableguest === "on")): ?>
           <div class="card">

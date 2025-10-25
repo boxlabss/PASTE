@@ -18,12 +18,29 @@
 require_once('../includes/password.php'); 
 session_start();
 require_once('../config.php');
+require_once('../mail/mail.php');
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['csrf_token'];
+
+// Fetch site info for baseurl and site_name
+try {
+    $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname", $dbuser, $dbpassword);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $stmt = $pdo->query("SELECT baseurl, site_name FROM site_info WHERE id = 1");
+    $site = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+} catch (PDOException $e) {
+    error_log("index.php: Database connection failed for site_info: " . $e->getMessage());
+    $site = [];
+}
+$baseurl = trim($site['baseurl'] ?? '');
+$site_name = trim($site['site_name'] ?? 'Paste');
 
 // Check if admin is already logged in
 if (isset($_SESSION['admin_login']) && isset($_SESSION['admin_id'])) {
     try {
-        $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname", $dbuser, $dbpassword);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $stmt = $pdo->prepare('SELECT id, user FROM admin WHERE id = ?');
         $stmt->execute([$_SESSION['admin_id']]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -35,43 +52,108 @@ if (isset($_SESSION['admin_login']) && isset($_SESSION['admin_id'])) {
             error_log("index.php: Session validation failed - id: {$_SESSION['admin_id']}, user: {$_SESSION['admin_login']}, found: " . ($row ? json_encode($row) : 'null'));
             unset($_SESSION['admin_login'], $_SESSION['admin_id']);
         }
-        $pdo = null;
     } catch (PDOException $e) {
         error_log("index.php: Database connection failed during session validation: " . $e->getMessage());
         unset($_SESSION['admin_login'], $_SESSION['admin_id']);
     }
 }
 
-try {
-    $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname", $dbuser, $dbpassword);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$action = $_GET['action'] ?? '';
+$msg = '';
 
-    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-        $username = trim($_POST['username'] ?? '');
-        $password = trim($_POST['password'] ?? '');
-        if ($username === '' || $password === '') {
-            error_log("index.php: Login failed - username or password empty. Username: '$username'");
-            $msg = '<div class="alert alert-warning text-center mb-3">Username and password are required</div>';
-        } else {
-            $stmt = $pdo->prepare('SELECT id, user, pass FROM admin WHERE user = :user LIMIT 1');
-            $stmt->execute(['user' => $username]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($row && password_verify($password, $row['pass'])) {
-                $_SESSION['admin_login'] = $row['user'];
-                $_SESSION['admin_id'] = $row['id'];
-                error_log("index.php: Login successful for user: '$username', redirecting to dashboard.php");
-                header("Location: dashboard.php");
-                exit();
+// Reset password
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    if (!hash_equals($csrf_token, $_POST['csrf_token'] ?? '')) {
+        $msg = '<div class="alert alert-danger text-center mb-3">Invalid CSRF token</div>';
+    } else {
+        if ($action === 'forgot') {
+            $username = trim($_POST['username'] ?? '');
+            if ($username === '') {
+                $msg = '<div class="alert alert-warning text-center mb-3">Username is required</div>';
             } else {
-                error_log("index.php: Login failed - invalid username or password. Username: '$username', Row: " . ($row ? json_encode($row) : 'null'));
-                $msg = '<div class="alert alert-danger text-center mb-3">Wrong User/Password</div>';
+                try {
+                    $stmt = $pdo->prepare('SELECT id, email FROM admin WHERE user = ?');
+                    $stmt->execute([$username]);
+                    if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                        $code = bin2hex(random_bytes(16));
+                        $exp = date('Y-m-d H:i:s', strtotime('+1 hour'));
+                        $stmt = $pdo->prepare('UPDATE admin SET reset_code = ?, reset_expiry = ? WHERE user = ?');
+                        $stmt->execute([$code, $exp, $username]);
+                        $reset_url = rtrim($baseurl, '/') . '/admin/index.php?action=reset&user=' . urlencode($username) . '&code=' . urlencode($code);
+                        $subject = "$site_name Admin Password Reset";
+                        $body = "To reset your admin password, click the link below:<br><br><a href='$reset_url' target='_self'>$reset_url</a><br><br>This link expires in 1 hour.";
+                        send_mail($row['email'], $subject, $body, $site_name, $csrf_token);
+                        $msg = '<div class="alert alert-success text-center mb-3">If that username exists, the password reset link was successfully sent to your email.</div>';
+                    } else {
+                        error_log("index.php: Forgot password failed - invalid username: '$username'");
+                        $msg = '<div class="alert alert-success text-center mb-3">If that username exists, the password reset link was successfully sent to your email.</div>';
+                    }
+                } catch (PDOException $e) {
+                    error_log("index.php: Database error during forgot password: " . $e->getMessage());
+                    $msg = '<div class="alert alert-danger text-center mb-3">An error occurred. Please try again.</div>';
+                }
+            }
+        } elseif ($action === 'reset') {
+            $username = trim($_GET['user'] ?? '');
+            $code = trim($_GET['code'] ?? '');
+            $password = trim($_POST['password'] ?? '');
+            if ($password === '') {
+                $msg = '<div class="alert alert-warning text-center mb-3">Password is required</div>';
+            } else {
+                try {
+                    $stmt = $pdo->prepare('SELECT id FROM admin WHERE user = ? AND reset_code = ? AND reset_expiry > NOW()');
+                    $stmt->execute([$username, $code]);
+                    if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                        $hash = password_hash($password, PASSWORD_DEFAULT);
+                        $stmt = $pdo->prepare('UPDATE admin SET pass = ?, reset_code = NULL, reset_expiry = NULL WHERE user = ?');
+                        $stmt->execute([$hash, $username]);
+                        error_log("index.php: Password reset successful for user: '$username'");
+                        $msg = '<div class="alert alert-success text-center mb-3">Password reset successful. You can now log in.</div>';
+                    } else {
+                        error_log("index.php: Password reset failed - invalid/expired code for user: '$username'");
+                        $msg = '<div class="alert alert-danger text-center mb-3">Invalid or expired reset link</div>';
+                    }
+                } catch (PDOException $e) {
+                    error_log("index.php: Database error during password reset: " . $e->getMessage());
+                    $msg = '<div class="alert alert-danger text-center mb-3">An error occurred. Please try again.</div>';
+                }
+            }
+        } else {
+            // Login
+            $username = trim($_POST['username'] ?? '');
+            $password = trim($_POST['password'] ?? '');
+            if ($username === '' || $password === '') {
+                error_log("index.php: Login failed - username or password empty. Username: '$username'");
+                $msg = '<div class="alert alert-warning text-center mb-3">Username and password are required</div>';
+            } else {
+                try {
+                    $stmt = $pdo->prepare('SELECT id, user, pass FROM admin WHERE user = :user LIMIT 1');
+                    $stmt->execute(['user' => $username]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    if ($row && password_verify($password, $row['pass'])) {
+                        $_SESSION['admin_login'] = $row['user'];
+                        $_SESSION['admin_id'] = $row['id'];
+                        error_log("index.php: Login successful for user: '$username', redirecting to dashboard.php");
+                        // Login Admin History
+                        $date = date('Y-m-d H:i:s');
+                        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+                        $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                        $log_stmt = $pdo->prepare("INSERT INTO admin_history (admin_id, last_date, ip, user_agent) VALUES (?, ?, ?, ?)");
+                        $log_stmt->execute([$row['id'], $date, $ip, $ua]);
+                        header("Location: dashboard.php");
+                        exit();
+                    } else {
+                        error_log("index.php: Login failed - invalid username or password. Username: '$username', Row: " . ($row ? json_encode($row) : 'null'));
+                        $msg = '<div class="alert alert-danger text-center mb-3">Invalid login details.</div>';
+                    }
+                } catch (PDOException $e) {
+                    error_log("index.php: Database error during login: " . $e->getMessage());
+                    $msg = '<div class="alert alert-danger text-center mb-3">An error occurred. Please try again.</div>';
+                }
             }
         }
     }
-} catch (PDOException $e) {
-    error_log("index.php: Database connection failed: " . $e->getMessage());
-    $msg = '<div class="alert alert-danger text-center mb-3">Unable to connect to database: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
 }
 ?>
 <!DOCTYPE html>
@@ -79,7 +161,7 @@ try {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Paste - Login</title>
+<title>Paste - Admin</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <style>
@@ -107,28 +189,65 @@ try {
 <div class="login-wrap">
   <div class="card shadow-sm" style="max-width:460px;width:100%;">
     <div class="card-body p-4">
-      <div class="d-flex align-items-center justify-content-between mb-3">
-        <h4 class="mb-0">Admin Login</h4>
-        <i class="bi bi-shield-lock"></i>
-      </div>
-      <?php if (isset($msg)) echo $msg; ?>
-      <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" method="post" novalidate>
-        <div class="mb-3">
-          <label for="username" class="form-label">Username</label>
-          <input type="text" class="form-control" id="username" name="username" autocomplete="username" required>
+      <?php if ($action === 'forgot') { ?>
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h4 class="mb-0">Forgot Password</h4>
+          <i class="bi bi-shield-lock"></i>
         </div>
-        <div class="mb-3">
-          <label for="password" class="form-label d-flex justify-content-between">
-            <span>Password</span>
-            <a class="link-secondary small text-decoration-none" href="../forgot.php">Forgot?</a>
-          </label>
-          <input type="password" class="form-control" id="password" name="password" autocomplete="current-password" required>
+        <?php if ($msg) echo $msg; ?>
+        <form action="?action=forgot" method="post" novalidate>
+          <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+          <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input type="text" class="form-control" id="username" name="username" autocomplete="username" required>
+          </div>
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-envelope me-1"></i>Send Reset Link</button>
+            <a class="btn btn-soft" href="index.php">Back to Login</a>
+          </div>
+        </form>
+      <?php } elseif ($action === 'reset' && isset($_GET['user']) && isset($_GET['code'])) { ?>
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h4 class="mb-0">Reset Password</h4>
+          <i class="bi bi-shield-lock"></i>
         </div>
-        <div class="d-grid gap-2">
-          <button type="submit" class="btn btn-primary"><i class="bi bi-box-arrow-in-right me-1"></i>Login</button>
-          <a class="btn btn-soft" href="<?php echo htmlspecialchars('../', ENT_QUOTES, 'UTF-8'); ?>">Back to site</a>
+        <?php if ($msg) echo $msg; ?>
+        <form action="?action=reset&user=<?php echo urlencode($_GET['user']); ?>&code=<?php echo urlencode($_GET['code']); ?>" method="post" novalidate>
+          <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+          <div class="mb-3">
+            <label for="password" class="form-label">New Password</label>
+            <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" required>
+          </div>
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-key me-1"></i>Reset Password</button>
+            <a class="btn btn-soft" href="index.php">Back to Login</a>
+          </div>
+        </form>
+      <?php } else { ?>
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h4 class="mb-0">Admin Login</h4>
+          <i class="bi bi-shield-lock"></i>
         </div>
-      </form>
+        <?php if ($msg) echo $msg; ?>
+        <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" method="post" novalidate>
+          <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+          <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input type="text" class="form-control" id="username" name="username" autocomplete="username" required>
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label d-flex justify-content-between">
+              <span>Password</span>
+              <a class="link-secondary small text-decoration-none" href="?action=forgot">Forgot?</a>
+            </label>
+            <input type="password" class="form-control" id="password" name="password" autocomplete="current-password" required>
+          </div>
+          <div class="d-grid gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-box-arrow-in-right me-1"></i>Login</button>
+            <a class="btn btn-soft" href="<?php echo htmlspecialchars('../', ENT_QUOTES, 'UTF-8'); ?>">Back to site</a>
+          </div>
+        </form>
+      <?php } ?>
     </div>
   </div>
 </div>

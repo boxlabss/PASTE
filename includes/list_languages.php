@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/08/21 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -155,7 +155,7 @@ function highlight_supported_languages(): array {
 // id => label for highlight.php (adds Autodetect, Markdown, Text; hides 'plaintext')
 function highlight_language_map(array $langs): array {
     $map = [
-        'autodetect' => 'Autodetect (experimental)',
+        'autodetect' => 'Autodetect Language',
         'markdown'   => 'Markdown',
         'text'       => 'Plain Text',
     ];

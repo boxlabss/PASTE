@@ -63,24 +63,6 @@ $date = date('Y-m-d H:i:s');
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 require_once('../includes/functions.php');
 
-// Log admin activity
-$last_ip = null; $last_date = null;
-$stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-$last_id = $stmt->fetch(PDO::FETCH_ASSOC)['last_id'] ?? null;
-
-if ($last_id) {
-    $stmt = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id = ?");
-    $stmt->execute([$last_id]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row) { $last_date = $row['last_date'] ?? ''; $last_ip = $row['ip'] ?? ''; }
-}
-if ($last_ip !== $ip || $last_date !== $date) {
-    try {
-        $stmt = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $stmt->execute([$date, $ip]);
-    } catch (PDOException $e) { error_log("dashboard.php: Failed to log admin activity: " . $e->getMessage()); }
-}
-
 // Stats
 $stmt = $pdo->query("SELECT SUM(tpage) AS total_page, SUM(tvisit) AS total_visit FROM page_view");
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -394,35 +376,34 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="col-lg-6">
           <div class="card h-100">
             <div class="card-body">
-              <h4 class="card-title">Admin History</h4>
+              <h4 class="card-title">Admin Login History</h4>
               <div class="table-responsive">
                 <table class="table table-hover table-bordered align-middle">
                   <thead>
-                    <tr><th>ID</th><th>Last Login Date</th><th>IP</th></tr>
+                    <tr><th>Date</th><th>Admin</th><th>IP</th><th>User Agent</th></tr>
                   </thead>
                   <tbody>
                     <?php
-                    $stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-                    $last_id = $stmt->fetch(PDO::FETCH_ASSOC)['last_id'] ?? null;
-
-                    if ($last_id) {
-                      for ($cloop = 0; $cloop <= 6; $cloop++) {
-                        $c_my_id = $last_id - $cloop;
-                        $stmt = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id = ?");
-                        $stmt->execute([$c_my_id]);
-                        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                        if ($row) {
-                          $last_date = $row['last_date'] ?? '';
-                          $ip = htmlspecialchars($row['ip'] ?? '', ENT_QUOTES, 'UTF-8');
-                          echo "<tr>
-                                  <td>".htmlspecialchars($c_my_id, ENT_QUOTES, 'UTF-8')."</td>
-                                  <td>".htmlspecialchars($last_date, ENT_QUOTES, 'UTF-8')."</td>
-                                  <td><span class='badge'>$ip</span></td>
-                                </tr>";
-                        }
-                      }
+                    $stmt = $pdo->query("SELECT ah.last_date, a.user AS admin_user, ah.ip, ah.user_agent 
+                                         FROM admin_history ah 
+                                         LEFT JOIN admin a ON ah.admin_id = a.id 
+                                         ORDER BY ah.id DESC LIMIT 7");
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    if (empty($rows)) {
+                      echo "<tr><td colspan='4' class='text-center'>No admin history found.</td></tr>";
                     } else {
-                      echo "<tr><td colspan='3' class='text-center'>No admin history found.</td></tr>";
+                      foreach ($rows as $row) {
+                        $last_date = htmlspecialchars($row['last_date'] ?? '', ENT_QUOTES, 'UTF-8');
+                        $admin_user = htmlspecialchars($row['admin_user'] ?? 'Legacy', ENT_QUOTES, 'UTF-8');
+                        $ip = htmlspecialchars($row['ip'] ?? '', ENT_QUOTES, 'UTF-8');
+                        $user_agent = htmlspecialchars($row['user_agent'] ?? '', ENT_QUOTES, 'UTF-8');
+                        echo "<tr>
+                                <td>$last_date</td>
+                                <td>$admin_user</td>
+                                <td><span class='badge'>$ip</span></td>
+                                <td>$user_agent</td>
+                              </tr>";
+                      }
                     }
                     ?>
                   </tbody>

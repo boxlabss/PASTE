@@ -15,6 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
+ 
 declare(strict_types=1);
 
 require_once __DIR__ . '/includes/session.php';

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,12 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
+ 
 declare(strict_types=1);
 
 // Set default timezone
@@ -612,8 +613,6 @@ function getNavLinks(PDO $pdo, string $location): array
         ");
         $stmt->execute(['loc' => $location]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Index by id, pre-fill structure
         $items = [];
         foreach ($rows as $r) {
             $items[(int)$r['id']] = [
@@ -1071,6 +1070,31 @@ function paste_detect_php_tag(string $s): bool {
     return (bool) preg_match('/<\?(php|=)/i', $s);
 }
 
+function paste_natural_language_score(string $code): float {
+    // Top 50 common English words (source: Oxford English Corpus; case-insensitive)
+    $commonWords = [
+        'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'have',
+        'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
+        'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she',
+        'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what',
+        'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me'
+    ];
+    
+    // Normalize text: lowercase, split into words (alphanumeric only for simplicity)
+    $lower = strtolower($code);
+    preg_match_all('/\b[a-z]+\b/', $lower, $matches);
+    $words = $matches[0] ?? [];
+    $totalWords = count($words);
+    if ($totalWords < 10) return 0.0; // Too short to judge
+    
+    $commonCount = 0;
+    foreach ($words as $w) {
+        if (in_array($w, $commonWords, true)) $commonCount++;
+    }
+    
+    return $commonCount / $totalWords;
+}
+
 /**
  * Feature extractor used by the ensemble. Fast & language-agnostic.
  * Returns an array of simple counts/ratios.
@@ -1079,6 +1103,12 @@ function paste_feature_extract(string $code): array {
     $len  = max(1, strlen($code));
     $lines = preg_split('/\R/', $code);
     $lc   = max(1, count($lines));
+
+    // For very large code (>500KB), sample to cap regex time
+    if ($len > 500000) {
+        $code = substr($code, 0, 250000) . substr($code, -250000);
+        $len = strlen($code);
+    }
 
     $semicolon = substr_count($code, ';');
     $braces    = preg_match_all('/[{}]/', $code) ?: 0;
@@ -1125,6 +1155,22 @@ function paste_feature_extract(string $code): array {
     $qml_hint += preg_match_all('/(^|\n)\s*import\s+Qt[^\r\n]*/', $code) ?: 0;
     $qml_hint += preg_match_all('/(^|\n)\s*[A-Z][A-Za-z0-9_]*\s*\{\s*$/m', $code) ?: 0;
 
+    // Assembly opcodes (for GeSHi/Highlight asm variants like 6502, armasm, z80)
+    $assembly_opcodes = preg_match_all('/\b(mov|jmp|add|sub|push|pop|lea|call|ret|int|cmp|test|ldr|str|bl|bx|movz|movk)\b/i', $code) ?: 0;
+
+    // Lisp/Scheme parens density (for lisp, scheme, clojure, racket)
+    $lisp_parens = substr_count($code, '(') + substr_count($code, ')');
+    $lisp_parens_ratio = $lisp_parens / $len;
+
+    // Fortran fixed-format (columns 1-5 label, 6 continuation, 7-72 code; for fortran)
+    $fortran_fixed = preg_match_all('/^ {0,5}\d| {6}[^ !*]/m', $code) ?: 0;
+
+    // BNF/ABNF/EBNF rules (::= or | or <rule>)
+    $bnf_rules = preg_match_all('/::=|\||<[^>]+>/', $code) ?: 0;
+
+    // GLSL shaders (for glsl)
+    $glsl_keywords = preg_match_all('/\b(gl_Position|vec[234]|mat[234]|uniform|varying|attribute|shader|fragment|vertex)\b/i', $code) ?: 0;
+
     return [
         'len'              => $len,
         'lines'            => $lc,
@@ -1144,6 +1190,11 @@ function paste_feature_extract(string $code): array {
         'powershell_sig'   => $powershell_sig,
         'tcl_signals'      => $tcl_signals,
         'qml_hint'         => $qml_hint,
+        'assembly_opcodes' => $assembly_opcodes,
+        'lisp_parens_ratio' => $lisp_parens_ratio,
+        'fortran_fixed'    => $fortran_fixed,
+        'bnf_rules'        => $bnf_rules,
+        'glsl_keywords'    => $glsl_keywords,
     ];
 }
 
@@ -1191,12 +1242,12 @@ function paste_candidate_languages(string $engine, array $f): array {
     }
 
     // YAML only with clear YAML shape and low C-like signals
-    if ($f['yaml_key_lines'] >= 3 && $f['brace_ratio'] < 0.4 && $f['semicolon_ratio'] < 0.25) {
+    if ($f['yaml_key_lines'] >= 3 && $f['brace_ratio'] < 0.02 && $f['semicolon_ratio'] < 0.15) {
         $cand[] = 'yaml';
     }
 
     // C-like?
-    if ($f['has_preproc'] || $f['semicolon_ratio'] >= 0.25 || $f['brace_ratio'] >= 0.4) {
+    if ($f['has_preproc'] || $f['semicolon_ratio'] >= 0.15 || $f['brace_ratio'] >= 0.02) {
         $cand = array_merge($cand, $c_like);
     }
 
@@ -1222,7 +1273,7 @@ function paste_candidate_languages(string $engine, array $f): array {
 /** Simple heuristic pick for GeSHi (returns a *highlight* id). */
 function paste_pick_from_features(array $f): string {
     if ($f['json_like']) return 'json';
-    if ($f['yaml_key_lines'] >= 3 && $f['semicolon_ratio'] < 0.25) return 'yaml';
+    if ($f['yaml_key_lines'] >= 3 && $f['semicolon_ratio'] < 0.15) return 'yaml';
     if ($f['sql_keywords'] > 0) return 'sql';
     if ($f['mirc_patterns'] > 0) return 'mirc';
     if ($f['powershell_sig'] > 0) return 'powershell';
@@ -1231,8 +1282,18 @@ function paste_pick_from_features(array $f): string {
     if ($f['make_targets'] > 0) return 'makefile';
     if ($f['tag_density'] > 0.02 && !$f['has_preproc']) return 'xml';
     if ($f['qml_hint'] > 0) return 'qml';
-    if ($f['has_preproc'] || $f['brace_ratio'] >= 0.4) return 'cpp';
-    if ($f['semicolon_ratio'] >= 0.25) return 'javascript';
+    if ($f['has_preproc'] || $f['brace_ratio'] >= 0.02) return 'cpp';
+    if ($f['semicolon_ratio'] >= 0.15) return 'javascript';
+    // Assembly if opcodes present and low semicolons (for 6502, arm, z80, etc.)
+    if ($f['assembly_opcodes'] >= 5 && $f['semicolon_ratio'] < 0.1) return 'x86asm'; // or 'armasm', etc.; group as 'asm'
+    // Lisp if high parens ratio
+    if ($f['lisp_parens_ratio'] > 0.05) return 'lisp'; // or 'scheme', 'clojure'
+    // Fortran fixed-format
+    if ($f['fortran_fixed'] >= 3) return 'fortran';
+    // BNF/ABNF if rules present
+    if ($f['bnf_rules'] >= 5) return 'bnf'; // or 'abnf', 'ebnf'
+    // GLSL if keywords present
+    if ($f['glsl_keywords'] >= 3) return 'glsl';
     return 'plaintext';
 }
 
@@ -1280,58 +1341,25 @@ function paste_autodetect_language(string $code, string $engine = 'highlight', $
         }
     }
 
-    // 5) Feature-driven ensemble
-    $F = paste_feature_extract($code);
-
-    if ($engine === 'highlight' && $hl) {
-        // Restrict hljs auto to a small candidate pool built from features
-        $cand = paste_candidate_languages('highlight', $F);
-        if ($cand && method_exists($hl, 'setAutodetectLanguages')) {
-            $hl->setAutodetectLanguages($cand);
-        } else {
-            $allow = paste_hl_autodetect_allowlist($hl, $code, paste_detect_php_tag($code));
-            if ($allow) $hl->setAutodetectLanguages($allow);
-        }
-
-        try {
-            $res  = $hl->highlightAuto($code);
-            $lang = strtolower((string)($res->language ?? ''));
-
-            // Guard against misfires: e.g. HTML chosen while C-preproc present
-            if ($lang === '' || ($lang === 'xml' && ($F['has_preproc'] || $F['brace_ratio'] >= 0.4))) {
-                $lang = paste_pick_from_features($F);
-                if ($lang === 'markdown') {
-                    return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'heuristic'];
-                }
-                $id = paste_normalize_lang($lang, 'highlight', $hl);
-                return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
-            }
-
-            if ($lang === 'markdown') {
-                return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'hljs'];
-            }
-
-            // YAML vs SQL/Markdown guard
-            if (in_array($lang, ['sql','markdown'], true) && $F['yaml_key_lines'] >= 3 && $F['semicolon_ratio'] < 0.25) {
-                $lang = 'yaml';
-            }
-
-            $id = paste_normalize_lang($lang, 'highlight', $hl);
-            return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'hljs'];
-        } catch (\Throwable $e) {
-            $lang = paste_pick_from_features($F);
-            $id   = paste_normalize_lang($lang, 'highlight', $hl);
-            return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
+    // 5) Quick natural language check for plaintext
+    $nlScore = paste_natural_language_score($code);
+    if ($nlScore > 0.20 && strlen($code) > 100) {  // Threshold: 20% common words, min length to avoid noise
+        // Confirm no strong code signals (adjust thresholds as needed)
+        $F = paste_feature_extract($code);  // Extract features if not already
+        if ($F['semicolon_ratio'] < 0.15 && $F['brace_ratio'] < 0.02 && !$F['has_preproc'] && $F['tag_density'] < 0.01) {
+            $id = ($engine === 'highlight') ? 'plaintext' : 'text';
+            return ['id' => $id, 'label' => 'Plain Text', 'source' => 'heuristic'];
         }
     }
 
-    // GeSHi path: choose by features, then map to GeSHi id
+    // 6) Feature-driven ensemble (no auto for 'highlight')
+    $F = paste_feature_extract($code);
     $lang = paste_pick_from_features($F);
     if ($lang === 'markdown') {
         return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'heuristic'];
     }
-    $id = paste_normalize_lang($lang, 'geshi', null);
-    if ($id === '') $id = 'text';
+    $id = paste_normalize_lang($lang, $engine, $hl);
+    if ($id === '') $id = ($engine === 'highlight' ? 'plaintext' : 'text');
     return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
 }
 
@@ -1547,7 +1575,6 @@ if (!function_exists('paste_error')) {
         exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
     }
 }
-
 
 if (!function_exists('paste_enable_themed_errors')) {
     function paste_enable_themed_errors(): void

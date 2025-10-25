@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,23 +9,23 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
  
-require_once 'includes/session.php';
-require_once 'config.php';
-require_once 'includes/functions.php';
+require_once __DIR__ . '/includes/session.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/functions.php';
 
-// utf-8
+// UTF-8
 header('Content-Type: text/html; charset=utf-8');
 
-// common
 $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+
 global $pdo;
 
 // JSON response for ajax delete

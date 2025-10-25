@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/01 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,16 +9,18 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
+ 
 declare(strict_types=1);
 
-require_once 'includes/session.php';
-require_once 'config.php';
+require_once __DIR__ . '/includes/session.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/includes/functions.php';
 
 // Load highlighter engine libs conditionally
 if (($highlighter ?? 'geshi') === 'geshi') {
@@ -26,8 +28,6 @@ if (($highlighter ?? 'geshi') === 'geshi') {
 } else {
     require_once __DIR__ . '/includes/hlbootstrap.php';
 }
-
-require_once 'includes/functions.php';
 
 // ensure these are visible to all included templates (header/footer/sidebar)
 global $pdo, $mod_rewrite;

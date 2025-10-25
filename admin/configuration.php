@@ -43,6 +43,7 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 $date = date('Y-m-d H:i:s');
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+$ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 require_once '../config.php';
 // Dependency guards if vendor trees missing
 $OAUTH_VENDOR = __DIR__ . '/../oauth/vendor/autoload.php';
@@ -88,6 +89,13 @@ function require_mail_vendor_or_json_error(): void {
     exit;
 }
 
+// --- Active tab persistence (server-side default) ---
+$activeTab = $_POST['active_tab'] ?? $_GET['tab'] ?? 'siteinfo';
+$validTabs = ['siteinfo','permissions','captcha','mail'];
+if (!in_array($activeTab, $validTabs, true)) {
+    $activeTab = 'siteinfo';
+}
+
 try {
     $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname;charset=utf8mb4", $dbuser, $dbpassword, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -104,19 +112,6 @@ try {
         ob_end_clean();
         header('Location: index.php');
         exit;
-    }
-    $stmt = $pdo->query("SELECT MAX(id) AS last_id FROM admin_history");
-    $last_id = $stmt->fetch()['last_id'] ?? null;
-    if ($last_id) {
-        $stmt = $pdo->prepare("SELECT last_date, ip FROM admin_history WHERE id = ?");
-        $stmt->execute([$last_id]);
-        $row = $stmt->fetch();
-        $last_date = $row['last_date'] ?? null;
-        $last_ip = $row['ip'] ?? null;
-    }
-    if (($last_ip ?? '') !== $ip || ($last_date ?? '') !== $date) {
-        $stmt = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $stmt->execute([$date, $ip]);
     }
     $stmt = $pdo->query("SELECT * FROM site_info WHERE id = 1");
     $row = $stmt->fetch() ?: [];
@@ -359,6 +354,20 @@ try {
                         $msg_type = 'error';
                     }
                 }
+            } elseif (isset($_POST['reset_oauth_token'])) {
+                try {
+                    $stmt = $pdo->prepare("UPDATE mail SET oauth_refresh_token = '' WHERE id = 1");
+                    $stmt->execute();
+                    $oauth_refresh_token = '';
+                    $oauth_status = 'OAuth refresh token not set. Configure Gmail OAuth if using smtp.gmail.com.';
+                    $msg_plain = 'OAuth refresh token reset successfully.';
+                    $msg_type = 'success';
+                    error_log("configuration.php: OAuth refresh token reset successfully");
+                } catch (PDOException $e) {
+                    error_log("configuration.php: OAuth refresh token reset error: " . $e->getMessage());
+                    $msg_plain = $e->getMessage();
+                    $msg_type = 'error';
+                }
             } elseif (isset($_POST['cap'])) {
                 $cap_e = trim($_POST['cap_e'] ?? '');
                 $mode = trim($_POST['mode'] ?? '');
@@ -473,8 +482,9 @@ try {
                     error_log("configuration.php: CSRF token regenerated: {$_SESSION['csrf_token']}, Session ID: " . session_id());
                 }
                 if (!is_ajax()) {
+                    $query_param = ($msg_type === 'success') ? 'msg' : 'error';
                     ob_end_clean();
-                    header("Location: {$_SERVER['PHP_SELF']}?$msg_type=" . urlencode($msg_plain) . "#$activeTab");
+                    header("Location: {$_SERVER['PHP_SELF']}?tab=" . urlencode($activeTab) . "&$query_param=" . urlencode($msg_plain));
                     exit;
                 }
             }
@@ -493,19 +503,6 @@ try {
 } finally {
     // Keep variables like $baseurl/$site_name in scope for HTML; we only close PDO connection here.
     $pdo = null;
-}
-// --- Active tab persistence (server-side default) ---
-$activeTab = $_POST['active_tab'] ?? $_GET['tab'] ?? '';
-$validTabs = ['siteinfo','permissions','captcha','mail'];
-if (!in_array($activeTab, $validTabs, true)) {
-    // Also allow hash from URL if present (e.g. #mail) on first paint:
-    if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '#') !== false) {
-        $hash = substr($_SERVER['REQUEST_URI'], strpos($_SERVER['REQUEST_URI'], '#') + 1);
-        if (in_array($hash, $validTabs, true)) {
-            $activeTab = $hash;
-        }
-    }
-    if (!$activeTab) $activeTab = 'siteinfo';
 }
 ?>
 <!DOCTYPE html>
@@ -680,12 +677,12 @@ if (!in_array($activeTab, $validTabs, true)) {
                   <input type="text" class="form-control" id="face" name="face" placeholder="Facebook URL" value="<?php echo htmlspecialchars($face ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="mb-3">
-                  <label for="twit" class="form-label">Twitter URL</label>
-                  <input type="text" class="form-control" id="twit" name="twit" placeholder="Twitter URL" value="<?php echo htmlspecialchars($twit ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                  <label for="twit" class="form-label">X URL</label>
+                  <input type="text" class="form-control" id="twit" name="twit" placeholder="X URL" value="<?php echo htmlspecialchars($twit ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="mb-3">
-                  <label for="gplus" class="form-label">Google+ URL</label>
-                  <input type="text" class="form-control" id="gplus" name="gplus" placeholder="Google+ URL" value="<?php echo htmlspecialchars($gplus ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                  <label for="gplus" class="form-label">Other URL</label>
+                  <input type="text" class="form-control" id="gplus" name="gplus" placeholder="URL" value="<?php echo htmlspecialchars($gplus ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="mb-3">
                   <label for="additional_scripts" class="form-label">Additional Site Scripts</label>
@@ -859,10 +856,11 @@ if (!in_array($activeTab, $validTabs, true)) {
                   <div class="form-text"><?php echo htmlspecialchars($oauth_status ?? '', ENT_QUOTES, 'UTF-8'); ?></div>
                   <?php if (empty($oauth_refresh_token)): ?>
                     <p class="mt-2"><a href="../oauth/google_smtp.php" class="btn btn-primary">Authorize Gmail SMTP</a></p>
+                  <?php else: ?>
+                    <p class="mt-2"><button type="submit" name="reset_oauth_token" value="reset" class="btn btn-danger">Reset OAuth Token</button></p>
                   <?php endif; ?>
                 </div>
-                <input type="hidden" name="save_oauth_credentials" value="save_oauth_credentials" />
-                <button type="submit" class="btn btn-primary">Save OAuth Credentials</button>
+                <button type="submit" name="save_oauth_credentials" value="save" class="btn btn-primary">Save OAuth Credentials</button>
               </form>
             </div>
           </div><!-- /.tab-content -->
@@ -959,7 +957,7 @@ if (!in_array($activeTab, $validTabs, true)) {
   }
   $('#mode').on('change', toggleCaptchaSettings);
   toggleCaptchaSettings(); // Initial toggle on load
-  // Keep active tab after Save + support URL hashes
+  // Keep active active tab after Save + support URL hashes
   document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.getElementById('configTabs');
     const setHiddenInputs = (tabId) => {

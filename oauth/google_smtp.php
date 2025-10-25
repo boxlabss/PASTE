@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.1 2025/08/16 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -173,85 +173,85 @@ try {
     exit;
 }
 ?>
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
 <head>
-    <meta charset="utf-8">
-    <title>Paste - Google OAuth Setup for Gmail SMTP</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link rel="shortcut icon" href="../admin/favicon.ico">
-    <link href="../admin/css/paste.css" rel="stylesheet" type="text/css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Google OAuth Setup for Gmail SMTP - Paste</title>
+    <link rel="shortcut icon" href="../theme/default/img/favicon.ico">
+    <link href="//cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="../theme/default/css/paste.css" rel="stylesheet" type="text/css">
 </head>
 <body>
-    <div id="top" class="clearfix">
-        <div class="applogo"><a href="../" class="logo">Paste</a></div>
-        <ul class="top-right">
-            <li class="dropdown link">
-                <a href="#" class="profilebox"><b><?php echo htmlspecialchars($_SESSION['admin_login']); ?></b></a>
-            </li>
-        </ul>
-    </div>
+    <nav class="navbar navbar-expand-lg bg-dark">
+        <div class="container-xxl d-flex align-items-center">
+            <a class="navbar-brand" href="<?php echo htmlspecialchars($baseurl ?? '', ENT_QUOTES, 'UTF-8') ?>">
+                <i class="bi bi-clipboard"></i> Paste
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <?php echo htmlspecialchars($_SESSION['admin_login'] ?? 'Admin', ENT_QUOTES, 'UTF-8'); ?>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="../admin/configuration.php"><i class="bi bi-gear"></i> Configuration</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
 
-    <div class="content">
-        <div class="container-widget">
-            <div class="panel panel-widget">
-                <div class="panel-body">
-                    <h2>Google OAuth 2.0 Setup for Gmail SMTP</h2>
-
-                    <form class="form-horizontal" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
-                        <div class="form-group">
-                            <label class="col-sm-2 control-label">Client ID</label>
-                            <div class="col-sm-10">
+    <div class="container-xxl my-4">
+        <div class="row">
+            <div class="col-lg-10">
+                <div class="card">
+                    <div class="card-header">
+                        <h1>Google OAuth 2.0 Setup for Gmail SMTP</h1>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
+                            <div class="mb-3">
+                                <label class="form-label">Client ID</label>
                                 <input type="text" class="form-control" name="client_id" placeholder="Google OAuth Client ID" value="<?php echo htmlspecialchars($client_id); ?>">
                             </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="col-sm-2 control-label">Client Secret</label>
-                            <div class="col-sm-10">
+                            <div class="mb-3">
+                                <label class="form-label">Client Secret</label>
                                 <input type="text" class="form-control" name="client_secret" placeholder="Google OAuth Client Secret" value="<?php echo htmlspecialchars($client_secret); ?>">
                             </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="col-sm-offset-2 col-sm-10">
-                                <button type="submit" name="save_credentials" class="btn btn-default">Save Credentials</button>
+                            <div class="mb-3">
+                                <button type="submit" name="save_credentials" class="btn btn-primary">Save Credentials</button>
                                 <?php if (!empty($client_id) && !empty($client_secret)): ?>
-                                    <a href="?start=1" class="btn btn-info">Authorize Gmail SMTP</a>
+                                    <a href="?start=1" class="btn btn-success">Authorize Gmail SMTP</a>
                                 <?php else: ?>
                                     <button type="button" class="btn btn-info" disabled>Authorize Gmail SMTP (save creds first)</button>
                                 <?php endif; ?>
                             </div>
-                        </div>
-                    </form>
+                        </form>
 
-                    <p><a href="https://console.developers.google.com" target="_blank" rel="noreferrer">Create or manage your Google OAuth credentials</a></p>
-                    <p>Redirect URI for Google Cloud Console: <code><?php echo htmlspecialchars($redirect_uri); ?></code></p>
+                        <p><a href="https://console.developers.google.com" target="_blank" rel="noreferrer">Create or manage your Google OAuth credentials</a></p>
+                        <p>Redirect URI for Google Cloud Console: <code><?php echo htmlspecialchars($redirect_uri); ?></code></p>
 
-                    <?php if (!empty($refresh_token)): ?>
-                        <p><strong>Refresh Token Status:</strong> A refresh token is saved in the database.</p>
-                    <?php else: ?>
-                        <p><strong>Refresh Token Status:</strong> No refresh token saved. Click "Authorize Gmail SMTP" to obtain one (you'll be redirected to Google).</p>
-                    <?php endif; ?>
-
+                        <?php if (!empty($refresh_token)): ?>
+                            <p><strong>Refresh Token Status:</strong> A refresh token is saved in the database.</p>
+                        <?php else: ?>
+                            <p><strong>Refresh Token Status:</strong> No refresh token saved. Click "Authorize Gmail SMTP" to obtain one (you'll be redirected to Google).</p>
+                        <?php endif; ?>
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="row footer">
-            <div class="col-md-6 text-left">
-                <a href="https://github.com/boxlabss/PASTE" target="_blank" rel="noreferrer">Updates</a> &mdash; <a href="https://github.com/boxlabss/PASTE/issues" target="_blank" rel="noreferrer">Bugs</a>
-            </div>
-            <div class="col-md-6 text-right">
-                Powered by <a href="https://phpaste.sourceforge.io" target="_blank" rel="noreferrer">Paste</a>
             </div>
         </div>
     </div>
 
-    <script src="../admin/js/jquery.min.js"></script>
-    <script src="../admin/js/bootstrap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // AJAX form submit
         document.querySelector('form').addEventListener('submit', function(e) {
             e.preventDefault();
             const btn = this.querySelector('button[name="save_credentials"]');
@@ -262,6 +262,7 @@ try {
                 .then(data => {
                     btn.disabled = false;
                     if (data.status === 'success') {
+                        alert(data.message);
                         if (data.reload) window.location.reload();
                     } else {
                         alert('Error: ' + data.message);

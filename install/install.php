@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/09/04 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,10 +9,10 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
 
@@ -381,6 +381,9 @@ try {
             id INT NOT NULL AUTO_INCREMENT,
             user VARCHAR(250) NOT NULL UNIQUE,
             pass VARCHAR(250) NOT NULL,
+            email VARCHAR(255) NOT NULL DEFAULT 'admin@example.com',
+            reset_code VARCHAR(32) DEFAULT NULL,
+            reset_expiry DATETIME DEFAULT NULL,
             PRIMARY KEY(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         $output[] = 'admin table created.';
@@ -389,6 +392,9 @@ try {
         ensureColumn($pdo,'admin','id',   "INT NOT NULL AUTO_INCREMENT", $output,$errors);
         ensureColumn($pdo,'admin','user', "VARCHAR(250) NOT NULL",       $output,$errors);
         ensureColumn($pdo,'admin','pass', "VARCHAR(250) NOT NULL",       $output,$errors);
+        ensureColumn($pdo,'admin','email',"VARCHAR(255) NOT NULL DEFAULT 'admin@example.com'",$output,$errors);
+        ensureColumn($pdo,'admin','reset_code', "VARCHAR(32) DEFAULT NULL", $output,$errors);
+        ensureColumn($pdo,'admin','reset_expiry', "DATETIME DEFAULT NULL", $output,$errors);
         if (!indexExists($pdo,'admin','user')) {
             try { $pdo->exec("ALTER TABLE admin ADD UNIQUE KEY `user` (user)"); } catch (PDOException $e) { error_log($e->getMessage()); }
         }
@@ -398,8 +404,8 @@ try {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM admin WHERE user=:u");
         $stmt->execute([':u'=>$admin_user]);
         if ((int)$stmt->fetchColumn() === 0) {
-            $ins = $pdo->prepare("INSERT INTO admin (user, pass) VALUES (:u,:p)");
-            $ins->execute([':u'=>$admin_user, ':p'=>$admin_pass]);
+            $ins = $pdo->prepare("INSERT INTO admin (user, pass, email) VALUES (:u,:p,:e)");
+            $ins->execute([':u'=>$admin_user, ':p'=>$admin_pass, ':e'=>'admin@yourdomain.com']);
             $output[] = 'Admin user inserted.';
         } else {
             $output[] = 'Admin user already exists, skipping insertion.';
@@ -412,16 +418,28 @@ try {
     if (!tableExists($pdo,'admin_history')) {
         $pdo->exec("CREATE TABLE admin_history (
             id INT NOT NULL AUTO_INCREMENT,
+            admin_id INT DEFAULT NULL,
             last_date DATETIME NOT NULL,
             ip VARCHAR(45) NOT NULL,
-            PRIMARY KEY(id)
+            user_agent VARCHAR(255) NOT NULL DEFAULT '',
+            PRIMARY KEY(id),
+            KEY idx_admin_id (admin_id),
+            CONSTRAINT fk_admin_history_admin FOREIGN KEY (admin_id) REFERENCES admin(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         $output[] = 'admin_history table created.';
     } else {
         ensureEngineAndCharset($pdo,'admin_history',$output,$errors);
-        ensureColumn($pdo,'admin_history','id',       "INT NOT NULL AUTO_INCREMENT", $output,$errors);
-        ensureColumn($pdo,'admin_history','ip',       "VARCHAR(45) NOT NULL",        $output,$errors);
+        ensureColumn($pdo,'admin_history','id',         "INT NOT NULL AUTO_INCREMENT", $output,$errors);
+        ensureColumn($pdo,'admin_history','admin_id',   "INT DEFAULT NULL", $output,$errors);
         ensureDateType($pdo,'admin_history','last_date','DATETIME',$output,$errors);
+        ensureColumn($pdo,'admin_history','ip',         "VARCHAR(45) NOT NULL", $output,$errors);
+        ensureColumn($pdo,'admin_history','user_agent', "VARCHAR(255) NOT NULL DEFAULT ''", $output,$errors);
+        if (!indexExists($pdo,'admin_history','idx_admin_id')) {
+            try { $pdo->exec("ALTER TABLE admin_history ADD KEY idx_admin_id (admin_id)"); } catch (PDOException $e) { error_log($e->getMessage()); }
+        }
+        if (!fkExists($pdo,'admin_history','fk_admin_history_admin')) {
+            try { $pdo->exec("ALTER TABLE admin_history ADD CONSTRAINT fk_admin_history_admin FOREIGN KEY (admin_id) REFERENCES admin(id) ON DELETE SET NULL"); } catch (PDOException $e) { error_log($e->getMessage()); }
+        }
     }
 
     // site_info

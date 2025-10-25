@@ -48,21 +48,6 @@ try {
         exit();
     }
 
-    // admin history (best-effort)
-    $last = $pdo->query("SELECT MAX(id) last_id FROM admin_history")->fetch()['last_id'] ?? null;
-    $last_ip=null; $last_date=null;
-    if ($last) {
-        $st = $pdo->prepare("SELECT ip,last_date FROM admin_history WHERE id=?");
-        $st->execute([$last]);
-        $row = $st->fetch();
-        $last_ip = $row['ip'] ?? null;
-        $last_date = $row['last_date'] ?? null;
-    }
-    if (($last_ip ?? '') !== $ip || ($last_date ?? '') !== $date) {
-        $st = $pdo->prepare("INSERT INTO admin_history (last_date, ip) VALUES (?, ?)");
-        $st->execute([$date, $ip]);
-    }
-
     // Summary stats
     $row = $pdo->query("SELECT SUM(tpage) AS total_page, SUM(tvisit) AS total_visit FROM page_view")->fetch();
     $total_page = (int)($row['total_page'] ?? 0);

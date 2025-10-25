@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.2 2025/08/21 https://github.com/boxlabss/PASTE
+ * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
