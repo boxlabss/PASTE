@@ -35,7 +35,6 @@ See docs/CHANGELOG.md
 
 Paste 3.3
 ====
-```
 * Improved autodetection for syntax highlighting for both GeSHi and Highlight.php
 	Fix sluggish behaviour with Highlight.php's autodetection of very large plain text especially.
 	Added more heuristic detection handling, improved efficiency of Paste's autodetect
@@ -102,7 +101,6 @@ Previous version - 3.0
 * Improved database schema
 * Update Parsedown for Markdown
 * All pastes encrypted in the database with AES-256 by default
-```
 
 ---
 Install
