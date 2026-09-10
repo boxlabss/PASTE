@@ -26,9 +26,12 @@ const FILEHOST_EXT = [
     'application/octet-stream' => 'bin',
 ];
 
-/** Types we refuse even when their major type is accepted. */
+/** Types we refuse even when their major type is accepted: scriptable
+ *  ones (served inline they would run), and TIFF, which the site's image
+ *  handling does not support. */
 const FILEHOST_REFUSE = ['image/svg+xml', 'text/html', 'application/xhtml+xml',
-                         'text/javascript', 'application/javascript'];
+                         'text/javascript', 'application/javascript',
+                         'image/tiff', 'image/tiff-fx'];
 
 /** File extension -> paste syntax name (GeSHi / highlight.php names). */
 const FILEHOST_SYNTAX = [

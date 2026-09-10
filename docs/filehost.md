@@ -91,7 +91,7 @@ Basic credentials; `WWW-Authenticate: Bearer`), 401 `invalid_token` (bad
 signature, wrong issuer or audience, expired), 401 `replayed_token`, 403
 `banned` (site IP bans apply), 413 `too_large`, 415 `unsupported_type` /
 `type_mismatch` (declared type not in `Accept-Post`, or the bytes do not look
-like it; SVG and HTML are never accepted), 429 `rate_limited`.
+like it; SVG, HTML and TIFF are never accepted), 429 `rate_limited`.
 
 Text uploads (`text/*`, JSON, XML; must be UTF-8) become unlisted pastes owned
 by `FILEHOST_MEMBER`, titled after the uploaded filename, syntax guessed from

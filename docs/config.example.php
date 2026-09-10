@@ -50,7 +50,7 @@ define('FILEHOST_ISSUER', 'ExampleNet');                        // the IRC netwo
 define('FILEHOST_PUBKEY', "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"); // from the ircd: STATS authtoken
 define('FILEHOST_DIR', __DIR__ . '/../filehost_files');          // binaries; keep it outside the web root
 define('FILEHOST_MAX_BYTES', 10 * 1024 * 1024);
-define('FILEHOST_ACCEPT', 'image/*, video/*, audio/*, text/*'); // Accept-Post
+define('FILEHOST_ACCEPT', 'image/*, video/*, text/*');          // Accept-Post (TIFF, SVG and HTML are always refused)
 define('FILEHOST_MEMBER', 'irc');                               // site user that owns text uploads (pastes)
 define('FILEHOST_EXPIRY', 'M');                                 // paste expiry letter for text uploads
 define('FILEHOST_RETAIN_DAYS', 30);                             // binaries are removed after this (0 = keep)
