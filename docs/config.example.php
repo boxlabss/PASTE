@@ -54,6 +54,7 @@ define('FILEHOST_ACCEPT', 'image/*, video/*, audio/*, text/*'); // Accept-Post
 define('FILEHOST_MEMBER', 'irc');                               // site user that owns text uploads (pastes)
 define('FILEHOST_EXPIRY', 'M');                                 // paste expiry letter for text uploads
 define('FILEHOST_RETAIN_DAYS', 30);                             // binaries are removed after this (0 = keep)
+define('FILEHOST_STRIP_METADATA', true);                        // drop EXIF/XMP/text chunks from JPEG, PNG, WebP (lossless)
 define('FILEHOST_PER_HOUR', 30);                                // uploads per IRC account per hour
 
 // set to 1 to enable tidy urls

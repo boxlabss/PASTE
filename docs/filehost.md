@@ -51,6 +51,10 @@ implements `draft/authtoken` JWT services (Nefarious `ircv3.2-upgrade` does:
      `nosniff` and a sandboxing CSP.
    - `FILEHOST_MAX_BYTES`, `FILEHOST_ACCEPT`, `FILEHOST_EXPIRY`,
      `FILEHOST_RETAIN_DAYS`, `FILEHOST_PER_HOUR`: limits.
+   - `FILEHOST_STRIP_METADATA` (default on): EXIF, XMP and text metadata are
+     removed from JPEG, PNG and WebP uploads before storage, losslessly
+     (segments and chunks are dropped, pixels are never re-encoded, animation
+     survives). The response says `X-Filehost-Metadata: stripped` or `kept`.
    - `FILEHOST_ENABLED = true`.
 4. Make sure the web server and PHP allow bodies of `FILEHOST_MAX_BYTES`
    (`client_max_body_size` / `LimitRequestBody`, PHP `post_max_size`) and that
@@ -108,7 +112,7 @@ and `DELETE` of the row plus the file is the takedown.
 
 ## Notes for maintainers
 
-- EXIF is not stripped in this version. If the site's image uploader already
-  does that, call it from `filehost_store_file()`.
+- Metadata stripping is lossless and format-aware (`includes/filehost_exif.php`);
+  formats it does not know (AVIF, HEIC, video) are stored as they are.
 - `Bearer` carries an authtoken JWT rather than an OAUTHBEARER token; the
   FILEHOST draft predates authtoken. `Basic` is refused deliberately.

@@ -28,6 +28,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/filehost_jwt.php';
 require_once __DIR__ . '/includes/filehost_store.php';
+require_once __DIR__ . '/includes/filehost_exif.php';
 
 date_default_timezone_set('UTC');
 
@@ -43,6 +44,7 @@ $fh_member   = defined('FILEHOST_MEMBER') ? (string)FILEHOST_MEMBER : 'irc';
 $fh_expiry   = defined('FILEHOST_EXPIRY') ? (string)FILEHOST_EXPIRY : 'M';
 $fh_perhour  = defined('FILEHOST_PER_HOUR') ? (int)FILEHOST_PER_HOUR : 30;
 $fh_retain   = defined('FILEHOST_RETAIN_DAYS') ? (int)FILEHOST_RETAIN_DAYS : 30;
+$fh_strip    = defined('FILEHOST_STRIP_METADATA') ? (bool)FILEHOST_STRIP_METADATA : true;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $now = time();
@@ -293,6 +295,12 @@ try {
         $st->execute([filehost_new_slug($pdo), $claims['sub'], $claims['iss'], $mime, $size, 'txt', $filename, $paste_id, $ip]);
         $expires = null;
     } else {
+        $stripped = false;
+        if ($fh_strip) {
+            [$body, $stripped] = filehost_strip_metadata($body, $mime);
+            $size = strlen($body);
+        }
+        header('X-Filehost-Metadata: ' . ($stripped ? 'stripped' : 'kept'));
         $ext = FILEHOST_EXT[$mime] ?? 'bin';
         $slug = filehost_new_slug($pdo);
         filehost_store_file($fh_dir, $body, $slug, $ext);
