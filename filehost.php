@@ -38,7 +38,7 @@ $fh_url      = defined('FILEHOST_URL') ? (string)FILEHOST_URL : '';
 $fh_pubkey   = defined('FILEHOST_PUBKEY') ? (string)FILEHOST_PUBKEY : '';
 $fh_issuer   = defined('FILEHOST_ISSUER') ? (string)FILEHOST_ISSUER : '';
 $fh_dir      = defined('FILEHOST_DIR') ? (string)FILEHOST_DIR : __DIR__ . '/../filehost_files';
-$fh_max      = defined('FILEHOST_MAX_BYTES') ? (int)FILEHOST_MAX_BYTES : 10 * 1024 * 1024;
+$fh_max      = defined('FILEHOST_MAX_BYTES') ? (int)FILEHOST_MAX_BYTES : 25 * 1024 * 1024;
 $fh_accept   = defined('FILEHOST_ACCEPT') ? (string)FILEHOST_ACCEPT : 'image/*, video/*, text/*';
 $fh_member   = defined('FILEHOST_MEMBER') ? (string)FILEHOST_MEMBER : 'irc';
 $fh_expiry   = defined('FILEHOST_EXPIRY') ? (string)FILEHOST_EXPIRY : 'M';
@@ -268,7 +268,13 @@ if (!$is_text && class_exists('finfo')) {
     $sniffed = (new finfo(FILEINFO_MIME_TYPE))->buffer($body) ?: '';
     $want = explode('/', $mime, 2)[0];
     $got = explode('/', $sniffed, 2)[0];
-    if (in_array($want, ['image', 'video', 'audio'], true) && $got !== $want) {
+    if (in_array($want, ['image', 'video', 'audio'], true)) {
+        if ($got !== $want) {
+            fh_error(415, 'type_mismatch', 'Content does not look like ' . $mime . ' (' . $sniffed . ')');
+        }
+    } elseif ($sniffed !== $mime) {
+        /* Anything else an operator chose to accept (a PDF, say) must be
+         * exactly what it claims: no mislabelled binaries. */
         fh_error(415, 'type_mismatch', 'Content does not look like ' . $mime . ' (' . $sniffed . ')');
     }
     if (in_array($sniffed, FILEHOST_REFUSE, true)) {

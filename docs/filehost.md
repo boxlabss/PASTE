@@ -93,6 +93,12 @@ signature, wrong issuer or audience, expired), 401 `replayed_token`, 403
 `type_mismatch` (declared type not in `Accept-Post`, or the bytes do not look
 like it; SVG, HTML and TIFF are never accepted), 429 `rate_limited`.
 
+Arbitrary binaries are not accepted: the default `FILEHOST_ACCEPT` is images,
+video and text; an upload without a `Content-Type`, or with `application/*`,
+gets 415. Images and video must sniff (`finfo`) as their declared major type;
+text must be UTF-8; any other type an operator adds to `FILEHOST_ACCEPT` must
+sniff as exactly that type.
+
 Text uploads (`text/*`, JSON, XML; must be UTF-8) become unlisted pastes owned
 by `FILEHOST_MEMBER`, titled after the uploaded filename, syntax guessed from
 the extension; `Location` is the raw URL. Everything else is written to
