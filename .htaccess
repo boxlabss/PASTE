@@ -1,6 +1,10 @@
 Options +FollowSymLinks
 RewriteEngine on
 
+# Pass the Authorization header through to PHP (FILEHOST Bearer tokens)
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 <IfModule mod_rewrite.c>
  RewriteCond %{REQUEST_FILENAME} !-f
  RewriteCond %{REQUEST_FILENAME} !-d
@@ -11,6 +15,8 @@ RewriteEngine on
  RewriteRule ^contact contact.php [L]
  RewriteRule ^download/(.*)$  paste.php?download&id=$1 [L]
  RewriteRule ^raw/(.*)$  paste.php?raw&id=$1 [L]
+ RewriteRule ^filehost/?$ filehost.php [L]
+ RewriteRule ^filehost/([A-Za-z0-9]+\.[a-z0-9]+)$ filehost.php?f=$1 [L]
  RewriteRule ^embed/(.*)$  paste.php?embed&id=$1 [L]
 </IfModule>
 
