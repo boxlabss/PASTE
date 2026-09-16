@@ -156,16 +156,22 @@ function filehost_store_text(PDO $pdo, string $body, ?string $filename, string $
  */
 function filehost_store_file(string $dir, string $body, string $slug, string $ext): void
 {
-    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
-        throw new RuntimeException('storage directory unavailable');
+    if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException("FILEHOST_DIR $dir does not exist and could not be created");
+    }
+    if (!is_writable($dir)) {
+        /* The usual first-deployment mistake: the directory exists but is
+         * not writable by the PHP user.  Say so in the log up front rather
+         * than failing on the write. */
+        throw new RuntimeException("FILEHOST_DIR $dir is not writable by the web server user");
     }
     $path = $dir . '/' . $slug . '.' . $ext;
     $tmp = $path . '.part';
-    if (file_put_contents($tmp, $body, LOCK_EX) !== strlen($body) || !rename($tmp, $path)) {
+    if (@file_put_contents($tmp, $body, LOCK_EX) !== strlen($body) || !@rename($tmp, $path)) {
         @unlink($tmp);
-        throw new RuntimeException('write failed');
+        throw new RuntimeException("write to $tmp failed");
     }
-    chmod($path, 0640);
+    @chmod($path, 0640);
 }
 
 /**

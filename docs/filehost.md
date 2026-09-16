@@ -59,7 +59,10 @@ implements `draft/authtoken` JWT services (Nefarious `ircv3.2-upgrade` does:
 4. Make sure the web server and PHP allow bodies of `FILEHOST_MAX_BYTES`
    (`client_max_body_size` / `LimitRequestBody`, PHP `post_max_size`) and that
    the `Authorization` header reaches PHP (the shipped `.htaccess` sets
-   `HTTP_AUTHORIZATION`; nginx + php-fpm passes it by default).
+   `HTTP_AUTHORIZATION`; nginx + php-fpm passes it by default). On nginx,
+   keep the `location ^~ /filehost/` block from the example: a regex
+   `location` for it loses to an earlier static-asset rule such as
+   `location ~* \.(png|jpg)$`, and image links then 404 while text works.
 5. Cron, optional: `php /path/to/filehost.php --cron` daily removes expired
    binaries. Each upload also sweeps a few.
 6. On the IRC server:

@@ -24,6 +24,11 @@
  */
 declare(strict_types=1);
 
+/* This endpoint answers machines, not browsers: never let a PHP warning
+ * (with a filesystem path in it) print ahead of the JSON body.  Errors go
+ * to the server log; the client gets the JSON 500 below. */
+ini_set('display_errors', '0');
+
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/filehost_jwt.php';
