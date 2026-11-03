@@ -208,7 +208,6 @@ function _diff_idx_via_myers(array $A, array $B): array {
             $V[$off + $k] = $x;
 
             if ($x >= $N && $y >= $M) {
-                $trace[$d] = $V;
                 $Dend = $d;
                 break 2;
             }
@@ -218,25 +217,22 @@ function _diff_idx_via_myers(array $A, array $B): array {
     $ops = [];
     $x = $N; $y = $M;
     for ($d = $Dend; $d > 0; $d--) {
-        $Vprev = $trace[$d-1];
+        $Vprev = $trace[$d]; // V as it was before step d
         $k  = $x - $y;
 
         $down = ($k == -$d) || ($k != $d && $Vprev[$off + $k - 1] < $Vprev[$off + $k + 1]);
-        $kPrev   = $down ? $k + 1 : $k - 1;
-        $xStart  = $down ? $Vprev[$off + $kPrev] : $Vprev[$off + $kPrev] + 1;
-        $yStart  = $xStart - $kPrev;
+        $kPrev = $down ? $k + 1 : $k - 1;
+        $xPrev = $Vprev[$off + $kPrev];
+        $yPrev = $xPrev - $kPrev;
 
-        while ($x > $xStart && $y > $yStart) { $x--; $y--; $ops[] = ['op'=>'eq','ai'=>$x,'bi'=>$y]; }
+        // Snake on diagonal k starts right after the single edit
+        $xMid = $down ? $xPrev : $xPrev + 1;
+        $yMid = $xMid - $k;
+        while ($x > $xMid && $y > $yMid) { $x--; $y--; $ops[] = ['op'=>'eq','ai'=>$x,'bi'=>$y]; }
 
-        if ($down) {
-            $yStart--;
-            $ops[] = ['op'=>'add','bi'=>$yStart];
-        } else {
-            $xStart--;
-            $ops[] = ['op'=>'del','ai'=>$xStart];
-        }
+        $ops[] = $down ? ['op'=>'add','bi'=>$yPrev] : ['op'=>'del','ai'=>$xPrev];
 
-        $x = $xStart; $y = $yStart;
+        $x = $xPrev; $y = $yPrev;
     }
 
     while ($x > 0 && $y > 0) { $x--; $y--; $ops[] = ['op'=>'eq','ai'=>$x,'bi'=>$y]; }
@@ -614,6 +610,108 @@ function compute_change_counts(array $ops): array {
 }
 
 /* =========================================================
+ * Server-side merge (moved off the client)
+ *
+ * The diff opcodes already carry exact original line indices, so applying a
+ * hunk is a pure array splice — no DOM line-number reading, and no chance of
+ * an earlier merge shifting a later hunk to the wrong lines.
+ * =======================================================*/
+
+/** Group opcodes into hunks carrying original-array offsets/lengths. */
+function diff_hunks_from_ops(array $ops): array {
+    $hunks = []; $ai = 0; $bi = 0; $cur = null;
+    foreach ($ops as $op) {
+        $t = $op['op'] ?? 'eq';
+        if ($t === 'eq') {
+            if ($cur !== null) { $hunks[] = $cur; $cur = null; }
+            $ai++; $bi++;
+        } else {
+            if ($cur === null) $cur = ['lStart'=>$ai,'lLen'=>0,'rStart'=>$bi,'rLen'=>0];
+            if ($t === 'del') { $cur['lLen']++; $ai++; }
+            else              { $cur['rLen']++; $bi++; }
+        }
+    }
+    if ($cur !== null) $hunks[] = $cur;
+    return $hunks;
+}
+
+/**
+ * Apply one hunk in the requested direction; returns [leftText, rightText].
+ *   dir='right' : copy LEFT (old) lines over the hunk's region in RIGHT
+ *   dir='left'  : copy RIGHT (new) lines over the hunk's region in LEFT
+ */
+function apply_merge_hunk(array $La, array $Ra, array $ops, int $hunkId, string $dir): array {
+    $hunks = diff_hunks_from_ops($ops);
+    if ($hunkId < 0 || !isset($hunks[$hunkId])) {
+        return [implode("\n", $La), implode("\n", $Ra)];
+    }
+    $hk = $hunks[$hunkId];
+    if ($dir === 'right') {
+        $block = array_slice($La, $hk['lStart'], $hk['lLen']);
+        array_splice($Ra, $hk['rStart'], $hk['rLen'], $block);
+    } else {
+        $block = array_slice($Ra, $hk['rStart'], $hk['rLen']);
+        array_splice($La, $hk['lStart'], $hk['lLen'], $block);
+    }
+    return [implode("\n", $La), implode("\n", $Ra)];
+}
+
+/* ---------- Merge / Undo handler (POST -> apply -> 303 redirect, PRG) ----------
+ * Operates on the session "working copy" that produced the visible diff, so the
+ * hunk numbering on screen always matches what gets spliced here.
+ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && (isset($_POST['merge']) || ($_POST['action'] ?? '') === 'merge_undo')) {
+
+    // Redirect target: same view, but detached from any ?a/?b source pastes so
+    // the merged working copy (in session) is what gets shown next.
+    $self  = strtok($_SERVER['REQUEST_URI'] ?? 'diff.php', '?');
+    $q     = $_GET;
+    unset($q['a'], $q['b'], $q['left_id'], $q['right_id'], $q['download'], $q['merge']);
+    $redir = $self . ($q ? ('?' . http_build_query($q)) : '');
+
+    $buf = $_SESSION['diff_buffers'] ?? null;
+
+    if (($_POST['action'] ?? '') === 'merge_undo') {
+        if (!empty($_SESSION['diff_undo'])) {
+            $prev = array_pop($_SESSION['diff_undo']);
+            $_SESSION['diff_buffers']['left']  = (string)($prev['left']  ?? ($buf['left']  ?? ''));
+            $_SESSION['diff_buffers']['right'] = (string)($prev['right'] ?? ($buf['right'] ?? ''));
+            $_SESSION['diff_buffers']['time']  = time();
+        }
+    } elseif ($buf) {
+        // merge value form: "<hunkId>:<left|right>"
+        $parts  = explode(':', (string)$_POST['merge'], 2);
+        $hunkId = (int)($parts[0] ?? -1);
+        $dir    = (($parts[1] ?? '') === 'left') ? 'left' : 'right';
+
+        $L = (string)($buf['left']  ?? '');
+        $R = (string)($buf['right'] ?? '');
+
+        // Same normaliser the displayed diff used, so hunk numbering lines up.
+        $iw   = isset($_GET['ignore_ws']) ? (int)$_GET['ignore_ws'] : 0;
+        $norm = $iw ? static fn($s) => rtrim($s, " \t") : null;
+
+        $La = preg_split("/\R/u", $L); if ($La === false) $La = [$L];
+        $Ra = preg_split("/\R/u", $R); if ($Ra === false) $Ra = [$R];
+
+        $ops = diff_lines_idx($La, $Ra, $norm);
+        [$L2, $R2] = apply_merge_hunk($La, $Ra, $ops, $hunkId, $dir);
+
+        if ($L2 !== $L || $R2 !== $R) {
+            $_SESSION['diff_undo'][] = ['left' => $L, 'right' => $R];
+            if (count($_SESSION['diff_undo']) > 50) array_shift($_SESSION['diff_undo']);
+            $_SESSION['diff_buffers']['left']  = $L2;
+            $_SESSION['diff_buffers']['right'] = $R2;
+            $_SESSION['diff_buffers']['time']  = time();
+        }
+    }
+
+    header('Location: ' . $redir, true, 303);
+    exit;
+}
+
+/* =========================================================
  * Page inputs & bootstrap
  * =======================================================*/
 
@@ -765,8 +863,11 @@ if ($engine === 'highlight') {
 
 /* ---------- Picked languages (DB-seeded, request override, GeSHi resolve) ---------- */
 $req_single = $_POST['lang']       ?? $_GET['lang']       ?? ($_SESSION['diff_lang_single'] ?? null);
-$req_left   = $_POST['left_lang']  ?? $_GET['left_lang']  ?? ($_SESSION['diff_lang_left']   ?? null);
-$req_right  = $_POST['right_lang'] ?? $_GET['right_lang'] ?? ($_SESSION['diff_lang_right']  ?? null);
+// The diff UI uses a single language dropdown; per-side langs only honoured when
+// explicitly supplied (POST/GET), never from a stale session, so the dropdown and
+// post-merge reloads aren't shadowed by an old dual-language session value.
+$req_left   = $_POST['left_lang']  ?? $_GET['left_lang']  ?? null;
+$req_right  = $_POST['right_lang'] ?? $_GET['right_lang'] ?? null;
 
 $normalize = static function($id) use ($engine, $alias_map): string {
     $id = strtolower(trim((string)$id));
@@ -956,6 +1057,25 @@ $GLOBALS['diff_changes_total']  = $changed_total; // theme uses this for ±T
 /* ---------- Pair adjacent del+add rows into single side-by-side rows ---------- */
 $sideRows = pair_sxs_hunks($sideRows);
 
+/* ---------- Tag hunks so the theme can place server-side merge buttons ----------
+ * A hunk is a maximal run of changed rows. This ordering matches
+ * diff_hunks_from_ops(), so the IDs rendered here are the IDs the merge handler
+ * applies. Tags are added before inline-diff/filtering, which both preserve them.
+ */
+$hid = -1; $inHunk = false; $cntSide = count($sideRows);
+for ($i = 0; $i < $cntSide; $i++) {
+    $r = $sideRows[$i];
+    $changed = (($r['lclass'] ?? '') === 'del') || (($r['rclass'] ?? '') === 'add');
+    if ($changed) {
+        if (!$inHunk) { $hid++; $inHunk = true; }
+        $sideRows[$i]['hunk'] = $hid;
+    } elseif ($inHunk) {
+        $sideRows[$i - 1]['hunk_end'] = true;
+        $inHunk = false;
+    }
+}
+if ($inHunk && $cntSide > 0) $sideRows[$cntSide - 1]['hunk_end'] = true;
+
 /* ---------- Limit expensive inline diff pass for very large diffs ---------- */
 $perform_inline = true;
 $totalBytes = strlen($left) + strlen($right);
@@ -1074,6 +1194,35 @@ $GLOBALS['uniRows']     = $uniRows;
 // Expose Only/Context to the theme
 $GLOBALS['only_changes'] = (int)$only_changes;
 $GLOBALS['context']      = (string)$context_opt;
+
+/* ---------- Persist the working copy (lets server-side merge act on it) ---------- */
+$_SESSION['diff_buffers'] = [
+    'left'        => $left,
+    'right'       => $right,
+    'left_label'  => $leftLabel,
+    'right_label' => $rightLabel,
+    'time'        => time(),
+];
+// Keep highlighting stable across merge reloads (single dropdown drives both sides)
+$persist_lang = $req_single;
+if ($persist_lang === null || $persist_lang === '') {
+    $persist_lang = ($lang_right && $lang_right !== 'autodetect') ? $lang_right
+                  : (($lang_left && $lang_left !== 'autodetect') ? $lang_left : 'autodetect');
+}
+$_SESSION['diff_lang_single'] = (string)$persist_lang;
+
+/* ---------- Native-form action URLs (these replace the old JS submitters) ---------- */
+$self_path = strtok($_SERVER['REQUEST_URI'] ?? 'diff.php', '?');
+$q_base    = $_GET; unset($q_base['download']);
+$mk_url    = static fn(array $q) => $self_path . ($q ? ('?' . http_build_query($q)) : '');
+$q_diff    = $q_base; $q_diff['download']  = 'diff';
+$q_patch   = $q_base; $q_patch['download'] = 'patch';
+$GLOBALS['form_action_compare']  = $mk_url($q_base);
+$GLOBALS['form_action_dl_diff']  = $mk_url($q_diff);
+$GLOBALS['form_action_dl_patch'] = $mk_url($q_patch);
+$GLOBALS['merge_action']         = $mk_url($q_base);
+$GLOBALS['ignore_ws_val']        = (int)($ignore_ws ?? 0);
+$GLOBALS['can_undo']             = !empty($_SESSION['diff_undo']);
 
 require_once $themeDir . '/header.php';
 require_once $themeDir . '/diff.php';

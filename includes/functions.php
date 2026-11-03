@@ -35,6 +35,56 @@ try {
     paste_error($error, 503); // themed render + exit
 }
 
+/**
+ * Enforce account status on every request.
+ *
+ * Banning a user sets users.verified = '2'. login.php already refuses to issue a
+ * new session for that, but an already-authenticated session used to keep working
+ * because nothing re-checked the account once logged in (and the session token was
+ * never compared against the DB). This downgrades any banned, deleted, or
+ * token-rotated session back to a guest, so a ban takes effect immediately on the
+ * banned user's very next request, on every page.
+ *
+ * Safe to call unconditionally: it no-ops under CLI, when there is no active
+ * session, or when nobody is logged in, and it only ever touches the front-end
+ * user session (admin sessions live in separate keys / the `admin` table).
+ */
+function paste_enforce_account_status(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    if (PHP_SAPI === 'cli') return;
+    if (session_status() !== PHP_SESSION_ACTIVE) return;
+    if (empty($_SESSION['username'])) return;
+
+    try {
+        $stmt = $pdo->prepare('SELECT verified, token FROM users WHERE username = ? LIMIT 1');
+        $stmt->execute([(string)$_SESSION['username']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return; // never lock people out over a transient DB hiccup
+    }
+
+    $sessTok = (string)($_SESSION['token'] ?? '');
+    $dbTok   = (string)($row['token'] ?? '');
+
+    $revoke =
+        ($row === false)                                                  // account deleted
+        || ((string)($row['verified'] ?? '') === '2')                     // banned
+        || ($sessTok !== '' && $dbTok !== '' && !hash_equals($dbTok, $sessTok)); // token rotated elsewhere
+
+    if ($revoke) {
+        unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username'], $_SESSION['pic']);
+    }
+}
+
+// Apply account status (ban / forced logout) as early as possible on every request.
+if (isset($pdo) && $pdo instanceof PDO) {
+    paste_enforce_account_status($pdo);
+}
+
 function str_contains_polyfill(string $haystack, string $needle, bool $ignoreCase = false): bool
 {
     if (function_exists('str_contains')) {
@@ -387,6 +437,44 @@ function shouldBlockNumericUrls(?PDO $pdo = null): bool
 // ============================================================================
 // End of Slug Functions
 // ============================================================================
+
+/**
+ * Convert an expiry code to the stored pastes.expiry value: a unix timestamp,
+ * 'SELF' (view once) or 'NULL' (never).
+ * Accepts the web form codes (10M, 1H, 1D, 1W, 2W, 1M, self, N) and the
+ * API/filehost codes (T, H, D, W, M, B, Y, NULL).
+ */
+function paste_expiry_value(string $code, ?int $now = null): string
+{
+    $now = $now ?? time();
+    $offset = match (strtoupper(trim($code))) {
+        '10M', 'T' => '+10 minutes',
+        '1H', 'H'  => '+1 hour',
+        '1D', 'D'  => '+1 day',
+        '1W', 'W'  => '+1 week',
+        '2W'       => '+2 weeks',
+        '1M', 'M'  => '+1 month',
+        'B'        => '+6 months',
+        'Y'        => '+1 year',
+        'SELF'     => 'SELF',
+        default    => 'NULL',
+    };
+    if ($offset === 'SELF' || $offset === 'NULL') {
+        return $offset;
+    }
+    return (string)strtotime($offset, $now);
+}
+
+/** True if a stored expiry value is a timestamp in the past. */
+function paste_is_expired(?string $expiry, ?int $now = null): bool
+{
+    $expiry = trim((string)$expiry);
+    if ($expiry === '' || !ctype_digit($expiry)) {
+        return false;
+    }
+    $ts = (int)$expiry;
+    return $ts > 0 && $ts < ($now ?? time());
+}
 
 function deleteMyPaste(PDO $pdo, int $paste_id): bool
 {
@@ -741,8 +829,13 @@ function doDownload(int $paste_id, string $p_title, string $p_content, string $p
         'xml' => 'xml',
         default => 'txt',
     };
+    $base = html_entity_decode($p_title, ENT_QUOTES, 'UTF-8');
+    $base = trim((string)preg_replace('/[^A-Za-z0-9._ -]+/', '_', $base), " ._");
+    if ($base === '') {
+        $base = 'paste';
+    }
     header('Content-Type: text/plain; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . htmlspecialchars($p_title, ENT_QUOTES, 'UTF-8') . '.' . $ext . '"');
+    header('Content-Disposition: attachment; filename="' . substr($base, 0, 100) . '.' . $ext . '"');
     echo $p_content;
     return true;
 }
@@ -759,9 +852,23 @@ function rawView(int $paste_id, string $p_title, string $p_content, string $p_co
     return true;
 }
 
+/**
+ * Output a paste as a document.write() embed script.
+ * $paste_id is the URL identifier (slug or id); $p_content must already be safe HTML.
+ */
 function embedView( $paste_id, $p_title, $p_content, $p_code, $title, $baseurl, $ges_style, $lang ) {
+    global $mod_rewrite;
     $stats = false;
     if ( $p_content ) {
+        $e        = static fn($s) => htmlspecialchars(html_entity_decode((string)$s, ENT_QUOTES, 'UTF-8'), ENT_QUOTES, 'UTF-8');
+        $base     = rtrim((string)$baseurl, '/') . '/';
+        $ident    = rawurlencode((string)$paste_id);
+        $pretty   = ((string)($mod_rewrite ?? '0') === '1');
+        $viewUrl  = $pretty ? $base . $ident : $base . 'paste.php?id=' . $ident;
+        $rawUrl   = $pretty ? $base . 'raw/' . $ident : $base . 'paste.php?raw&id=' . $ident;
+        $hostedBy = $e($lang['embed-hosted-by'] ?? 'hosted by');
+        $viewRaw  = $e(strtolower((string)($lang['view-raw'] ?? 'view raw')));
+
         $output = "<div class='paste_embed_container'>";
         $output .= "<style>
             .paste_embed_container {
@@ -795,6 +902,7 @@ function embedView( $paste_id, $p_title, $p_content, $p_code, $title, $baseurl, 
             .paste_embed_code {
                 margin: 0;
                 padding: 12px;
+                white-space: pre;
                 max-height: 300px;
                 overflow-y: auto;
                 overflow-x: auto;
@@ -820,11 +928,11 @@ function embedView( $paste_id, $p_title, $p_content, $p_code, $title, $baseurl, 
         $output .= "<div class='fade-out'></div>";
 
         // Footer
-        $output .= "<div class='paste_embed_footer'>
-            <a href='$baseurl/$paste_id'>$p_title</a> {$lang['embed-hosted-by']}
-            <a href='$baseurl'>$title</a> | 
-            <a href='$baseurl/raw/$paste_id'>" . strtolower($lang['view-raw']) . "</a>
-        </div>";
+        $output .= "<div class='paste_embed_footer'>"
+            . "<a href='" . $e($viewUrl) . "'>" . $e($p_title) . "</a> {$hostedBy} "
+            . "<a href='" . $e($base) . "'>" . $e($title) . "</a> | "
+            . "<a href='" . $e($rawUrl) . "'>{$viewRaw}</a>"
+            . "</div>";
 
         $output .= "</div>";
 
@@ -2027,149 +2135,146 @@ function render_comment_html(string $text): string {
 }
 
 // --- Fatal Errors ---
-if (!function_exists('paste_error')) {
-    function paste_error(string $msg, int $httpCode = 200): void
-    {
-        // Variables expected by theme/default/errors.php
-        $error            = $msg;
-        $notfound         = null;
-        $require_password = false;
-        $paste_id         = 0;
+function paste_error(string $msg, int $httpCode = 200): void
+{
+    // Variables expected by theme/default/errors.php
+    $error            = $msg;
+    $notfound         = null;
+    $require_password = false;
+    $paste_id         = 0;
 
-        // fallbacks
-        $default_theme = (string)($GLOBALS['default_theme'] ?? 'default');
-        $baseurl       = (string)($GLOBALS['baseurl'] ?? '/');
-        $mod_rewrite   = (string)($GLOBALS['mod_rewrite'] ?? '0');
-        $lang          = (array)($GLOBALS['lang'] ?? []);
-        $title         = (string)($GLOBALS['title'] ?? 'Error');
-        $site_name     = (string)($GLOBALS['site_name'] ?? 'Paste');
-        $des           = (string)($GLOBALS['des'] ?? '');
-        $keyword       = (string)($GLOBALS['keyword'] ?? '');
-        $ga            = (string)($GLOBALS['ga'] ?? '');
-        $additional_scripts = (string)($GLOBALS['additional_scripts'] ?? '');
-        $ads_1         = (string)($GLOBALS['ads_1'] ?? '');
-        $ads_2         = (string)($GLOBALS['ads_2'] ?? '');
-        $text_ads      = (string)($GLOBALS['text_ads'] ?? '');
-        $privatesite   = (string)($GLOBALS['privatesite'] ?? 'off');
-        $noguests      = (string)($GLOBALS['noguests'] ?? 'off');
-        $enablegoog    = (string)($GLOBALS['enablegoog'] ?? 'no');
-        $enablefb      = (string)($GLOBALS['enablefb'] ?? 'no');
-        $hl_style      = (string)($GLOBALS['hl_style'] ?? 'hybrid.css');
-        $ges_style     = (string)($GLOBALS['ges_style'] ?? '');
+    // fallbacks
+    $default_theme = (string)($GLOBALS['default_theme'] ?? 'default');
+    $baseurl       = (string)($GLOBALS['baseurl'] ?? '/');
+    $mod_rewrite   = (string)($GLOBALS['mod_rewrite'] ?? '0');
+    $lang          = (array)($GLOBALS['lang'] ?? []);
+    $title         = (string)($GLOBALS['title'] ?? 'Error');
+    $site_name     = (string)($GLOBALS['site_name'] ?? 'Paste');
+    $des           = (string)($GLOBALS['des'] ?? '');
+    $keyword       = (string)($GLOBALS['keyword'] ?? '');
+    $ga            = (string)($GLOBALS['ga'] ?? '');
+    $additional_scripts = (string)($GLOBALS['additional_scripts'] ?? '');
+    $ads_1         = (string)($GLOBALS['ads_1'] ?? '');
+    $ads_2         = (string)($GLOBALS['ads_2'] ?? '');
+    $text_ads      = (string)($GLOBALS['text_ads'] ?? '');
+    $privatesite   = (string)($GLOBALS['privatesite'] ?? 'off');
+    $noguests      = (string)($GLOBALS['noguests'] ?? 'off');
+    $enablegoog    = (string)($GLOBALS['enablegoog'] ?? 'no');
+    $enablefb      = (string)($GLOBALS['enablefb'] ?? 'no');
+    $hl_style      = (string)($GLOBALS['hl_style'] ?? 'hybrid.css');
+    $ges_style     = (string)($GLOBALS['ges_style'] ?? '');
 
-        // Provide a safe $pdo so header.php can call getNavLinks($pdo,'header')
-        if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
-            $pdo = $GLOBALS['pdo']; // make it local for the include scope
-        } else {
-            if (!class_exists('PasteDummyPDO')) {
-                class PasteDummyPDO extends PDO {
-                    public function __construct() { /* no parent ctor */ }
-                    public function prepare($query, $options = []) { throw new PDOException('DB unavailable'); }
-                    public function query($query, $mode = null, ...$args) { throw new PDOException('DB unavailable'); }
-                }
+    // Provide a safe $pdo so header.php can call getNavLinks($pdo,'header')
+    if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+        $pdo = $GLOBALS['pdo']; // make it local for the include scope
+    } else {
+        if (!class_exists('PasteDummyPDO')) {
+            class PasteDummyPDO extends PDO {
+                public function __construct() { /* no parent ctor */ }
+                public function prepare($query, $options = []) { throw new PDOException('DB unavailable'); }
+                public function query($query, $mode = null, ...$args) { throw new PDOException('DB unavailable'); }
             }
-            $pdo = new PasteDummyPDO();
-            $GLOBALS['pdo'] = $pdo; // optional
         }
+        $pdo = new PasteDummyPDO();
+        $GLOBALS['pdo'] = $pdo; // optional
+    }
 
-        // If we're here from an OOM, avoid loading header/footer (keeps memory tiny)
-        if (!empty($GLOBALS['__PASTE_FATAL_OOM__'])) {
-            while (ob_get_level() > 0) { @ob_end_clean(); }
-            http_response_code($httpCode);
-            header('Content-Type: text/html; charset=utf-8');
-            $safe = htmlspecialchars($error, ENT_QUOTES, 'UTF-8');
-            exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
-        }
-
-        // theme
-        $rootDir  = dirname(__DIR__);
-        $themeDir = $rootDir . '/theme/' . basename($default_theme);
-        $header   = $themeDir . '/header.php';
-        $errors   = $themeDir . '/errors.php';
-        $footer   = $themeDir . '/footer.php';
-
-        // Clean any partial output and set status
+    // If we're here from an OOM, avoid loading header/footer (keeps memory tiny)
+    if (!empty($GLOBALS['__PASTE_FATAL_OOM__'])) {
         while (ob_get_level() > 0) { @ob_end_clean(); }
         http_response_code($httpCode);
-
-        if (is_file($header) && is_file($errors) && is_file($footer)) {
-            require $header;   // sees all locals above ($pdo, $baseurl, $lang, …)
-            require $errors;
-            require $footer;
-            exit;
-        }
-
-        // Minimal fallback
         header('Content-Type: text/html; charset=utf-8');
         $safe = htmlspecialchars($error, ENT_QUOTES, 'UTF-8');
         exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
     }
-}
 
-if (!function_exists('paste_enable_themed_errors')) {
-    function paste_enable_themed_errors(): void
-    {
-        if (!empty($GLOBALS['PASTE_NO_THEMED_ERRORS'])) {
-            return; // per-script opt-out
-        }
+    // theme
+    $rootDir  = dirname(__DIR__);
+    $themeDir = $rootDir . '/theme/' . basename($default_theme);
+    $header   = $themeDir . '/header.php';
+    $errors   = $themeDir . '/errors.php';
+    $footer   = $themeDir . '/footer.php';
 
-        if (!headers_sent()) {
-            ob_start(); // allow clearing partial output on fatal
-        }
+    // Clean any partial output and set status
+    while (ob_get_level() > 0) { @ob_end_clean(); }
+    http_response_code($httpCode);
 
-        set_exception_handler(static function (Throwable $ex): void {
-            error_log('[paste-uncaught] ' . get_class($ex) . ': ' . $ex->getMessage() . ' @ ' . $ex->getFile() . ':' . $ex->getLine());
-            $GLOBALS['error'] = 'An unexpected error occurred while processing your request.';
-            paste_error($GLOBALS['error'], 200);
-        });
-
-        set_error_handler(static function (int $severity, string $message, string $file = '', int $line = 0) {
-            // Respect @-silencing
-            if (!(error_reporting() & $severity)) {
-                return false;
-            }
-            // Escalate only serious, recoverable fatals
-            if (in_array($severity, [E_RECOVERABLE_ERROR, E_USER_ERROR], true)) {
-                throw new ErrorException($message, 0, $severity, $file, $line);
-            }
-            return false; // let PHP handle warnings/notices
-        });
-
-        register_shutdown_function(static function (): void {
-            $err = error_get_last();
-            if (!$err) {
-                return;
-            }
-
-            $type = (int)($err['type'] ?? 0);
-            if (!in_array($type, [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
-                return;
-            }
-
-            $msg = (string)($err['message'] ?? '');
-            $isOOM     = stripos($msg, 'Allowed memory size') !== false;
-            $isTimeout = stripos($msg, 'Maximum execution time') !== false;
-
-            if (!$isOOM && !$isTimeout && $type !== E_PARSE) {
-                return; // ignore non-fatal shutdowns
-            }
-
-            $ml = ini_get('memory_limit') ?: '';
-            $mlText = $ml !== '' ? " Current memory_limit in php.ini settings: $ml." : '';
-
-            if ($isOOM) {
-                $error = 'The operation needs more memory than the server allows. Try unified view or download the .diff.' . $mlText;
-            } elseif ($isTimeout) {
-                $error = 'The operation took too long and timed out. Try unified view or downloading the .diff.';
-            } else {
-                $error = 'A fatal error occurred while rendering this page.';
-            }
-
-            $GLOBALS['error'] = $error;
-            header('X-Paste-Fatal: ' . ($isOOM ? 'oom' : ($isTimeout ? 'timeout' : 'fatal')));
-            paste_error($error, 200);
-        });
+    if (is_file($header) && is_file($errors) && is_file($footer)) {
+        require $header;   // sees all locals above ($pdo, $baseurl, $lang, …)
+        require $errors;
+        require $footer;
+        exit;
     }
+
+    // Minimal fallback
+    header('Content-Type: text/html; charset=utf-8');
+    $safe = htmlspecialchars($error, ENT_QUOTES, 'UTF-8');
+    exit("<!doctype html><meta charset='utf-8'><title>Error</title><p>{$safe}</p>");
 }
 
-?>
+function paste_enable_themed_errors(): void
+{
+    if (!empty($GLOBALS['PASTE_NO_THEMED_ERRORS'])) {
+        return; // per-script opt-out
+    }
+
+    if (!headers_sent()) {
+        ob_start(); // allow clearing partial output on fatal
+    }
+
+    set_exception_handler(static function (Throwable $ex): void {
+        error_log('[paste-uncaught] ' . get_class($ex) . ': ' . $ex->getMessage() . ' @ ' . $ex->getFile() . ':' . $ex->getLine());
+        $GLOBALS['error'] = 'An unexpected error occurred while processing your request.';
+        paste_error($GLOBALS['error'], 200);
+    });
+
+    set_error_handler(static function (int $severity, string $message, string $file = '', int $line = 0) {
+        // Respect @-silencing
+        if (!(error_reporting() & $severity)) {
+            return false;
+        }
+        // Escalate only serious, recoverable fatals
+        if (in_array($severity, [E_RECOVERABLE_ERROR, E_USER_ERROR], true)) {
+            throw new ErrorException($message, 0, $severity, $file, $line);
+        }
+        return false; // let PHP handle warnings/notices
+    });
+
+    register_shutdown_function(static function (): void {
+        $err = error_get_last();
+        if (!$err) {
+            return;
+        }
+
+        $type = (int)($err['type'] ?? 0);
+        if (!in_array($type, [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return;
+        }
+
+        $msg = (string)($err['message'] ?? '');
+        $isOOM     = stripos($msg, 'Allowed memory size') !== false;
+        $isTimeout = stripos($msg, 'Maximum execution time') !== false;
+
+        if (!$isOOM && !$isTimeout && $type !== E_PARSE) {
+            return; // ignore non-fatal shutdowns
+        }
+
+        $ml = ini_get('memory_limit') ?: '';
+        $mlText = $ml !== '' ? " Current memory_limit in php.ini settings: $ml." : '';
+
+        if ($isOOM) {
+            $error = 'The operation needs more memory than the server allows. Try unified view or download the .diff.' . $mlText;
+        } elseif ($isTimeout) {
+            $error = 'The operation took too long and timed out. Try unified view or downloading the .diff.';
+        } else {
+            $error = 'A fatal error occurred while rendering this page.';
+        }
+
+        $GLOBALS['error'] = $error;
+        header('X-Paste-Fatal: ' . ($isOOM ? 'oom' : ($isTimeout ? 'timeout' : 'fatal')));
+        paste_error($error, 200);
+    });
+}
+
+// Spam detection engine (rules, heuristics, DNSBL, StopForumSpam)
+require_once __DIR__ . '/spam.php';

@@ -469,11 +469,8 @@ try {
     }
 
     // expiry
-    if ($p_expiry !== "NULL" && $p_expiry !== "SELF") {
-        $input_time = (int) $p_expiry;
-        if ($input_time > 0 && $input_time < time()) {
-            render_error_and_exit($lang['expired'] ?? 'This paste has expired.');
-        }
+    if (paste_is_expired($p_expiry)) {
+        render_error_and_exit($lang['expired'] ?? 'This paste has expired.');
     }
 
 	// decrypt if needed
@@ -482,7 +479,7 @@ try {
 	if ($p_encrypt === "2") { // Clientside encryption (AES-256-GCM)
 		$is_client_encrypted = true;
 		$raw_base64 = $row['content']; // Store raw base64 from database
-		$p_content = $raw_base64; // Initial p_content as raw base64
+		$p_content = htmlspecialchars($raw_base64, ENT_QUOTES, 'UTF-8'); // Placeholder until the browser decrypts it
 		$p_code = 'Clientside Encryption'; // Skip server-side highlighting. Using Highlight.js
 	} else {
 		if ($p_encrypt === "1") {
@@ -494,14 +491,29 @@ try {
 				render_error_and_exit(($lang['error'] ?? 'Error') . ': Decryption failed.', '403');
 			}
 			$p_content = $dec;
+			// Older API pastes stored an encrypted title
+			$decTitle = decrypt($p_title, hex2bin(SECRET));
+			if ($decTitle !== null && $decTitle !== '') {
+				$p_title = htmlspecialchars($decTitle, ENT_QUOTES, 'UTF-8');
+			}
 		}
 	}
-	$op_content = trim(htmlspecialchars_decode($p_content)); // For non-client-encrypted display
+	$op_content = htmlspecialchars_decode($p_content); // For non-client-encrypted display
+
+	// View-once pastes are deleted after a second unique viewer, whichever route they use
+	$burn_after_read = static function () use ($pdo, $paste_id, $p_expiry): void {
+		if ($p_expiry !== 'SELF') return;
+		updateMyView($pdo, (int) $paste_id);
+		if (getPasteViewCount($pdo, (int) $paste_id) >= 2) {
+			deleteMyPaste($pdo, (int) $paste_id);
+		}
+	};
 
     // download/raw/embed
     if (isset($_GET['download'])) {
         if ($p_password === "NONE" || (isset($_GET['password']) && password_verify((string) $_GET['password'], $p_password))) {
             doDownload((int) $paste_id, $p_title, $op_content, $p_code);
+            $burn_after_read();
             exit;
         }
         render_password_required_and_exit(
@@ -514,6 +526,7 @@ try {
     if (isset($_GET['raw'])) {
         if ($p_password === "NONE" || (isset($_GET['password']) && password_verify((string) $_GET['password'], $p_password))) {
             rawView((int) $paste_id, $p_title, $op_content, $p_code);
+            $burn_after_read();
             exit;
         }
         render_password_required_and_exit(
@@ -524,9 +537,13 @@ try {
     }
 
     if (isset($_GET['embed'])) {
+        // Embeds would burn view-once pastes and cannot decrypt client-side ones
+        if ($p_expiry === 'SELF' || $p_encrypt === '2') {
+            render_error_and_exit($lang['notfound'] ?? 'Paste not found.');
+        }
         if ($p_password === "NONE" || (isset($_GET['password']) && password_verify((string) $_GET['password'], $p_password))) {
             // Embed view is standalone; we pass empty $ges_style as we don't inject CSS here.
-            embedView((int) $paste_id, $p_title, $p_content, $p_code, $title, $baseurl, $ges_style, $lang);
+            embedView($url_identifier, $p_title, htmlspecialchars($op_content, ENT_QUOTES, 'UTF-8'), $p_code, $title, $baseurl, $ges_style, $lang);
             exit;
         }
         render_password_required_and_exit(
@@ -817,6 +834,16 @@ try {
                 $parent_id = (int)$_POST['parent_id'];
             }
 
+            // Comments have no moderation queue, so held comments are refused too
+            $commentBody = (string)($_POST['comment_body'] ?? '');
+            if (function_exists('spam_evaluate')) {
+                $cv = spam_evaluate($pdo, $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0', $uname, '', $commentBody, $uname === 'Guest', 'comment');
+                if ($cv['action'] !== 'allow') {
+                    $comment_error = $lang['spam_blocked_comment'] ?? 'Your comment was flagged as spam and was not posted.';
+                    goto COMMENT_DONE;
+                }
+            }
+
             // Backward/forward compatible call to addPasteComment()
             $okId = null;
             try {
@@ -861,6 +888,7 @@ try {
             }
             $comment_error = 'Could not add comment.';
         }
+        COMMENT_DONE: ;
     }
 
     // ======= Delete comment (PRG) — hard delete; replies removed via FK CASCADE) =======
@@ -938,20 +966,28 @@ try {
     require_once $theme . '/header.php';
 
     // Fetch comments (tree if available), then decorate
+    $viewerName = isset($_SESSION['username'], $_SESSION['csrf_token']) ? (string)$_SESSION['username'] : '';
+    $viewerUid  = 0;
+    if ($viewerName !== '') {
+        try {
+            $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+            $q->execute([$viewerName]);
+            $viewerUid = (int)($q->fetchColumn() ?: 0);
+        } catch (Throwable $e) { $viewerUid = 0; }
+    }
+    // Same ownership rule as userOwnsComment(), without a query per comment
+    $ownsComment = static function (array $c) use ($viewerName, $viewerUid): bool {
+        if ($viewerName === '') return false;
+        if (!empty($c['user_id']) && (int)$c['user_id'] === $viewerUid) return true;
+        return strcasecmp((string)($c['username'] ?? ''), $viewerName) === 0;
+    };
+
     if (function_exists('getPasteCommentsTree')) {
         $comments = getPasteCommentsTree($pdo, (int)$paste_id);
         // decorate recursively
-        $decorate = function (&$node) use (&$decorate, $pdo) {
+        $decorate = function (&$node) use (&$decorate, $ownsComment) {
             $node['body_html'] = render_comment_html((string)($node['body'] ?? ''));
-            $node['can_delete'] = isset($_SESSION['username']) && isset($_SESSION['csrf_token']) && (function() use ($pdo, $node) {
-                $uid = 0;
-                try {
-                    $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-                    $q->execute([$_SESSION['username']]);
-                    $uid = (int)($q->fetchColumn() ?: 0);
-                } catch (Throwable $e) { $uid = 0; }
-                return userOwnsComment($pdo, (int)$node['id'], $uid, (string)$_SESSION['username']);
-            })();
+            $node['can_delete'] = $ownsComment($node);
             if (!empty($node['children'])) {
                 foreach ($node['children'] as &$ch) $decorate($ch);
                 unset($ch);
@@ -964,15 +1000,7 @@ try {
         $comments = getPasteComments($pdo, (int)$paste_id, 200, 0);
         foreach ($comments as &$c) {
             $c['body_html'] = render_comment_html((string)$c['body']);
-            $c['can_delete'] = isset($_SESSION['username']) && isset($_SESSION['csrf_token']) && (function() use ($pdo, $c) {
-                $uid = 0;
-                try {
-                    $q = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-                    $q->execute([$_SESSION['username']]);
-                    $uid = (int)($q->fetchColumn() ?: 0);
-                } catch (Throwable $e) { $uid = 0; }
-                return userOwnsComment($pdo, (int)$c['id'], $uid, (string)$_SESSION['username']);
-            })();
+            $c['can_delete'] = $ownsComment($c);
         }
         unset($c);
     }

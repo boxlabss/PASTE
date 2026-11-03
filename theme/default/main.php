@@ -49,8 +49,12 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
               </a>
             </div>
             <div class="card-body">
+              <?php if (!empty($flash_notice)): ?>
+                <div class="alert alert-success"><?php echo htmlspecialchars($flash_notice, ENT_QUOTES, "UTF-8"); ?></div>
+
+              <?php endif; ?>
               <?php if (!empty($flash_error)): ?>
-                <div class="alert alert-danger"><?php echo htmlspecialchars($flash_error, ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="alert alert-danger"><?php echo htmlspecialchars($flash_error, ENT_QUOTES, "UTF-8"); ?></div>
               <?php elseif (isset($_GET['error'])): ?>
                 <div class="alert alert-warning"><?php echo htmlspecialchars($_GET['error'], ENT_QUOTES, 'UTF-8'); ?></div>
               <?php elseif (isset($_GET['success'])): ?>
@@ -59,11 +63,12 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                 <div class="alert alert-warning"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
               <?php endif; ?>
               <form class="form-horizontal" name="mainForm" id="mainForm" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>" method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="row mb-3 g-3">
                   <div class="col-sm-4">
                     <div class="input-group">
                       <span class="input-group-text"><i class="bi bi-fonts"></i></span>
-                      <input type="text" class="form-control" name="title" placeholder="<?php echo htmlspecialchars($lang['pastetitle'] ?? 'Paste Title'); ?>">
+                      <input type="text" class="form-control" name="title" placeholder="<?php echo htmlspecialchars($lang['pastetitle'] ?? 'Paste Title'); ?>" value="<?php echo htmlspecialchars($paste_title ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     </div>
                   </div>
                   <div class="col-sm-4">
@@ -220,7 +225,7 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
     <?php else: ?>
       <!-- Non-private site: Main content + sidebar -->
       <div class="col-lg-10">
-        <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on") && $devmode == '1'): ?>
+        <?php if (!isset($_SESSION['username']) && (!isset($privatesite) || $privatesite != "on") && ($devmode ?? '0') == '1'): ?>
           <div class="card guest-welcome text-center">
             <div class="btn-group" role="group" aria-label="Download Paste">
               <a href="https://sourceforge.net/projects/phpaste/files/latest/download" class="btn btn-success">Get Paste <?=$currentversion?></a>
@@ -257,8 +262,12 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
               </a>
             </div>
             <div class="card-body">
+              <?php if (!empty($flash_notice)): ?>
+                <div class="alert alert-success"><?php echo htmlspecialchars($flash_notice, ENT_QUOTES, "UTF-8"); ?></div>
+
+              <?php endif; ?>
               <?php if (!empty($flash_error)): ?>
-                <div class="alert alert-danger"><?php echo htmlspecialchars($flash_error, ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="alert alert-danger"><?php echo htmlspecialchars($flash_error, ENT_QUOTES, "UTF-8"); ?></div>
               <?php elseif (isset($_GET['error'])): ?>
                 <div class="alert alert-warning"><?php echo htmlspecialchars($_GET['error'], ENT_QUOTES, 'UTF-8'); ?></div>
               <?php elseif (isset($_GET['success'])): ?>
@@ -267,11 +276,12 @@ $main_sitekey = $_SESSION['captcha'] ?? ''; // sitekey for this main form (set i
                 <div class="alert alert-warning"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
               <?php endif; ?>
               <form class="form-horizontal" name="mainForm" id="mainForm" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>" method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="row mb-3 g-3">
                   <div class="col-sm-4">
                     <div class="input-group">
                       <span class="input-group-text"><i class="bi bi-fonts"></i></span>
-                      <input type="text" class="form-control" name="title" placeholder="<?php echo htmlspecialchars($lang['pastetitle'] ?? 'Paste Title'); ?>">
+                      <input type="text" class="form-control" name="title" placeholder="<?php echo htmlspecialchars($lang['pastetitle'] ?? 'Paste Title'); ?>" value="<?php echo htmlspecialchars($paste_title ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     </div>
                   </div>
                   <div class="col-sm-4">

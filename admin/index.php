@@ -132,6 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                     if ($row && password_verify($password, $row['pass'])) {
+                        session_regenerate_id(true);
                         $_SESSION['admin_login'] = $row['user'];
                         $_SESSION['admin_id'] = $row['id'];
                         error_log("index.php: Login successful for user: '$username', redirecting to dashboard.php");
@@ -144,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         header("Location: dashboard.php");
                         exit();
                     } else {
-                        error_log("index.php: Login failed - invalid username or password. Username: '$username', Row: " . ($row ? json_encode($row) : 'null'));
+                        error_log("index.php: Login failed - invalid username or password. Username: '$username'");
                         $msg = '<div class="alert alert-danger text-center mb-3">Invalid login details.</div>';
                     }
                 } catch (PDOException $e) {

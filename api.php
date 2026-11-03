@@ -72,13 +72,18 @@ function validateApiKey(PDO $pdo, string $apiKey): ?array
 {
     try {
         $stmt = $pdo->prepare("
-            SELECT ak.id as key_id, ak.user_id, ak.is_active, u.username, u.email_id as email
+            SELECT ak.id as key_id, ak.user_id, ak.is_active, u.username, u.email_id as email, u.verified
             FROM api_keys ak
             JOIN users u ON ak.user_id = u.id
             WHERE ak.api_key = ? AND ak.is_active = 1
         ");
         $stmt->execute([$apiKey]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // A banned account's keys must not work, even if still marked active.
+        if ($result && (string)($result['verified'] ?? '') === '2') {
+            return null;
+        }
         
         if ($result) {
             // Update last_used_at
@@ -98,24 +103,44 @@ function validateApiKey(PDO $pdo, string $apiKey): ?array
  */
 function getApiKey(): ?string
 {
-    // Check header first
-    $headers = getallheaders();
-    if (isset($headers['X-API-Key'])) {
-        return $headers['X-API-Key'];
+    // Header first (any case; HTTP/2 sends lowercase names)
+    if (!empty($_SERVER['HTTP_X_API_KEY'])) {
+        return (string)$_SERVER['HTTP_X_API_KEY'];
     }
-    if (isset($headers['X-Api-Key'])) {
-        return $headers['X-Api-Key'];
+    if (function_exists('getallheaders')) {
+        foreach ((array)getallheaders() as $name => $value) {
+            if (strcasecmp((string)$name, 'X-API-Key') === 0 && $value !== '') {
+                return (string)$value;
+            }
+        }
     }
-    
+
     // Check query param
-    if (isset($_GET['api_key'])) {
+    if (isset($_GET['api_key']) && is_string($_GET['api_key'])) {
         return $_GET['api_key'];
     }
-    if (isset($_POST['api_key'])) {
+    if (isset($_POST['api_key']) && is_string($_POST['api_key'])) {
         return $_POST['api_key'];
     }
-    
+
     return null;
+}
+
+/** Input string field from a decoded request body. */
+function apiInputString(array $input, array $keys, string $default = ''): string
+{
+    foreach ($keys as $k) {
+        if (isset($input[$k]) && is_scalar($input[$k])) {
+            return (string)$input[$k];
+        }
+    }
+    return $default;
+}
+
+/** Stored (HTML-escaped) paste text back to what the author wrote. */
+function apiPlain(string $stored): string
+{
+    return htmlspecialchars_decode($stored, ENT_QUOTES);
 }
 
 /**
@@ -182,6 +207,10 @@ if (!in_array($action, $publicActions)) {
     }
 }
 
+if (is_banned($pdo, (string)($_SERVER['REMOTE_ADDR'] ?? ''))) {
+    apiError('Access denied', 403);
+}
+
 // Get site info for URLs
 $stmt = $pdo->query("SELECT baseurl FROM site_info WHERE id = 1");
 $siteInfo = $stmt->fetch() ?: [];
@@ -207,70 +236,106 @@ switch ($action) {
         // Get input (support both form data and JSON)
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
         if (strpos($contentType, 'application/json') !== false) {
-            $input = json_decode(file_get_contents('php://input'), true) ?: [];
+            $input = json_decode((string)file_get_contents('php://input'), true);
+            $input = is_array($input) ? $input : [];
         } else {
             $input = $_POST;
         }
         
-        $content = $input['content'] ?? '';
-        $title = $input['title'] ?? 'Untitled';
-        $syntax = $input['syntax'] ?? $input['language'] ?? $input['code'] ?? 'text';
-        $visibility = $input['visibility'] ?? $input['visible'] ?? 'public';
-        $expiry = $input['expiry'] ?? $input['expire'] ?? 'NULL';
-        $password = $input['password'] ?? '';
-        
+        $content = apiInputString($input, ['content']);
+        $title = trim(apiInputString($input, ['title'], 'Untitled')) ?: 'Untitled';
+        $syntax = apiInputString($input, ['syntax', 'language', 'code'], 'text');
+        $visibility = apiInputString($input, ['visibility', 'visible'], 'public');
+        $expiry = strtoupper(apiInputString($input, ['expiry', 'expire'], 'NULL'));
+        $password = apiInputString($input, ['password']);
+
         // Validate content
-        if (empty(trim($content))) {
+        if (trim($content) === '') {
             apiError('Content is required');
         }
-        
+        if (strlen($content) > 1024 * 1024 * (float)($pastelimit ?? 10)) {
+            apiError('Content is too large', 413);
+        }
+        if (!preg_match('/^[A-Za-z0-9._+#-]{1,50}$/', $syntax)) {
+            $syntax = 'text';
+        }
+
         // Validate visibility
         $visibilityMap = ['public' => '0', 'unlisted' => '1', 'private' => '2'];
         $p_visible = $visibilityMap[$visibility] ?? '0';
-        
+
         // Validate expiry
         $validExpiries = ['NULL', 'T', 'H', 'W', 'M', 'B', 'Y'];
-        if (!in_array(strtoupper($expiry), $validExpiries)) {
+        if (!in_array($expiry, $validExpiries, true)) {
             $expiry = 'NULL';
         }
-        
-        // Handle encryption if password provided
-        $p_encrypt = '0';
-        $p_content = $content;
-        $p_title = $title;
-        $p_password = 'NONE';
-        
-        if (!empty($password)) {
-            $p_password = password_hash($password, PASSWORD_DEFAULT);
-            if (defined('SECRET') && SECRET) {
-                $p_content = encrypt($content, hex2bin(SECRET));
-                $p_title = encrypt($title, hex2bin(SECRET));
-                $p_encrypt = '1';
-            }
+        $expires = paste_expiry_value($expiry);
+
+        // Stored like web pastes: HTML-escaped, content encrypted at rest
+        if (!defined('SECRET') || SECRET === '') {
+            apiError('Server configuration error', 500);
         }
-        
+        $p_title = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+        $p_content = encrypt(htmlspecialchars($content, ENT_QUOTES, 'UTF-8'), hex2bin(SECRET));
+        $p_encrypt = '1';
+        $p_password = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : 'NONE';
+
         // Generate slug
         $slug = null;
         if ($urlMode === 'slug') {
             $slug = generateApiSlug($pdo, $slugLength);
         }
-        
+
         // Insert paste
         $now = date('Y-m-d H:i:s');
+        $today = date('Y-m-d');
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        
+
+        // ---- Spam filter (scans plaintext title/content; API users are authenticated) ----
+        if (function_exists('spam_evaluate')) {
+            $verdict = spam_evaluate($pdo, $ip, (string)$user['username'], $title, $content, false, 'api');
+            if ($verdict['action'] === 'block') {
+                apiError('Paste rejected: flagged as spam', 422);
+            }
+            if ($verdict['action'] === 'hold' && function_exists('spam_enqueue')) {
+                $row = [
+                    'slug'     => $slug,
+                    'title'    => $p_title,
+                    'content'  => $p_content,
+                    'visible'  => $p_visible,
+                    'code'     => $syntax,
+                    'expiry'   => $expires,
+                    'password' => $p_password,
+                    'encrypt'  => $p_encrypt,
+                    'member'   => (string)$user['username'],
+                    'date'     => $now,
+                    'ip'       => $ip,
+                    'now_time' => (string)time(),
+                    's_date'   => $today,
+                ];
+                if ($slug === null) unset($row['slug']);
+                if (spam_enqueue($pdo, $row, $ip, (string)$user['username'], (int)$verdict['score'], $verdict['reasons'] ?? [], $title, mb_substr($content, 0, 500))) {
+                    apiResponse([
+                        'success' => true,
+                        'status'  => 'pending_review',
+                        'message' => 'Paste accepted and is awaiting moderator approval.',
+                    ], 202);
+                }
+            }
+        }
+
         if ($slug) {
             $stmt = $pdo->prepare("
                 INSERT INTO pastes (slug, title, content, visible, code, expiry, password, encrypt, member, date, ip, now_time, s_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UNIX_TIMESTAMP(), ?)
             ");
-            $stmt->execute([$slug, $p_title, $p_content, $p_visible, $syntax, strtoupper($expiry), $p_password, $p_encrypt, $user['username'], $now, $ip, $now]);
+            $stmt->execute([$slug, $p_title, $p_content, $p_visible, $syntax, $expires, $p_password, $p_encrypt, $user['username'], $now, $ip, $today]);
         } else {
             $stmt = $pdo->prepare("
                 INSERT INTO pastes (title, content, visible, code, expiry, password, encrypt, member, date, ip, now_time, s_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UNIX_TIMESTAMP(), ?)
             ");
-            $stmt->execute([$p_title, $p_content, $p_visible, $syntax, strtoupper($expiry), $p_password, $p_encrypt, $user['username'], $now, $ip, $now]);
+            $stmt->execute([$p_title, $p_content, $p_visible, $syntax, $expires, $p_password, $p_encrypt, $user['username'], $now, $ip, $today]);
         }
         
         $pasteId = $pdo->lastInsertId();
@@ -301,29 +366,29 @@ switch ($action) {
     // GET PASTE
     // ========================================================================
     case 'get':
-        $id = $_GET['id'] ?? '';
-        if (empty($id)) {
+        $id = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
+        if ($id === '') {
             apiError('Paste ID required');
         }
-        
+
         $paste = getPasteByIdentifier($pdo, $id);
-        if (!$paste) {
+        if (!$paste || paste_is_expired($paste['expiry'] ?? null)) {
             apiError('Paste not found', 404);
         }
-        
+
         // Check visibility (private pastes only accessible by owner)
         if ($paste['visible'] === '2' && $paste['member'] !== $user['username']) {
             apiError('Access denied', 403);
         }
-        
+
         // Check if password protected
         if ($paste['password'] !== 'NONE') {
-            $providedPassword = $_GET['password'] ?? '';
+            $providedPassword = is_string($_GET['password'] ?? null) ? $_GET['password'] : '';
             if (!password_verify($providedPassword, $paste['password'])) {
                 apiError('Password required or incorrect', 401);
             }
         }
-        
+
         // Decrypt if needed
         $content = $paste['content'];
         $title = $paste['title'];
@@ -331,6 +396,10 @@ switch ($action) {
             $content = decrypt($content, hex2bin(SECRET)) ?: $content;
             $title = decrypt($title, hex2bin(SECRET)) ?: $title;
         }
+        if ($paste['encrypt'] !== '2') {
+            $content = apiPlain($content);
+        }
+        $title = apiPlain($title);
         
         $identifier = $paste['slug'] ?: $paste['id'];
         $pasteUrl = $mod_rewrite ? $baseurl . $identifier : $baseurl . 'paste.php?id=' . $identifier;
@@ -384,8 +453,9 @@ switch ($action) {
             if ($paste['encrypt'] === '1' && defined('SECRET') && SECRET) {
                 $title = decrypt($title, hex2bin(SECRET)) ?: $title;
             }
+            $title = apiPlain($title);
             $identifier = $paste['slug'] ?: $paste['id'];
-            
+
             $result[] = [
                 'id' => (int)$paste['id'],
                 'slug' => $paste['slug'] ?? null,
@@ -420,15 +490,16 @@ switch ($action) {
         }
         
         $id = $_GET['id'] ?? $_POST['id'] ?? '';
-        if (empty($id)) {
+        $id = is_string($id) ? $id : '';
+        if ($id === '') {
             apiError('Paste ID required');
         }
-        
+
         $paste = getPasteByIdentifier($pdo, $id);
         if (!$paste) {
             apiError('Paste not found', 404);
         }
-        
+
         // Only owner can delete
         if ($paste['member'] !== $user['username']) {
             apiError('Access denied', 403);
@@ -444,39 +515,35 @@ switch ($action) {
     // SEARCH PASTES
     // ========================================================================
     case 'search':
-        $query = trim($_GET['q'] ?? '');
+        $query = trim(is_string($_GET['q'] ?? null) ? $_GET['q'] : '');
         if (strlen($query) < 2) {
             apiError('Search query must be at least 2 characters');
         }
-        
+
         $page = max(1, (int)($_GET['page'] ?? 1));
         $limit = min(50, max(1, (int)($_GET['limit'] ?? 20)));
         $offset = ($page - 1) * $limit;
-        
-        // Search in public and user's own pastes
-        $searchTerm = '%' . $query . '%';
-        
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) FROM pastes 
-            WHERE (visible = '0' OR member = ?) 
-            AND (title LIKE ? OR content LIKE ?)
-            AND encrypt = '0'
-        ");
-        $stmt->execute([$user['username'], $searchTerm, $searchTerm]);
+
+        // Titles are searchable everywhere; content only where it is stored unencrypted
+        $like = static fn(string $s): string => '%' . addcslashes($s, '%_\\') . '%';
+        $titleTerm = $like(htmlspecialchars($query, ENT_QUOTES, 'UTF-8'));
+        $contentTerm = $like($query);
+        $where = "(visible = '0' OR member = ?) AND (title LIKE ? OR (encrypt = '0' AND content LIKE ?))";
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM pastes WHERE $where");
+        $stmt->execute([$user['username'], $titleTerm, $contentTerm]);
         $total = (int)$stmt->fetchColumn();
-        
+
         $stmt = $pdo->prepare("
             SELECT id, slug, title, code, visible, member, date
-            FROM pastes 
-            WHERE (visible = '0' OR member = ?) 
-            AND (title LIKE ? OR content LIKE ?)
-            AND encrypt = '0'
+            FROM pastes
+            WHERE $where
             ORDER BY id DESC
             LIMIT ? OFFSET ?
         ");
-        $stmt->execute([$user['username'], $searchTerm, $searchTerm, $limit, $offset]);
+        $stmt->execute([$user['username'], $titleTerm, $contentTerm, $limit, $offset]);
         $pastes = $stmt->fetchAll();
-        
+
         $result = [];
         foreach ($pastes as $paste) {
             $identifier = $paste['slug'] ?: $paste['id'];
@@ -484,7 +551,7 @@ switch ($action) {
                 'id' => (int)$paste['id'],
                 'slug' => $paste['slug'] ?? null,
                 'url' => $mod_rewrite ? $baseurl . $identifier : $baseurl . 'paste.php?id=' . $identifier,
-                'title' => $paste['title'],
+                'title' => apiPlain((string)$paste['title']),
                 'syntax' => $paste['code'],
                 'author' => $paste['member'],
                 'created_at' => $paste['date']
@@ -564,39 +631,62 @@ switch ($action) {
         // Get input
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
         if (strpos($contentType, 'application/json') !== false) {
-            $input = json_decode(file_get_contents('php://input'), true) ?: [];
+            $input = json_decode((string)file_get_contents('php://input'), true);
+            $input = is_array($input) ? $input : [];
         } else {
             $input = $_POST;
         }
         
         $id = $_GET['id'] ?? $input['id'] ?? '';
-        if (empty($id)) {
+        $id = is_scalar($id) ? (string)$id : '';
+        if ($id === '') {
             apiError('Paste ID required');
         }
-        
+
         $paste = getPasteByIdentifier($pdo, $id);
         if (!$paste) {
             apiError('Paste not found', 404);
         }
-        
+
         // Only owner can update
         if ($paste['member'] !== $user['username']) {
             apiError('Access denied', 403);
         }
-        
-        // Get current values for fields not being updated
+
+        $clientEncrypted = ($paste['encrypt'] === '2');
+        if ($clientEncrypted && isset($input['content'])) {
+            apiError('Client-side encrypted pastes cannot have their content changed through the API');
+        }
+        if (!defined('SECRET') || SECRET === '') {
+            apiError('Server configuration error', 500);
+        }
+
+        // Current values as the author wrote them
         $currentContent = $paste['content'];
         $currentTitle = $paste['title'];
-        if ($paste['encrypt'] === '1' && defined('SECRET') && SECRET) {
+        if ($paste['encrypt'] === '1') {
             $currentContent = decrypt($currentContent, hex2bin(SECRET)) ?: $currentContent;
             $currentTitle = decrypt($currentTitle, hex2bin(SECRET)) ?: $currentTitle;
         }
-        
-        $newContent = $input['content'] ?? $currentContent;
-        $newTitle = $input['title'] ?? $currentTitle;
-        $newSyntax = $input['syntax'] ?? $input['code'] ?? $paste['code'];
-        $newVisibility = $input['visibility'] ?? null;
-        
+        $currentTitle = apiPlain($currentTitle);
+        if (!$clientEncrypted) {
+            $currentContent = apiPlain($currentContent);
+        }
+
+        $newContent = apiInputString($input, ['content'], $currentContent);
+        $newTitle = trim(apiInputString($input, ['title'], $currentTitle)) ?: 'Untitled';
+        $newSyntax = apiInputString($input, ['syntax', 'code'], (string)$paste['code']);
+        if (!preg_match('/^[A-Za-z0-9._+#-]{1,50}$/', $newSyntax)) {
+            $newSyntax = (string)$paste['code'];
+        }
+        $newVisibility = isset($input['visibility']) && is_string($input['visibility']) ? $input['visibility'] : null;
+        if (!$clientEncrypted && trim($newContent) === '') {
+            apiError('Content is required');
+        }
+        if (strlen($newContent) > 1024 * 1024 * (float)($pastelimit ?? 10)) {
+            apiError('Content is too large', 413);
+        }
+
         // Map visibility
         if ($newVisibility !== null) {
             $visibilityMap = ['public' => '0', 'unlisted' => '1', 'private' => '2'];
@@ -604,17 +694,28 @@ switch ($action) {
         } else {
             $newVisible = $paste['visible'];
         }
-        
-        // Re-encrypt if needed
-        $p_content = $newContent;
-        $p_title = $newTitle;
-        if ($paste['encrypt'] === '1' && defined('SECRET') && SECRET) {
-            $p_content = encrypt($newContent, hex2bin(SECRET));
-            $p_title = encrypt($newTitle, hex2bin(SECRET));
+
+        // Spam filter: updates are checked like new pastes, but cannot be queued
+        if (function_exists('spam_evaluate')) {
+            $scan = $clientEncrypted ? '' : $newContent;
+            $verdict = spam_evaluate($pdo, $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0', (string)$user['username'], $newTitle, $scan, false, 'api-edit');
+            if ($verdict['action'] !== 'allow') {
+                apiError('Update rejected: flagged as spam', 422);
+            }
         }
-        
-        $stmt = $pdo->prepare("UPDATE pastes SET title = ?, content = ?, code = ?, visible = ? WHERE id = ?");
-        $stmt->execute([$p_title, $p_content, $newSyntax, $newVisible, $paste['id']]);
+
+        // Stored like web pastes: HTML-escaped, content encrypted at rest
+        $p_title = htmlspecialchars($newTitle, ENT_QUOTES, 'UTF-8');
+        if ($clientEncrypted) {
+            $p_content = $paste['content'];
+            $p_encrypt = '2';
+        } else {
+            $p_content = encrypt(htmlspecialchars($newContent, ENT_QUOTES, 'UTF-8'), hex2bin(SECRET));
+            $p_encrypt = '1';
+        }
+
+        $stmt = $pdo->prepare("UPDATE pastes SET title = ?, content = ?, encrypt = ?, code = ?, visible = ? WHERE id = ?");
+        $stmt->execute([$p_title, $p_content, $p_encrypt, $newSyntax, $newVisible, $paste['id']]);
         
         $identifier = $paste['slug'] ?: $paste['id'];
         $pasteUrl = $mod_rewrite ? $baseurl . $identifier : $baseurl . 'paste.php?id=' . $identifier;

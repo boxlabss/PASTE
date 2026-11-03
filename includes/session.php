@@ -20,6 +20,7 @@ declare(strict_types=1);
 session_start([
     'cookie_secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
     'cookie_httponly' => true,
+    'cookie_samesite' => 'Lax',
     'use_strict_mode' => true,
 ]);
 // Initialize CSRF token

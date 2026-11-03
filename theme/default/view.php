@@ -500,6 +500,7 @@ if (!function_exists('render_comment_node')) {
                   <div class="card-header"><?php echo htmlspecialchars($lang['modpaste'] ?? 'Modify Paste'); ?></div>
                   <div class="card-body">
                     <form class="form-horizontal" name="mainForm" action="index.php" method="POST">
+                      <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                       <div class="row mb-3 g-3">
                         <div class="col-sm-4">
                           <div class="input-group">
@@ -1084,6 +1085,7 @@ if (!function_exists('render_comment_node')) {
                 <div class="card-header"><?php echo htmlspecialchars($lang['modpaste'] ?? 'Modify Paste'); ?></div>
                 <div class="card-body">
                   <form class="form-horizontal" name="mainForm" action="index.php" method="POST">
+                      <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="row mb-3 g-3">
                       <div class="col-sm-4">
                         <div class="input-group">

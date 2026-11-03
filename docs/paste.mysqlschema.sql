@@ -372,7 +372,8 @@ CREATE TABLE `users` (
   `reset_code` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `reset_expiry` datetime DEFAULT NULL,
   `remember_token` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `date` datetime NOT NULL
+  `date` datetime NOT NULL,
+  `spam_exempt` tinyint(1) NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------

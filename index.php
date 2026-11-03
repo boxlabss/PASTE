@@ -187,9 +187,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             goto OutPut;
         }
     }
-    
+
+    // Signed-in posts must carry the session CSRF token
+    if (isset($_SESSION['username'])
+        && !hash_equals((string)($_SESSION['csrf_token'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+        $error = $lang['invalidtoken'] ?? 'Your session token was missing or expired. Please try again.';
+        goto OutPut;
+    }
+
     $editPasteId = null;
     $editPasteSlug = null;
+    $editPastePassword = null;
     $forkParentId = null; // Track the original paste when forking
     
     // Handle explicit fork - always create new paste with parent_id
@@ -254,6 +262,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 // User owns the paste - get the numeric ID and slug for update
                 $editPasteId = (int)$existingPaste['id'];
                 $editPasteSlug = $existingPaste['slug'] ?? null;
+                $editPastePassword = (string)($existingPaste['password'] ?? 'NONE');
             }
         } catch (PDOException $e) {
             error_log("index.php: edit verify err " . $e->getMessage());
@@ -311,7 +320,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } elseif ($mode === "turnstile") {
                     require_once __DIR__ . '/includes/turnstile.php';
                     if (!require_human_turnstile('create_paste')) {
-                        $error = $lang['turnstile_failed'] ?? 'Turnstile verification failed. Refresh and try again.';
+                        $error = $error ?: ($lang['turnstile_failed'] ?? 'Turnstile verification failed. Refresh and try again.');
                         goto OutPut;
                     }
                 } else {
@@ -334,9 +343,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // sanitize inputs
     $p_title = trim(htmlspecialchars($_POST['title'] ?? '', ENT_QUOTES, 'UTF-8')) ?: 'Untitled';
     $p_content = htmlspecialchars($_POST['paste_data'], ENT_QUOTES, 'UTF-8');
-    $p_visible = trim(htmlspecialchars($_POST['visibility'] ?? '0', ENT_QUOTES, 'UTF-8'));
-    $p_code = trim(htmlspecialchars($_POST['format'] ?? 'text', ENT_QUOTES, 'UTF-8'));
-    $p_expiry = trim(htmlspecialchars($_POST['paste_expire_date'] ?? 'N', ENT_QUOTES, 'UTF-8'));
+    $p_visible = (string)($_POST['visibility'] ?? '0');
+    if (!in_array($p_visible, ['0', '1', '2'], true)) {
+        $p_visible = '0';
+    }
+    $p_code = trim((string)($_POST['format'] ?? 'text'));
+    if (!preg_match('/^[A-Za-z0-9._+#-]{1,50}$/', $p_code)) {
+        $p_code = 'text';
+    }
+    $p_expiry = trim((string)($_POST['paste_expire_date'] ?? 'N'));
     $p_password = trim($_POST['pass'] ?? '') === '' ? 'NONE' : trim($_POST['pass']);
     $p_encrypt = '1';
     $p_member = (string)($_SESSION['username'] ?? 'Guest');
@@ -346,9 +361,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 	
 	// Client-side encrypted? Skip server encryption
 	$is_client_encrypted = isset($_POST['is_client_encrypted']) && $_POST['is_client_encrypted'] === '1';
+
+	// Client-encrypted bodies must be the base64 salt|iv|ciphertext blob built by the browser
+	if ($is_client_encrypted) {
+		$blob = trim((string)$_POST['paste_data']);
+		$raw  = preg_match('~^[A-Za-z0-9+/]+={0,2}$~', $blob) ? base64_decode($blob, true) : false;
+		if ($raw === false || strlen($raw) < 28) {
+			$error = $lang['error'] ?? 'Invalid encrypted paste data.';
+			goto OutPut;
+		}
+	}
+
+	// ---- Spam filter (new pastes, forks and edits; runs on plaintext before encryption) ----
+	$spam_verdict = ['action' => 'allow', 'score' => 0, 'reasons' => []];
+	$scanTitle = html_entity_decode($p_title, ENT_QUOTES, 'UTF-8');
+	// Body is unreadable for client-encrypted pastes -> judge on title + IP only.
+	$scanBody  = $is_client_encrypted ? '' : html_entity_decode($p_content, ENT_QUOTES, 'UTF-8');
+	if (function_exists('spam_evaluate')) {
+		$isGuest      = !isset($_SESSION['username']) || $p_member === 'Guest';
+		$spam_verdict = spam_evaluate($pdo, $ip, $p_member, $scanTitle, $scanBody, $isGuest, ($isEdit && $editPasteId) ? 'edit' : 'paste');
+		// Edits cannot be queued, so a held edit is refused like a blocked one
+		if ($spam_verdict['action'] === 'block' || ($spam_verdict['action'] === 'hold' && $isEdit && $editPasteId)) {
+			$error = $lang['spam_blocked'] ?? 'This paste was flagged as spam and was not posted.';
+			goto OutPut;
+		}
+	}
+
 	if ($is_client_encrypted) {
 		$p_encrypt = '2'; // Client-encrypted flag
-		$p_content = $_POST['paste_data']; // Already encrypted (base64 blob), no htmlspecialchars
+		$p_content = $blob;
 	} else {
 		// encrypt content
 		try {
@@ -367,25 +408,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 			goto OutPut;
 		}
 	}
-    // hash password if provided
+    // hash password if provided; a blank password on edit keeps the existing one
     if ($p_password !== "NONE") {
         $p_password = password_hash($p_password, PASSWORD_DEFAULT);
         if ($p_password === false) {
             $error = $lang['error'] ?? 'Password hashing failed.';
             goto OutPut;
         }
+    } elseif ($isEdit && $editPasteId && $editPastePassword !== null) {
+        $p_password = $editPastePassword;
     }
     // expiry
-    $expires = match ($p_expiry) {
-        '10M' => mktime(date("H"), date("i") + 10, date("s"), date("n"), date("j"), date("Y")),
-        '1H' => mktime(date("H") + 1, date("i"), date("s"), date("n"), date("j"), date("Y")),
-        '1D' => mktime(date("H"), date("i"), date("s"), date("n"), date("j") + 1, date("Y")),
-        '1W' => mktime(date("H"), date("i"), date("s"), date("n"), date("j") + 7, date("Y")),
-        '2W' => mktime(date("H"), date("i"), date("s"), date("n"), date("j") + 14, date("Y")),
-        '1M' => mktime(date("H"), date("i"), date("s"), date("n") + 1, date("j"), date("Y")),
-        'self' => "SELF",
-        default => "NULL",
-    };
+    $expires = paste_expiry_value($p_expiry);
     // insert or update
     try {
         if ($isEdit && $editPasteId) {
@@ -407,6 +441,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // Determine URL identifier (slug or numeric ID)
             $url_identifier = ($p_slug && $p_slug !== '') ? $p_slug : $paste_id;
         } else {
+            // ---- Held for moderation? Stash the exact row and stop here. ----
+            if (($spam_verdict['action'] ?? 'allow') === 'hold' && function_exists('spam_enqueue')) {
+                $row = [
+                    'parent_id' => $forkParentId,
+                    'title'     => $p_title,
+                    'content'   => $p_content,
+                    'visible'   => $p_visible,
+                    'code'      => $p_code,
+                    'expiry'    => $expires,
+                    'password'  => $p_password,
+                    'encrypt'   => $p_encrypt,
+                    'member'    => $p_member,
+                    'date'      => $p_date,
+                    'ip'        => $ip,
+                    'now_time'  => $now_time,
+                    's_date'    => $s_date,
+                ];
+                // If the queue is unavailable the paste is published rather than lost
+                if (spam_enqueue($pdo, $row, $ip, $p_member, (int)($spam_verdict['score'] ?? 0), $spam_verdict['reasons'] ?? [], $scanTitle, mb_substr($scanBody, 0, 500))) {
+                    $notice = $lang['spam_held'] ?? 'Your paste was submitted and is awaiting moderator approval.';
+                    goto OutPut;
+                }
+            }
+
             // INSERT new paste
             // Check if URL mode is 'slug' and ensure slug column exists
             $useSlug = false;
@@ -494,6 +552,14 @@ if ($error_hard) {
 } else {
     // SOFT: show form with inline alert
     if ($error_text !== '') { $flash_error = $error_text; }
+    if (!empty($notice)) { $flash_notice = $notice; }
+    // Keep what the user typed when a submission is rejected
+    if ($error_text !== '' && $_SERVER['REQUEST_METHOD'] === 'POST'
+        && ($_POST['is_client_encrypted'] ?? '0') !== '1') {
+        $paste_data       = (string)($_POST['paste_data'] ?? '');
+        $paste_title      = (string)($_POST['title'] ?? '');
+        $paste_expire_date = (string)($_POST['paste_expire_date'] ?? 'N');
+    }
     try {
         require_once $themeDir . '/main.php';
     } catch (Throwable $e) {

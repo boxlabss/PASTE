@@ -729,6 +729,7 @@ try {
             reset_code VARCHAR(32) DEFAULT NULL,
             reset_expiry DATETIME DEFAULT NULL,
             remember_token VARCHAR(64) DEFAULT NULL,
+            spam_exempt TINYINT(1) NOT NULL DEFAULT 0,
             PRIMARY KEY(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         $output[] = 'users table created.';
@@ -753,6 +754,7 @@ try {
         ensureColumn($pdo,'users','reset_code',       "VARCHAR(32) DEFAULT NULL",$output,$errors);
         ensureColumn($pdo,'users','reset_expiry',     "DATETIME DEFAULT NULL",$output,$errors);
         ensureColumn($pdo,'users','remember_token',   "VARCHAR(64) DEFAULT NULL",$output,$errors);
+        ensureColumn($pdo,'users','spam_exempt',      "TINYINT(1) NOT NULL DEFAULT 0",$output,$errors);
         if (!indexExists($pdo,'users','username')) {
             try { $pdo->exec("ALTER TABLE users ADD UNIQUE KEY `username` (username)"); } catch (PDOException $e) { error_log($e->getMessage()); }
         }
@@ -1050,6 +1052,145 @@ try {
     }
 
     $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+
+    // ---- Spam filter: settings ----
+    if (!tableExists($pdo,'spam_settings')) {
+        $pdo->exec("CREATE TABLE spam_settings (
+            id TINYINT NOT NULL DEFAULT 1,
+            enabled TINYINT(1) NOT NULL DEFAULT 0,
+            block_threshold INT NOT NULL DEFAULT 100,
+            review_threshold INT NOT NULL DEFAULT 50,
+            max_links INT NOT NULL DEFAULT 4,
+            link_weight INT NOT NULL DEFAULT 12,
+            link_ratio_pct INT NOT NULL DEFAULT 35,
+            link_ratio_weight INT NOT NULL DEFAULT 30,
+            min_length INT NOT NULL DEFAULT 24,
+            short_weight INT NOT NULL DEFAULT 15,
+            caps_weight INT NOT NULL DEFAULT 10,
+            guest_weight INT NOT NULL DEFAULT 10,
+            dnsbl_enabled TINYINT(1) NOT NULL DEFAULT 0,
+            dnsbl_zones TEXT,
+            dnsbl_weight INT NOT NULL DEFAULT 40,
+            sfs_enabled TINYINT(1) NOT NULL DEFAULT 0,
+            sfs_weight INT NOT NULL DEFAULT 50,
+            sfs_confidence INT NOT NULL DEFAULT 30,
+            ip_cache_ttl INT NOT NULL DEFAULT 3600,
+            log_allowed TINYINT(1) NOT NULL DEFAULT 0,
+            PRIMARY KEY(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $pdo->exec("INSERT INTO spam_settings (id, dnsbl_zones) VALUES
+            (1, 'zen.spamhaus.org\nbl.spamcop.net\ndnsbl.dronebl.org')");
+        $output[] = 'spam_settings table created.';
+    } else {
+        ensureEngineAndCharset($pdo,'spam_settings',$output,$errors);
+        ensureColumn($pdo,'spam_settings','enabled',          "TINYINT(1) NOT NULL DEFAULT 0",$output,$errors);
+        ensureColumn($pdo,'spam_settings','block_threshold',  "INT NOT NULL DEFAULT 100",$output,$errors);
+        ensureColumn($pdo,'spam_settings','review_threshold', "INT NOT NULL DEFAULT 50",$output,$errors);
+        ensureColumn($pdo,'spam_settings','max_links',        "INT NOT NULL DEFAULT 4",$output,$errors);
+        ensureColumn($pdo,'spam_settings','link_weight',      "INT NOT NULL DEFAULT 12",$output,$errors);
+        ensureColumn($pdo,'spam_settings','link_ratio_pct',   "INT NOT NULL DEFAULT 35",$output,$errors);
+        ensureColumn($pdo,'spam_settings','link_ratio_weight',"INT NOT NULL DEFAULT 30",$output,$errors);
+        ensureColumn($pdo,'spam_settings','min_length',       "INT NOT NULL DEFAULT 24",$output,$errors);
+        ensureColumn($pdo,'spam_settings','short_weight',     "INT NOT NULL DEFAULT 15",$output,$errors);
+        ensureColumn($pdo,'spam_settings','caps_weight',      "INT NOT NULL DEFAULT 10",$output,$errors);
+        ensureColumn($pdo,'spam_settings','guest_weight',     "INT NOT NULL DEFAULT 10",$output,$errors);
+        ensureColumn($pdo,'spam_settings','dnsbl_enabled',    "TINYINT(1) NOT NULL DEFAULT 0",$output,$errors);
+        ensureColumn($pdo,'spam_settings','dnsbl_zones',      "TEXT",$output,$errors);
+        ensureColumn($pdo,'spam_settings','dnsbl_weight',     "INT NOT NULL DEFAULT 40",$output,$errors);
+        ensureColumn($pdo,'spam_settings','sfs_enabled',      "TINYINT(1) NOT NULL DEFAULT 0",$output,$errors);
+        ensureColumn($pdo,'spam_settings','sfs_weight',       "INT NOT NULL DEFAULT 50",$output,$errors);
+        ensureColumn($pdo,'spam_settings','sfs_confidence',   "INT NOT NULL DEFAULT 30",$output,$errors);
+        ensureColumn($pdo,'spam_settings','ip_cache_ttl',     "INT NOT NULL DEFAULT 3600",$output,$errors);
+        ensureColumn($pdo,'spam_settings','log_allowed',      "TINYINT(1) NOT NULL DEFAULT 0",$output,$errors);
+        try { $pdo->exec("INSERT IGNORE INTO spam_settings (id, dnsbl_zones) VALUES (1, 'zen.spamhaus.org\nbl.spamcop.net\ndnsbl.dronebl.org')"); } catch (PDOException $e) {}
+    }
+
+    // ---- Spam filter: rules ----
+    if (!tableExists($pdo,'spam_rules')) {
+        $pdo->exec("CREATE TABLE spam_rules (
+            id INT NOT NULL AUTO_INCREMENT,
+            rule_type ENUM('keyword','regex','domain') NOT NULL DEFAULT 'keyword',
+            pattern VARCHAR(255) NOT NULL,
+            weight INT NOT NULL DEFAULT 50,
+            target ENUM('content','title','both') NOT NULL DEFAULT 'both',
+            enabled TINYINT(1) NOT NULL DEFAULT 1,
+            note VARCHAR(255) DEFAULT NULL,
+            created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(id),
+            KEY idx_spam_rules_enabled (enabled)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $output[] = 'spam_rules table created.';
+    } else {
+        ensureEngineAndCharset($pdo,'spam_rules',$output,$errors);
+        ensureColumn($pdo,'spam_rules','rule_type',"ENUM('keyword','regex','domain') NOT NULL DEFAULT 'keyword'",$output,$errors);
+        ensureColumn($pdo,'spam_rules','pattern',  "VARCHAR(255) NOT NULL",$output,$errors);
+        ensureColumn($pdo,'spam_rules','weight',   "INT NOT NULL DEFAULT 50",$output,$errors);
+        ensureColumn($pdo,'spam_rules','target',   "ENUM('content','title','both') NOT NULL DEFAULT 'both'",$output,$errors);
+        ensureColumn($pdo,'spam_rules','enabled',  "TINYINT(1) NOT NULL DEFAULT 1",$output,$errors);
+        ensureColumn($pdo,'spam_rules','note',     "VARCHAR(255) DEFAULT NULL",$output,$errors);
+    }
+
+    // ---- Spam filter: log ----
+    if (!tableExists($pdo,'spam_log')) {
+        $pdo->exec("CREATE TABLE spam_log (
+            id INT NOT NULL AUTO_INCREMENT,
+            created DATETIME NOT NULL,
+            ip VARCHAR(45) NOT NULL,
+            member VARCHAR(255) NOT NULL DEFAULT 'Guest',
+            score INT NOT NULL DEFAULT 0,
+            action VARCHAR(10) NOT NULL DEFAULT 'allow',
+            reasons TEXT,
+            title VARCHAR(255) DEFAULT NULL,
+            excerpt VARCHAR(500) DEFAULT NULL,
+            PRIMARY KEY(id),
+            KEY idx_spam_log_created (created),
+            KEY idx_spam_log_ip (ip)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $output[] = 'spam_log table created.';
+    } else {
+        ensureEngineAndCharset($pdo,'spam_log',$output,$errors);
+    }
+
+    // ---- Spam filter: moderation queue ----
+    if (!tableExists($pdo,'spam_queue')) {
+        $pdo->exec("CREATE TABLE spam_queue (
+            id INT NOT NULL AUTO_INCREMENT,
+            created DATETIME NOT NULL,
+            ip VARCHAR(45) NOT NULL,
+            member VARCHAR(255) NOT NULL DEFAULT 'Guest',
+            score INT NOT NULL DEFAULT 0,
+            reasons TEXT,
+            title VARCHAR(255) DEFAULT NULL,
+            excerpt VARCHAR(500) DEFAULT NULL,
+            payload LONGTEXT NOT NULL,
+            status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+            PRIMARY KEY(id),
+            KEY idx_spam_queue_status (status),
+            KEY idx_spam_queue_created (created)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $output[] = 'spam_queue table created.';
+    } else {
+        ensureEngineAndCharset($pdo,'spam_queue',$output,$errors);
+    }
+
+    // ---- Spam filter: IP reputation cache ----
+    if (!tableExists($pdo,'spam_ip_cache')) {
+        $pdo->exec("CREATE TABLE spam_ip_cache (
+            id INT NOT NULL AUTO_INCREMENT,
+            ip VARCHAR(45) NOT NULL,
+            score INT NOT NULL DEFAULT 0,
+            sources VARCHAR(255) DEFAULT NULL,
+            checked_at DATETIME NOT NULL,
+            expires_at DATETIME NOT NULL,
+            PRIMARY KEY(id),
+            UNIQUE KEY idx_spam_ip (ip),
+            KEY idx_spam_ip_exp (expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $output[] = 'spam_ip_cache table created.';
+    } else {
+        ensureEngineAndCharset($pdo,'spam_ip_cache',$output,$errors);
+    }
+
 
     // ---- Generate slugs for existing pastes that don't have them ----
     $generateSlugs = isset($_POST['generate_slugs']) && $_POST['generate_slugs'] === 'on';

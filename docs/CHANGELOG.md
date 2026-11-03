@@ -1,14 +1,28 @@
-# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 06/02/2026)
+# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 03/11/2026)
 
-3.4
-* Fixed editing of Pastes
-* Added pastebin.com-like slug support for URLs (default 8 chars)
-* Show a "View differences" link for forked Pastes
-* Show a list of all forks on an original paste
-* Added a json API (see API.md/https://paste.boxlabs.uk/api-docs.php) and a python CLI client.
-* Updated example nginx conf (for URLs)
-* Added option to disable "Recent Pastes" in sidebar
-* Bug fixes
+Unreleased
+* Spam filter: per-user exemptions
+	New users.spam_exempt column (added by the installer, docs/upgrade-spam-exempt.sql, or automatically by the admin pages)
+	Admin > Users: exempt toggle per user, "Exempt" badge, and a "Spam filter exempt" status filter
+	Admin > Spam Filter: new Exempt tab (add by username, remove), and "Approve + exempt" in the queue
+	Exempt users skip every check on pastes, edits, forks, API calls and comments
+* Spam filter now also checks edits, forks, API updates and comments (previously these bypassed it)
+* A held paste is published instead of lost when the moderation queue table is unavailable
+* Approving a held paste picks a new slug if its reserved slug was taken in the meantime
+* Spam Filter and Users admin actions now require the CSRF token; the Spam Filter logout link works
+* Fixed stored XSS through the client-side encryption field (content is validated and escaped)
+* Signed-in paste create/edit/fork requires the CSRF token; session cookie is SameSite=Lax
+* Editing a password-protected paste with the password box left empty keeps the password
+* View-once pastes can no longer be read repeatedly through raw/download, and are not embeddable
+* Embeds: escaped title/content, line breaks preserved, links use the slug and respect mod_rewrite
+* Raw/download output is no longer trimmed (leading indentation kept); download filenames sanitised
+* Rejected pastes keep the typed title and content in the form
+* Client-side encryption: large pastes no longer fail to encrypt, errors are shown instead of a silent redirect, and edit/fork buttons are passed through
+* API: expiry codes now expire, content is escaped and encrypted at rest like web pastes, titles are no longer encrypted, banned IPs are refused, HTTP/2 lowercase X-API-Key headers work, malformed JSON no longer causes a fatal error, and expired pastes are hidden
+* FILEHOST text uploads: expiry codes now expire, content escaped and encrypted at rest
+* Diff viewer: fixed the built-in Myers diff (used when the xdiff extension is not installed), which produced wrong diffs
+* A database outage now shows the themed error page instead of a fatal "undefined function paste_error()"
+* Admin login regenerates the session ID and no longer logs the password hash on failure
 
 Previous version - 3.3
 * Improved autodetection for syntax highlighting for both GeSHi and Highlight.php

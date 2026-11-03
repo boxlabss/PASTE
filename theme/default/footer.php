@@ -130,7 +130,6 @@ $captcha_enabled = ($cap_e === 'on' && in_array($mode, ['reCAPTCHA', 'turnstile'
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   var encryptModalEl = document.getElementById('encryptPassModal');
-  var encryptModal = new bootstrap.Modal(encryptModalEl);
   var encryptChk = document.getElementById('client_encrypt');
   var encryptInput = document.getElementById('encryptPassInput');
   var strengthBar = document.getElementById('passStrengthBar');
@@ -138,8 +137,19 @@ document.addEventListener('DOMContentLoaded', function() {
   var encryptConfirm = document.getElementById('encryptConfirm');
   var toggleEncryptPass = document.getElementById('toggleEncryptPass');
   var encryptPassIcon = document.getElementById('encryptPassIcon');
-  var mainForm = document.getElementById('mainForm');
+  if (!encryptModalEl || !encryptChk || !encryptInput || !encryptConfirm) return; // page has no paste form
+  var encryptModal = bootstrap.Modal.getOrCreateInstance(encryptModalEl);
+  var mainForm = encryptChk.form || document.getElementById('mainForm');
   var clientPass = ''; // Temporary store for client passphrase (cleared after use)
+
+  // Base64 without spreading the whole buffer into one call (large pastes overflow the stack)
+  function bytesToBase64(bytes) {
+    var bin = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
 
   // Show modal on checkbox tick
   encryptChk.addEventListener('change', function() {
@@ -222,27 +232,30 @@ document.addEventListener('DOMContentLoaded', function() {
     combined.set(iv, salt.byteLength);
     combined.set(new Uint8Array(encrypted), salt.byteLength + iv.byteLength);
     
-    dataField.value = btoa(String.fromCharCode(...combined));
+    dataField.value = bytesToBase64(combined);
     document.getElementById('is_client_encrypted').value = '1';
     encryptModal.hide();
   });
 
   // Intercept submit for client-encrypted pastes: Use fetch to get redirect URL, append #pass= client-side
+  if (!mainForm) return;
   mainForm.addEventListener('submit', function(e) {
     if (document.getElementById('is_client_encrypted').value === '1' && clientPass) {
       e.preventDefault();
+      var fd = new FormData(this);
+      if (e.submitter && e.submitter.name) fd.append(e.submitter.name, e.submitter.value);
       fetch(this.action, {
         method: 'POST',
-        body: new FormData(this),
+        body: fd,
         credentials: 'same-origin' // Include cookies/sessions
       }).then(res => {
-        if (res.redirected || res.ok) {
-          let url = res.url;
-          window.location.href = url + '#pass=' + encodeURIComponent(clientPass);
+        if (res.redirected) {
+          window.location.href = res.url + '#pass=' + encodeURIComponent(clientPass);
           clientPass = ''; // Clear sensitive data
-        } else {
-          return res.text().then(text => { throw new Error(text || 'Submit failed'); });
+          return;
         }
+        // No redirect means the server rejected it; show its response (error message)
+        return res.text().then(html => { document.open(); document.write(html); document.close(); });
       }).catch(err => {
         alert('Error creating paste: ' + err.message);
       });
@@ -461,45 +474,124 @@ document.addEventListener('DOMContentLoaded', function() {
   <?php elseif ($mode === 'turnstile'): ?>
     <script>
       (function () {
+        var POLL_MS  = 200;
+        var MAX_WAIT = 25000;
+
+        // Widgets are rendered implicitly by api.js from their data-* values.
+        // sitekey, action, appearance, execution, size, theme, retry and
+        // retry-interval are FIXED at that moment, and passing any of them
+        // again to render() or execute() makes Turnstile throw "parameters ...
+        // not allowed be changed between the calls of render() and execute()".
+        // Nothing below ever passes an options object.
+
+        // The token is read with getResponse(widget), which is scoped to a
+        // single widget. That matters because ids are duplicated on some pages:
+        // the header sign in and sign up modals reuse the same input ids and
+        // form ids as the login page forms, so getElementById alone is not
+        // trustworthy there. The callbacks below are a best effort fast path;
+        // getResponse is the authoritative, form-scoped read.
+        // Fill the matching hidden input the moment a widget solves. A widget
+        // that is not deferred solves at render time, so for those the token is
+        // already in the form before anyone clicks submit and the handler below
+        // never has to do anything. That is how the paste form has always
+        // worked and it must keep working without depending on the handler.
         function setToken(id, token) {
           var el = document.getElementById(id);
-          if (el) el.value = token;
+          if (el && !el.value) { el.value = token; }
         }
-        // Global callbacks for all forms
-        window.onTurnstileSuccess = window.onTurnstileSuccess || function(t) { setToken('cf-turnstile-response', t); };
-        window.onTurnstileSuccessDirectSignin = window.onTurnstileSuccessDirectSignin || function(t) { setToken('cf-turnstile-response-direct-signin', t); };
-        window.onTurnstileSuccessSignin = window.onTurnstileSuccessSignin || function(t) { setToken('cf-turnstile-response-signin', t); };
-        window.onTurnstileSuccessSignup = window.onTurnstileSuccessSignup || function(t) { setToken('cf-turnstile-response-signup', t); };
-        window.onTurnstileSuccessForgot = window.onTurnstileSuccessForgot || function(t) { setToken('cf-turnstile-response-forgot', t); };
-        window.onTurnstileSuccessResend = window.onTurnstileSuccessResend || function(t) { setToken('cf-turnstile-response-resend', t); };
-        window.onTurnstileSuccessReset = window.onTurnstileSuccessReset || function(t) { setToken('cf-turnstile-response-reset', t); };
-        // Handle execute mode for all forms
-        if (typeof turnstile !== 'undefined') {
-          turnstile.ready(function() {
-            var actionMap = {
-              'mainForm': 'create_paste',
-              'signin-form': 'login',
-              'direct-signin-form': 'login',
-              'signup-form': 'signup',
-              'forgot-form': 'forgot',
-              'reset-form': 'reset',
-              'resend-form': 'resend'
-            };
-            document.addEventListener('submit', function(e) {
-              var form = e.target;
-              if (!(form instanceof HTMLFormElement)) return;
-              var id = form.id || '';
-              var action = actionMap[id] || 'submit';
-              var turnstileInput = form.querySelector('input[name="cf-turnstile-response"]');
-              if (!turnstileInput) return;
-              if (turnstileInput.value) return;
-              var turnstileWidget = form.querySelector('.cf-turnstile');
-              if (!turnstileWidget) return;
-              e.preventDefault();
-			  turnstile.execute(turnstileWidget, { action: action, retry: 'never' });
-            }, { capture: true });
-          });
+        function makeCallback(id) { return function (token) { setToken(id, token); }; }
+        window.onTurnstileSuccess             = window.onTurnstileSuccess             || makeCallback('cf-turnstile-response');
+        window.onTurnstileSuccessDirectSignin = window.onTurnstileSuccessDirectSignin || makeCallback('cf-turnstile-response-direct-signin');
+        window.onTurnstileSuccessSignin       = window.onTurnstileSuccessSignin       || makeCallback('cf-turnstile-response-signin');
+        window.onTurnstileSuccessSignup       = window.onTurnstileSuccessSignup       || makeCallback('cf-turnstile-response-signup');
+        window.onTurnstileSuccessForgot       = window.onTurnstileSuccessForgot       || makeCallback('cf-turnstile-response-forgot');
+        window.onTurnstileSuccessResend       = window.onTurnstileSuccessResend       || makeCallback('cf-turnstile-response-resend');
+        window.onTurnstileSuccessReset        = window.onTurnstileSuccessReset        || makeCallback('cf-turnstile-response-reset');
+
+        window.onTurnstileError = function (code) {
+          console.warn('[Turnstile] error code: ' + code);
+          return true; // handled
+        };
+
+        if (typeof turnstile === 'undefined') { return; }
+
+        function readToken(widget) {
+          try { return turnstile.getResponse(widget) || ''; } catch (err) { return ''; }
         }
+
+        // Re-fire the submit rather than calling form.submit(), so that other
+        // submit listeners still get to run with the token already in place.
+        // The paste form has one: the client side encryption handler builds a
+        // FormData snapshot, and if it runs before the token lands it posts an
+        // empty cf-turnstile-response and the server reports a missing token.
+        // requestSubmit() also re-runs constraint validation, which is fine
+        // because the original submit already passed it.
+        function reSubmit(form) {
+          if (typeof HTMLFormElement.prototype.requestSubmit === 'function') {
+            HTMLFormElement.prototype.requestSubmit.call(form);
+          } else {
+            // Prototype method: a control with id or name "submit" shadows
+            // form.submit on several of these forms.
+            HTMLFormElement.prototype.submit.call(form);
+          }
+        }
+
+        turnstile.ready(function () {
+          document.addEventListener('submit', function (e) {
+            var form = e.target;
+            if (!(form instanceof HTMLFormElement)) { return; }
+
+            var input = form.querySelector('input[name="cf-turnstile-response"]');
+            if (!input) { return; }                 // not a Turnstile protected form
+            var widget = form.querySelector('.cf-turnstile');
+            if (!widget) { return; }
+
+            // Token already in place: stand aside and let the submit proceed,
+            // including any other listener on this form.
+            if (input.value) { return; }
+
+            // From here the form is Turnstile protected and has no token, so the
+            // submit is always blocked. Never fall through to a POST with an
+            // empty token.
+            e.preventDefault();
+            if (form.__tsBusy) { return; }
+
+            var token = readToken(widget);
+            if (token) { input.value = token; reSubmit(form); return; }
+
+            form.__tsBusy = true;
+
+            // Deferred widgets need a nudge. Widgets that solve at render time
+            // just need to be waited on.
+            if (widget.getAttribute('data-execution') === 'execute') {
+              try {
+                turnstile.execute(widget);
+              } catch (err) {
+                form.__tsBusy = false;
+                console.warn('[Turnstile] execute failed: ' + ((err && err.message) || err));
+                return;
+              }
+            }
+
+            var waited = 0;
+            var timer = setInterval(function () {
+              var t = readToken(widget);
+              if (t) {
+                clearInterval(timer);
+                form.__tsBusy = false;
+                input.value = t;
+                reSubmit(form);
+                return;
+              }
+              waited += POLL_MS;
+              if (waited >= MAX_WAIT) {
+                clearInterval(timer);
+                form.__tsBusy = false;
+                console.warn('[Turnstile] no token after ' + (MAX_WAIT / 1000) + 's');
+              }
+            }, POLL_MS);
+          }, { capture: true });
+        });
       })();
     </script>
   <?php endif; ?>

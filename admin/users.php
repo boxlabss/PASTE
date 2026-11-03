@@ -19,15 +19,29 @@ session_start();
 
 // Guard: admin session
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
-    error_log("users.php: Session validation failed - admin_login or admin_id not set. Session: " . json_encode($_SESSION));
+    error_log("users.php: admin session missing");
     header("Location: ../index.php");
     exit();
 }
+
+/* Logout */
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    session_destroy();
+    header('Location: index.php');
+    exit();
+}
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf = (string)$_SESSION['csrf_token'];
 
 $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php');
+require_once(__DIR__ . '/../includes/spam.php');
 
 try {
     $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname;charset=utf8mb4", $dbuser, $dbpassword, [
@@ -50,7 +64,40 @@ try {
 /* Messages */
 $msg = '';
 
-/* Actions (GET) */
+$hasExempt = spam_ensure_exempt_column($pdo);
+
+/* Actions (GET, CSRF-protected) */
+$actionKeys = ['delete', 'ban', 'unban', 'verify', 'exempt', 'unexempt'];
+if (array_intersect(array_keys($_GET), $actionKeys)
+    && !hash_equals($csrf, (string)($_GET['csrf_token'] ?? ''))) {
+    $msg = '<div class="alert alert-danger text-center">Your session token was missing or expired. Reload the page and try again.</div>';
+    foreach ($actionKeys as $k) unset($_GET[$k]);
+}
+
+/* Builds a CSRF-protected action link that keeps the current page and filter. */
+$actionHref = function(string $action, int $id) use ($csrf, &$page, &$status_filter): string {
+    return '?' . http_build_query([
+        $action      => $id,
+        'page'       => $page,
+        'status'     => $status_filter,
+        'csrf_token' => $csrf,
+    ]);
+};
+
+if ($hasExempt && (isset($_GET['exempt']) || isset($_GET['unexempt']))) {
+    $on  = isset($_GET['exempt']);
+    $uid = (int)($on ? $_GET['exempt'] : $_GET['unexempt']);
+    try {
+        $stmt = $pdo->prepare("UPDATE users SET spam_exempt = ? WHERE id = ?");
+        $stmt->execute([$on ? 1 : 0, $uid]);
+        $msg = $on
+            ? '<div class="alert alert-success text-center">User is now exempt from the spam filter</div>'
+            : '<div class="alert alert-success text-center">Spam filter exemption removed</div>';
+    } catch (PDOException $e) {
+        $msg = '<div class="alert alert-danger text-center">Error updating exemption: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+}
+
 if (isset($_GET['delete'])) {
     $delid = (int)filter_var($_GET['delete'], FILTER_SANITIZE_NUMBER_INT);
     try {
@@ -65,8 +112,12 @@ if (isset($_GET['delete'])) {
 if (isset($_GET['ban'])) {
     $ban_id = (int)filter_var($_GET['ban'], FILTER_SANITIZE_NUMBER_INT);
     try {
-        $stmt = $pdo->prepare("UPDATE users SET verified = '2' WHERE id = ?");
+        // Mark banned and kill any live session (token) so it can't keep working.
+        $stmt = $pdo->prepare("UPDATE users SET verified = '2', token = NULL WHERE id = ?");
         $stmt->execute([$ban_id]);
+        // Also disable their API keys so the ban covers the API, not just the web UI.
+        try { $pdo->prepare("UPDATE api_keys SET is_active = 0 WHERE user_id = ?")->execute([$ban_id]); }
+        catch (PDOException $e) { /* api_keys table optional; ignore if absent */ }
         $msg = '<div class="alert alert-success text-center">User banned successfully</div>';
     } catch (PDOException $e) {
         $msg = '<div class="alert alert-danger text-center">Error banning user: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
@@ -105,7 +156,9 @@ $status_filter = isset($_GET['status']) ? (string)$_GET['status'] : 'all';
 
 $where  = '';
 $params = [];
-if ($status_filter !== 'all') {
+if ($status_filter === 'exempt') {
+    $where = $hasExempt ? " WHERE spam_exempt = 1" : " WHERE 1 = 0";
+} elseif ($status_filter !== 'all') {
     $where = " WHERE verified = ?";
     $params[] = $status_filter;
 }
@@ -123,8 +176,9 @@ $total_pages = max(1, (int)ceil($total_users / $per_page));
 /* Page data */
 $per_page_safe = (int)$per_page;
 $offset_safe   = (int)$offset;
+$exemptCol = $hasExempt ? ', spam_exempt' : ', 0 AS spam_exempt';
 $query = "
-    SELECT id, username, email_id, full_name, platform, verified, date, ip, oauth_uid
+    SELECT id, username, email_id, full_name, platform, verified, date, ip, oauth_uid{$exemptCol}
       FROM users
       $where
   ORDER BY id DESC
@@ -146,14 +200,6 @@ if (isset($_GET['details'])) {
     $st = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $st->execute([$detail_id]);
     $detailRow = $st->fetch() ?: null;
-}
-
-/* Logout */
-if (isset($_GET['logout'])) {
-    $_SESSION = [];
-    session_destroy();
-    header('Location: index.php');
-    exit();
 }
 ?>
 <!DOCTYPE html>
@@ -255,6 +301,7 @@ if (isset($_GET['logout'])) {
       <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
       <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
       <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
+      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/spamfilter.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-shield-exclamation me-2"></i>Spam Filter</a>
       <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
       <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
       <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
@@ -277,6 +324,7 @@ if (isset($_GET['logout'])) {
           <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
           <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
           <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
+      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/spamfilter.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-shield-exclamation me-2"></i>Spam Filter</a>
           <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
           <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
           <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
@@ -311,6 +359,14 @@ if (isset($_GET['logout'])) {
                       };
                     ?>
                   </td></tr>
+                  <?php if ($hasExempt): $dExempt = (int)($detailRow['spam_exempt'] ?? 0) === 1; ?>
+                  <tr><td>Spam filter</td><td>
+                    <?php echo $dExempt ? '<span class="badge bg-info text-dark">Exempt</span>' : '<span class="badge bg-secondary">Checked</span>'; ?>
+                    <a class="btn btn-soft btn-sm ms-2" href="<?php echo htmlspecialchars('?' . http_build_query([($dExempt ? 'unexempt' : 'exempt') => (int)$detailRow['id'], 'details' => (int)$detailRow['id'], 'csrf_token' => $csrf]), ENT_QUOTES, 'UTF-8'); ?>">
+                      <?php echo $dExempt ? 'Remove exemption' : 'Exempt from spam filter'; ?>
+                    </a>
+                  </td></tr>
+                  <?php endif; ?>
                   <tr><td>Registered</td><td><?php echo htmlspecialchars($detailRow['date']); ?></td></tr>
                   <tr><td>IP</td><td><?php echo htmlspecialchars($detailRow['ip']); ?></td></tr>
                 </tbody>
@@ -332,6 +388,9 @@ if (isset($_GET['logout'])) {
                   <option value="0" <?php echo $status_filter==='0'?'selected':''; ?>>Unverified</option>
                   <option value="1" <?php echo $status_filter==='1'?'selected':''; ?>>Verified</option>
                   <option value="2" <?php echo $status_filter==='2'?'selected':''; ?>>Banned</option>
+                  <?php if ($hasExempt): ?>
+                  <option value="exempt" <?php echo $status_filter==='exempt'?'selected':''; ?>>Spam filter exempt</option>
+                  <?php endif; ?>
                 </select>
               </div>
               <div class="col-md-2">
@@ -364,16 +423,18 @@ if (isset($_GET['logout'])) {
                     '2' => '<span class="badge bg-danger">Banned</span>',
                     default => '<span class="badge bg-dark">Unknown</span>'
                   };
-                  $oauth = $u['oauth_uid']=='0'?'None':htmlspecialchars($u['oauth_uid']);
+                  $oauth = $u['oauth_uid']=='0'?'None':htmlspecialchars((string)$u['oauth_uid']);
                   $id    = (int)$u['id'];
                   $isBanned = ((string)$u['verified'] === '2');
                   $isUnverified = ((string)$u['verified'] === '0');
+                  $isExempt = ((int)($u['spam_exempt'] ?? 0) === 1);
 
-                  $banHref  = $isBanned ? ('?unban='.$id.'&page='.$page.'&status='.rawurlencode($status_filter))
-                                        : ('?ban='.$id.'&page='.$page.'&status='.rawurlencode($status_filter));
+                  $banHref  = $actionHref($isBanned ? 'unban' : 'ban', $id);
                   $banLabel = $isBanned ? 'Unban' : 'Ban';
 
-                  $verifyHref = '?verify='.$id.'&page='.$page.'&status='.rawurlencode($status_filter);
+                  $verifyHref = $actionHref('verify', $id);
+                  $exemptHref = $actionHref($isExempt ? 'unexempt' : 'exempt', $id);
+                  $deleteHref = $actionHref('delete', $id);
                 ?>
                   <tr>
                     <td><?php echo htmlspecialchars($u['username']); ?></td>
@@ -381,10 +442,19 @@ if (isset($_GET['logout'])) {
                     <td><?php echo htmlspecialchars($u['date']); ?></td>
                     <td><?php echo htmlspecialchars(trim((string)$u['platform'])); ?></td>
                     <td><?php echo $oauth; ?></td>
-                    <td><?php echo $statusBadge; ?></td>
+                    <td>
+                      <?php echo $statusBadge; ?>
+                      <?php if ($isExempt): ?><span class="badge bg-info text-dark ms-1" title="Exempt from the spam filter">Exempt</span><?php endif; ?>
+                    </td>
                     <td class="text-center">
                       <div class="btn-group btn-group-xs" role="group" aria-label="User actions">
                         <a class="btn btn-soft btn-sm" href="?details=<?php echo $id; ?>" title="Details"><i class="bi bi-person-badge"></i></a>
+
+                        <?php if ($hasExempt): ?>
+                          <a class="btn btn-sm <?php echo $isExempt ? 'btn-info' : 'btn-soft'; ?> exempt-user" href="<?php echo htmlspecialchars($exemptHref, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo $isExempt ? 'Remove spam filter exemption' : 'Exempt from spam filter'; ?>">
+                            <i class="bi <?php echo $isExempt ? 'bi-shield-fill-check' : 'bi-shield'; ?>"></i>
+                          </a>
+                        <?php endif; ?>
 
                         <?php if ($isUnverified): ?>
                           <a class="btn btn-success btn-sm verify-user" href="<?php echo htmlspecialchars($verifyHref, ENT_QUOTES, 'UTF-8'); ?>" title="Verify user">
@@ -396,7 +466,7 @@ if (isset($_GET['logout'])) {
                           <i class="bi <?php echo $isBanned ? 'bi-unlock' : 'bi-slash-circle'; ?>"></i>
                         </a>
 
-                        <a class="btn btn-danger btn-sm delete-user" href="?delete=<?php echo $id; ?>&page=<?php echo $page; ?>&status=<?php echo htmlspecialchars($status_filter, ENT_QUOTES, 'UTF-8'); ?>" title="Delete">
+                        <a class="btn btn-danger btn-sm delete-user" href="<?php echo htmlspecialchars($deleteHref, ENT_QUOTES, 'UTF-8'); ?>" title="Delete">
                           <i class="bi bi-trash"></i>
                         </a>
                       </div>
@@ -463,6 +533,15 @@ if (isset($_GET['logout'])) {
     if (verify) {
       e.preventDefault();
       if (confirm('Verify this user?')) window.location.href = verify.href;
+      return;
+    }
+    const exempt = e.target.closest('a.exempt-user');
+    if (exempt) {
+      e.preventDefault();
+      const msg = exempt.href.includes('unexempt=')
+        ? 'Remove this user\'s spam filter exemption?'
+        : 'Exempt this user from the spam filter? Their pastes, edits, API calls and comments will skip all spam checks.';
+      if (confirm(msg)) window.location.href = exempt.href;
       return;
     }
   });
