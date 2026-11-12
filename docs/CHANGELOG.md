@@ -1,6 +1,6 @@
 # Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 12/11/2026)
 
-3.5 - 12/11/2016
+3.5 - 12/11/2026
 * New spam filter:
     Scores each paste in points: your own rules (keywords, regular expressions and link domains), IP reputation (DNSBL, StopForumSpam), link domains on URI blocklists (Spamhaus DBL, SURBL; off until you turn it on in Settings) and form traps (a hidden field people never see but bots fill in, and forms sent within 3 seconds). Members can be made exempt.
     A learned filter judges pastes by their words. It learns from the moderation queue (rejecting a held paste teaches it spam, approving one teaches it normal), the new Spam button in Admin > Pastes, examples you paste in, or the site's own pastes.
