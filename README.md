@@ -20,7 +20,6 @@ Requirements
   - Composer for dependency management
   - Web server (e.g., Apache/Nginx) with HTTPS enabled (if OAuth enabled as below)
 
-See docs/CHANGELOG.md
 Paste 3.5
 ====
 * Spam filter: points based, with regex, keywords, a filter that learns from moderation, link domain blocklists, form traps, IP reputation (DNSBL, StopForumSpam) and per-user exemptions
