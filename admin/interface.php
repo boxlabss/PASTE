@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 /* Early logout (before any output) */
 if (isset($_GET['logout'])) {
@@ -35,14 +35,11 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('interface');
 require_once __DIR__ . '/../includes/list_languages.php'; // unified language helpers
 
-// PHP < 8 small polyfills
-if (!function_exists('str_starts_with')) {
-    function str_starts_with($haystack, $needle) {
-        return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
-    }
-}
+// The admin pages do not load the detector, which defines this for the site
 if (!function_exists('paste_friendly_label')) {
     function paste_friendly_label(string $id): string {
         $t = str_replace(['-', '_'], ' ', strtolower($id));
@@ -94,16 +91,26 @@ try {
 
     $msg = '';
     // save updates
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $d_lang  = trim((string)($_POST['lang']  ?? $d_lang));
-        $d_theme = trim((string)($_POST['theme'] ?? $d_theme));
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !admin_csrf_ok()) {
+        $msg = '<div class="alert alert-danger">Your form token was missing or expired. Please try again.</div>';
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $new_lang  = trim((string)($_POST['lang']  ?? $d_lang));
+        $new_theme = trim((string)($_POST['theme'] ?? $d_theme));
 
-        $st = $pdo->prepare("UPDATE interface SET lang=?, theme=? WHERE id=1");
-        $st->execute([$d_lang, $d_theme]);
-        $msg = '<div class="alert alert-success alert-dismissible fade show" role="alert">
+        // Only a language file from /langs and a theme folder from /theme
+        if (!preg_match('/^[A-Za-z0-9_-]+\.php$/', $new_lang) || $new_lang === 'index.php' || !is_file(__DIR__ . '/../langs/' . $new_lang)
+            || !preg_match('/^[A-Za-z0-9_-]+$/', $new_theme) || !is_file(__DIR__ . '/../theme/' . $new_theme . '/index.php')) {
+            $msg = '<div class="alert alert-danger">Unknown language or theme.</div>';
+        } else {
+            $d_lang = $new_lang;
+            $d_theme = $new_theme;
+            $st = $pdo->prepare("UPDATE interface SET lang=?, theme=? WHERE id=1");
+            $st->execute([$d_lang, $d_theme]);
+            $msg = '<div class="alert alert-success alert-dismissible fade show" role="alert">
                     Interface settings saved.
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>';
+        }
     }
 
     // Build language choices from /langs
@@ -235,18 +242,7 @@ try {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/dashboard.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/configuration.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'/admin/interface.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/admin.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/sitemap.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/tasks.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('interface.php'); ?>
     </div>
   </div>
 </div>
@@ -257,18 +253,7 @@ try {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/dashboard.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/configuration.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'/admin/interface.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/admin.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/sitemap.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/tasks.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('interface.php'); ?>
         </div>
       </div>
     </div>
@@ -293,6 +278,7 @@ try {
         <div class="card-body">
           <h4 class="card-title mb-3">Interface Settings</h4>
           <form action="<?php echo htmlspecialchars($_SERVER['PHP_SELF'], ENT_QUOTES, 'UTF-8'); ?>" method="post" class="row g-2">
+            <?= admin_csrf_field() ?>
             <div class="col-md-6">
               <label for="lang" class="form-label">Language</label>
               <select class="form-select" name="lang" id="lang">
@@ -472,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
   hookFilter('geshi-search', '#geshi-rows tr');
 });
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>
 <?php $pdo = null; ?>

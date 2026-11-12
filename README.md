@@ -26,12 +26,22 @@ https://github.com/boxlabss/PASTE/issues/new
 
 Requirements
 ===
- - PHP 8.1 or higher with `pdo_mysql`, `openssl`, and `curl` extensions. `GD` for internal CAPTCHA.
+ - PHP 8.1 or higher with `pdo_mysql`, `openssl`, `curl` and `fileinfo` extensions (`fileinfo` checks the type of uploads). `GD` for the internal CAPTCHA and for turning rotated photos upright.
   - MySQL or MariaDB
   - Composer for dependency management
   - Web server (e.g., Apache/Nginx) with HTTPS enabled (if OAuth enabled as below)
 
 See docs/CHANGELOG.md
+Paste 3.5
+====
+* Spam filter: points based, with regex, keywords, a filter that learns from moderation, link domain blocklists, form traps, IP reputation (DNSBL, StopForumSpam) and per-user exemptions
+* Image and video uploads at /img, and FILEHOST text and image uploads from IRC
+* Uploads are stored encrypted with each file's link as the key
+* Per-admin permissions for sections of the admin panel
+* The installer upgrades existing installations in place
+* API uploads, hashed API keys with scopes, and a per-key rate limit
+* Security and bug fixes (see docs/CHANGELOG.md)
+
 Paste 3.4
 ====
 * Fixed editing of Pastes
@@ -125,7 +135,7 @@ Install
     cd /mail
     composer require phpmailer/phpmailer:^6.9
     ```
-   - Enter database details (host, name, user, password) and OAuth settings (enable or disable Google/Facebook).
+   - Enter database details (host, name, user, password) and OAuth settings (enable or disable Google sign-in).
    - This generates `config.php` with dynamic `G_REDIRECT_URI` based on your domain.
    
  **Set Up Google OAuth for User Logins**:
@@ -162,25 +172,75 @@ Now you can start coding and send in pull requests.
 
 Upgrading
 ===
-3.0/3.1 schema changes
-run the installer to update database
-(backup first)
+From 3.x
+
+1. Back up the database (`mysqldump -u user -p databasename > paste-backup.sql`).
+2. Upload the new files over the old ones. Keep your `config.php`.
+3. Open http(s)://example.com/install, sign in with an admin account and press **Upgrade**,
+   or run `php install/upgrade.php` from a shell (`--no-slugs` skips giving old pastes short links).
+4. Delete the `install` folder.
+
+The upgrade adds any missing tables and columns, fixes columns whose definition has changed,
+and sets the version in `config.php`. Pastes, users, admin accounts, settings, pages and the
+rest of `config.php` are kept, and a copy of the old `config.php` is saved next to it as
+`config.backup-<date>.php`. It is safe to run again; a second run reports that nothing changed.
+
+Read the notes at the end of the upgrade. They name any account called Guest, or called the
+same as `FILEHOST_MEMBER` ("irc" by default). Those names label guest and IRC content, so new
+accounts cannot use them and an account named Guest can no longer sign in. Delete such an
+account in Admin > Users unless you created it yourself; the content under its name is kept.
+
+From 2.x: open the installer, sign in with an admin account, and choose
+**Reinstall or change the database settings**. Enter the old `$sec_key` on the second step
+to re-encrypt pastes encrypted by 2.x.
 
 
-* 2.1 to 2.2
-no changes to database
+---
+Admin access
+===
+In **Admin Account > Manage Admins**, each admin gets either **Full access** or only the
+sections ticked for them: Configuration, Interface, Pastes, Website uploads, IRC uploads,
+Users and personal data, IP bans, Spam filter, Statistics, Ads, Pages, Sitemap and Tasks.
 
-* 2.0 to 2.1
+* Every admin can open the dashboard and change their own account. The sidebar only lists
+  the sections an admin can open, and any other section answers "No access".
+* **Users and personal data** covers the Users page and the email and IP addresses shown in
+  other sections (Pastes, Uploads, Spam filter, the dashboard). Without it they show as "hidden".
+* **IP bans** is needed for "Ban IP + Delete" in Pastes.
+* **Website uploads** and **IRC uploads** split Admin > Uploads: each admin sees, finds and
+  deletes only the kinds of upload they have, and only website-upload admins see the /img
+  settings and reports.
+* **Configuration** (additional scripts and analytics), **Ads** and **Pages** put HTML and
+  scripts on the site, which run for every visitor, including admins with full access. Give
+  them only to admins you would trust with full access.
+* Only admins with full access can manage admins, see the admin login history or sign in to
+  the installer. The primary admin (ID 1) always has full access, and nobody can change
+  their own access.
 
-Insert the schema changes to your database using the CLI:
-```
-mysql -uuser -ppassword databasename < upgrade/2.0-to-2.1.sql
-```
-or upload & import upgrade/2.0-to-2.1.sql using phpMyAdmin
+Existing admins keep full access. The access list is stored in the `admin.permissions`
+column, which the upgrader adds.
 
-* 1.9 to 2.0
+---
+Spam filter
+===
+Admin > Spam Filter adds up points for each paste and holds it for moderation or blocks
+it past the thresholds you set. Turn it on under Settings.
 
-Run upgrade/1.9-to.2.0.php
+Advertising spam often carries one link or none, so counting links misses it. The
+learned filter judges a paste by its words and shape instead:
+
+* In the **Learn** tab, paste a few spam examples (separated by a line of dashes) and
+  press **These are spam**, then **Learn this site's pastes as normal**. It starts scoring
+  once it knows 5 of each.
+* After that it keeps learning: rejecting a held paste or pressing **Spam** in Admin > Pastes
+  teaches it spam, approving a held paste teaches it normal.
+* A paste that looks like spam gets 60 points (held); one that clearly looks normal has
+  30 taken off, so a normal paste with a link is not held by a link rule or the guest weight.
+
+Also under Settings: **Link domains** looks up linked domains on Spamhaus DBL and SURBL,
+and **Form traps** score bots that fill in a hidden field or send the form within seconds.
+Spamhaus and SURBL refuse lookups made through public DNS (8.8.8.8, 1.1.1.1), so the
+blocklist checks need your host's resolver or a local one.
 
 ---
 Clean URLs

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -60,7 +60,8 @@
                                         // Use slug if available, otherwise fall back to numeric ID
                                         $url_identifier = $p_slug !== '' ? $p_slug : $p_id;
                                         // controller delete link (same for rewrite)
-                                        $p_delete_link = "user.php?del&user=" . urlencode($username) . "&id=" . urlencode($p_id);
+                                        $p_delete_link = "user.php?del&user=" . urlencode($username) . "&id=" . urlencode($p_id)
+                                            . "&csrf_token=" . urlencode((string)($_SESSION['csrf_token'] ?? ''));
                                         ?>
                                         <div class="list-group-item d-flex justify-content-between align-items-center bg-dark text-light"
                                              id="paste-item-<?php echo htmlspecialchars($p_id, ENT_QUOTES, 'UTF-8'); ?>">

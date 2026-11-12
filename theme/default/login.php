@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * This program is free software; you can redistribute it and/or
@@ -22,7 +22,7 @@
  * $_SESSION['recaptcha_sitekey']
  * $_SESSION['turnstile_sitekey']
  */
- 
+
 $cap_e = $_SESSION['cap_e'] ?? 'off';
 $mode = $_SESSION['mode'] ?? 'normal';
 $recaptcha_version = $_SESSION['recaptcha_version'] ?? 'v2';
@@ -91,6 +91,7 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
                        data-error-callback="onTurnstileError"
                        data-action="reset"
                        data-appearance="execute"
+                       data-execution="execute"
                        data-retry="auto"></div>
                 <?php elseif ($captcha_mode === 'internal'): ?>
                   <?php include __DIR__ . '/captcha_bootstrap.php'; ?>
@@ -100,30 +101,6 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
             </form>
           </div>
         </div>
-        <?php if ($captcha_mode === 'turnstile'): ?>
-          <script>
-          (function() {
-              if (typeof turnstile !== 'undefined') {
-                  turnstile.ready(function() {
-                      document.getElementById('reset-form').addEventListener('submit', function(e) {
-                          var tokenInput = document.getElementById('cf-turnstile-response-reset');
-                          if (!tokenInput.value) {
-                              e.preventDefault();
-                              turnstile.render('.cf-turnstile', {
-                                  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                  callback: function(token) { tokenInput.value = token; document.getElementById('reset-form').submit(); },
-                                  action: 'reset',
-                                  size: 'compact',
-                                  retry: 'auto',
-                                  'retry-interval': 1000
-                              });
-                          }
-                      });
-                  });
-              }
-          })();
-          </script>
-        <?php endif; ?>
       <?php elseif (isset($_GET['action']) && $_GET['action'] === 'forgot'): ?>
         <!-- Forgot -->
         <div class="card mb-4">
@@ -154,6 +131,7 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
                        data-error-callback="onTurnstileError"
                        data-action="forgot"
                        data-appearance="execute"
+                       data-execution="execute"
                        data-retry="auto"></div>
                 <?php elseif ($captcha_mode === 'internal'): ?>
                   <?php include __DIR__ . '/captcha_bootstrap.php'; ?>
@@ -163,30 +141,6 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
             </form>
           </div>
         </div>
-        <?php if ($captcha_mode === 'turnstile'): ?>
-          <script>
-          (function() {
-              if (typeof turnstile !== 'undefined') {
-                  turnstile.ready(function() {
-                      document.getElementById('forgot-form').addEventListener('submit', function(e) {
-                          var tokenInput = document.getElementById('cf-turnstile-response-forgot');
-                          if (!tokenInput.value) {
-                              e.preventDefault();
-                              turnstile.render('.cf-turnstile', {
-                                  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                  callback: function(token) { tokenInput.value = token; document.getElementById('forgot-form').submit(); },
-                                  action: 'forgot',
-                                  size: 'compact',
-                                  retry: 'auto',
-                                  'retry-interval': 1000
-                              });
-                          }
-                      });
-                  });
-              }
-          })();
-          </script>
-        <?php endif; ?>
       <?php elseif (isset($_GET['action']) && $_GET['action'] === 'resend'): ?>
         <!-- Resend -->
         <div class="card mb-4">
@@ -217,6 +171,7 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
                        data-error-callback="onTurnstileError"
                        data-action="resend"
                        data-appearance="execute"
+                       data-execution="execute"
                        data-retry="auto"></div>
                 <?php elseif ($captcha_mode === 'internal'): ?>
                   <?php include __DIR__ . '/captcha_bootstrap.php'; ?>
@@ -226,30 +181,6 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
             </form>
           </div>
         </div>
-        <?php if ($captcha_mode === 'turnstile'): ?>
-          <script>
-          (function() {
-              if (typeof turnstile !== 'undefined') {
-                  turnstile.ready(function() {
-                      document.getElementById('resend-form').addEventListener('submit', function(e) {
-                          var tokenInput = document.getElementById('cf-turnstile-response-resend');
-                          if (!tokenInput.value) {
-                              e.preventDefault();
-                              turnstile.render('.cf-turnstile', {
-                                  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                  callback: function(token) { tokenInput.value = token; document.getElementById('resend-form').submit(); },
-                                  action: 'resend',
-                                  size: 'compact',
-                                  retry: 'auto',
-                                  'retry-interval': 1000
-                              });
-                          }
-                      });
-                  });
-              }
-          })();
-          </script>
-        <?php endif; ?>
       <?php elseif (isset($_GET['action']) && $_GET['action'] === 'signup'): ?>
         <!-- Signup -->
         <div class="card mb-4">
@@ -308,6 +239,7 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
                        data-error-callback="onTurnstileError"
                        data-action="signup"
                        data-appearance="execute"
+                       data-execution="execute"
                        data-retry="auto"></div>
                 <?php elseif ($captcha_mode === 'internal'): ?>
                   <?php include __DIR__ . '/captcha_bootstrap.php'; ?>
@@ -317,30 +249,6 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
             </form>
           </div>
         </div>
-        <?php if ($captcha_mode === 'turnstile'): ?>
-          <script>
-          (function() {
-              if (typeof turnstile !== 'undefined') {
-                  turnstile.ready(function() {
-                      document.getElementById('signup-form').addEventListener('submit', function(e) {
-                          var tokenInput = document.getElementById('cf-turnstile-response-signup');
-                          if (!tokenInput.value) {
-                              e.preventDefault();
-                              turnstile.render('.cf-turnstile', {
-                                  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                  callback: function(token) { tokenInput.value = token; document.getElementById('signup-form').submit(); },
-                                  action: 'signup',
-                                  size: 'compact',
-                                  retry: 'auto',
-                                  'retry-interval': 1000
-                              });
-                          }
-                      });
-                  });
-              }
-          })();
-          </script>
-        <?php endif; ?>
       <?php else: ?>
         <!-- Login -->
         <div class="card mb-4">
@@ -384,24 +292,18 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
                        data-error-callback="onTurnstileError"
                        data-action="login"
                        data-appearance="execute"
+                       data-execution="execute"
                        data-retry="auto"></div>
                 <?php elseif ($captcha_mode === 'internal'): ?>
                   <?php include __DIR__ . '/captcha_bootstrap.php'; ?>
                 <?php endif; ?>
               <?php endif; ?>
               <button type="submit" class="btn btn-primary btn-perky fw-bold w-100"><?php echo htmlspecialchars($lang['login'] ?? 'Login', ENT_QUOTES, 'UTF-8'); ?></button>
-              <?php if (($enablegoog ?? 'no') === 'yes' || ($enablefb ?? 'no') === 'yes'): ?>
+              <?php if (($enablegoog ?? 'no') === 'yes'): ?>
                 <div class="d-grid gap-2 mt-3">
-                  <?php if (($enablegoog ?? 'no') === 'yes'): ?>
-                    <a class="btn btn-outline-light btn-oauth" href="<?php echo htmlspecialchars($baseurl . 'login.php?login=google', ENT_QUOTES, 'UTF-8'); ?>">
-                      <i class="bi bi-google oauth-icon"></i> <?php echo htmlspecialchars($lang['login_with_google'] ?? 'Login with Google', ENT_QUOTES, 'UTF-8'); ?>
-                    </a>
-                  <?php endif; ?>
-                  <?php if (($enablefb ?? 'no') === 'yes'): ?>
-                    <a class="btn btn-outline-light btn-oauth" href="<?php echo htmlspecialchars($baseurl . 'login.php?login=facebook', ENT_QUOTES, 'UTF-8'); ?>">
-                      <i class="bi bi-facebook oauth-icon"></i> <?php echo htmlspecialchars($lang['login_with_facebook'] ?? 'Login with Facebook', ENT_QUOTES, 'UTF-8'); ?>
-                    </a>
-                  <?php endif; ?>
+                  <a class="btn btn-outline-light btn-oauth" href="<?php echo htmlspecialchars($baseurl . 'login.php?login=google', ENT_QUOTES, 'UTF-8'); ?>">
+                    <i class="bi bi-google oauth-icon"></i> <?php echo htmlspecialchars($lang['login_with_google'] ?? 'Login with Google', ENT_QUOTES, 'UTF-8'); ?>
+                  </a>
                 </div>
               <?php endif; ?>
             </form>
@@ -412,38 +314,7 @@ $captcha_enabled = ($cap_e === 'on' && $captcha_mode !== 'none' && (!empty($reca
             </div>
           </div>
         </div>
-        <?php if ($captcha_mode === 'turnstile'): ?>
-          <script>
-          (function() {
-              if (typeof turnstile !== 'undefined') {
-                  turnstile.ready(function() {
-                      document.getElementById('direct-signin-form').addEventListener('submit', function(e) {
-                          var tokenInput = document.getElementById('cf-turnstile-response-direct-signin');
-                          if (!tokenInput.value) {
-                              e.preventDefault();
-                              turnstile.render('.cf-turnstile', {
-                                  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-                                  callback: function(token) { tokenInput.value = token; document.getElementById('direct-signin-form').submit(); },
-                                  action: 'login',
-                                  size: 'compact',
-                                  retry: 'auto',
-                                  'retry-interval': 1000
-                              });
-                          }
-                      });
-                  });
-              }
-          })();
-          </script>
-        <?php endif; ?>
       <?php endif; ?>
     </div>
   </div>
 </div>
-<script>
-function onTurnstileError(code) {
-    console.warn('Turnstile error code: ' + code);
-    // Handle error (e.g., show message to user)
-    return true; // Mark as handled to prevent default console warning
-}
-</script>

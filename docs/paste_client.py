@@ -22,6 +22,19 @@ Usage:
     # Get raw content only
     python paste_client.py --get aBcDeFgH --raw
 
+    # Get a password-protected paste
+    python paste_client.py --get aBcDeFgH --password hunter2
+
+    # Upload an image or video, printing its direct link
+    python paste_client.py --upload photo.jpg --url-only
+    python paste_client.py --upload clip.mp4 --title "Cat vs laser pointer"
+
+    # Delete an upload by its key or link
+    python paste_client.py --delete-upload nD3SrAgZive8g4Y4JcsFV8
+
+    # Put uploads into an album (keys or links, in album order)
+    python paste_client.py --album nD3SrAgZive8g4Y4JcsFV8 Qm7pXb2Ld9vRt4Kw8YzHs3 --title "Weekend walk"
+
     # List your pastes
     python paste_client.py --list
 
@@ -40,16 +53,18 @@ Usage:
 
 import argparse
 import json
+import mimetypes
 import os
 import sys
+import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 
 # Version
-__version__ = "1.0"
+__version__ = "1.1"
 
 # Default configuration
 DEFAULT_API_URL = os.environ.get("PASTE_API_URL", "")
@@ -87,25 +102,30 @@ class PasteClient:
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
 
-    def _request(self, method: str, action: str, params: Optional[Dict] = None, 
-                 data: Optional[Dict] = None) -> Dict[str, Any]:
-        """Make an API request."""
+    def _request(self, method: str, action: str, params: Optional[Dict] = None,
+                 data: Optional[Dict] = None, headers: Optional[Dict] = None,
+                 body: Optional[bytes] = None, raw: bool = False) -> Any:
+        """Make an API request. Returns the decoded JSON, or the text when raw."""
         url = f"{self.api_url}?action={action}"
         if params:
             url += "&" + urlencode(params)
-        
-        headers = {
-            "X-API-Key": self.api_key,
+
+        all_headers = {
             "Content-Type": "application/json",
             "User-Agent": f"paste-client/{__version__}"
         }
-        
-        body = json.dumps(data).encode("utf-8") if data else None
-        req = Request(url, data=body, headers=headers, method=method.upper())
-        
+        if self.api_key:
+            all_headers["X-API-Key"] = self.api_key
+        all_headers.update(headers or {})
+
+        if body is None and data:
+            body = json.dumps(data).encode("utf-8")
+        req = Request(url, data=body, headers=all_headers, method=method.upper())
+
         try:
-            with urlopen(req, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with urlopen(req, timeout=120) as response:
+                text = response.read().decode("utf-8", "replace")
+                return text if raw else json.loads(text)
         except HTTPError as e:
             try:
                 return json.loads(e.read().decode("utf-8"))
@@ -120,9 +140,11 @@ class PasteClient:
 
     def create_paste(self, content: str, title: Optional[str] = None, 
                      syntax: Optional[str] = None, visibility: str = "public",
-                     expiry: Optional[str] = None) -> Dict[str, Any]:
+                     expiry: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
         """Create a new paste."""
         data = {"content": content}
+        if password:
+            data["password"] = password
         if title:
             data["title"] = title
         if syntax:
@@ -133,9 +155,13 @@ class PasteClient:
             data["expiry"] = expiry
         return self._request("POST", "paste", data=data)
 
-    def get_paste(self, paste_id: str) -> Dict[str, Any]:
-        """Get a paste by ID or slug."""
-        return self._request("GET", "get", params={"id": paste_id})
+    def get_paste(self, paste_id: str, password: Optional[str] = None, raw: bool = False) -> Any:
+        """Get a paste by ID or slug. With raw, returns the text only (or an error dict)."""
+        params = {"id": paste_id}
+        if raw:
+            params["format"] = "raw"
+        headers = {"X-Paste-Password": password} if password else None
+        return self._request("GET", "get", params=params, headers=headers, raw=raw)
 
     def update_paste(self, paste_id: str, content: Optional[str] = None,
                      title: Optional[str] = None, syntax: Optional[str] = None,
@@ -167,6 +193,44 @@ class PasteClient:
     def get_user(self) -> Dict[str, Any]:
         """Get user information."""
         return self._request("GET", "user")
+
+    def upload_file(self, path: str, strip_exif: bool = True,
+                    expiry: Optional[str] = None, title: Optional[str] = None) -> Dict[str, Any]:
+        """Upload an image or video to /img, with an optional title."""
+        boundary = uuid.uuid4().hex
+        filename = Path(path).name
+        ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        parts = [("strip_exif", "1" if strip_exif else "0")]
+        if expiry:
+            parts.append(("expiry", expiry))
+        if title:
+            parts.append(("title", title))
+        body = b""
+        for name, value in parts:
+            body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                     f"{value}\r\n").encode("utf-8")
+        with open(path, "rb") as f:
+            body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+                     f"filename=\"{filename}\"\r\nContent-Type: {ctype}\r\n\r\n").encode("utf-8")
+            body += f.read() + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+        return self._request("POST", "upload", headers=headers, body=body)
+
+    def delete_upload(self, key: str) -> Dict[str, Any]:
+        """Delete one of your uploads by its key or link."""
+        return self._request("DELETE", "upload_delete", params={"key": key})
+
+    def make_album(self, keys: List[str], title: Optional[str] = None, description: Optional[str] = None,
+                   expiry: Optional[str] = None) -> Dict[str, Any]:
+        """Put your uploads (keys or links, in order) into an album."""
+        data: Dict[str, Any] = {"keys": keys}
+        if title:
+            data["title"] = title
+        if description:
+            data["description"] = description
+        if expiry:
+            data["expiry"] = expiry
+        return self._request("POST", "album", data=data)
 
 
 def detect_syntax(filename: str) -> Optional[str]:
@@ -212,6 +276,19 @@ def format_output(data: Dict[str, Any], json_output: bool = False) -> str:
             lines.append(f"  [{slug}] {title} ({syntax}) - {date}")
         return "\n".join(lines)
     
+    if "upload" in data:
+        up = data["upload"]
+        title = f"Title: {up['title']}\n" if up.get("title") else ""
+        return (f"{title}Link: {up.get('file', '')}\n"
+                f"Page: {up.get('url', '')}\n"
+                f"Key:  {up.get('key', '')} (keep it to delete the upload later)")
+
+    if "album" in data:
+        album = data["album"]
+        title = f"Title: {album['title']}\n" if album.get("title") else ""
+        return (f"{title}Album: {album.get('url', '')}\n"
+                f"Uploads: {album.get('uploads', 0)}")
+
     if "user" in data:
         user = data["user"]
         return (f"Username: {user.get('username', 'N/A')}\n"
@@ -219,6 +296,9 @@ def format_output(data: Dict[str, Any], json_output: bool = False) -> str:
                 f"Paste Count: {user.get('paste_count', 0)}\n"
                 f"API Keys: {user.get('api_key_count', 0)}")
     
+    if data.get("deleted"):
+        return "Deleted."
+
     if "message" in data:
         return data["message"]
     
@@ -235,6 +315,9 @@ Examples:
   echo "code" | %(prog)s                 Create paste from stdin
   %(prog)s --get aBcDeFgH                Get a paste
   %(prog)s --get aBcDeFgH --raw          Get raw content only
+  %(prog)s --upload photo.jpg            Upload an image or video
+  %(prog)s --delete-upload KEY           Delete an upload
+  %(prog)s --album KEY KEY ...           Put uploads into an album
   %(prog)s --list                        List your pastes
   %(prog)s --search "query"              Search pastes
   %(prog)s --delete aBcDeFgH             Delete a paste
@@ -242,7 +325,8 @@ Examples:
 
 Environment Variables:
   PASTE_API_URL    API endpoint URL
-  PASTE_API_KEY    Your API key
+  PASTE_API_KEY    Your API key (optional for new pastes and uploads on
+                   sites that allow guests)
         """
     )
     
@@ -255,13 +339,21 @@ Environment Variables:
     action_group.add_argument("--list", "-l", action="store_true", help="List your pastes")
     action_group.add_argument("--search", "-s", metavar="QUERY", help="Search pastes")
     action_group.add_argument("--user", action="store_true", help="Show user info")
+    action_group.add_argument("--upload", metavar="FILE", help="Upload an image or video")
+    action_group.add_argument("--delete-upload", metavar="KEY", help="Delete an upload by its key or link")
+    action_group.add_argument("--album", metavar="KEY", nargs="+", help="Put uploads (keys or links) into an album")
     
-    parser.add_argument("--title", "-t", help="Paste title")
+    parser.add_argument("--title", "-t", help="Paste title, or the title of an --upload or --album")
+    parser.add_argument("--description", help="Description of an --album")
     parser.add_argument("--syntax", "-S", help="Syntax highlighting")
     parser.add_argument("--public", action="store_const", const="public", dest="visibility")
     parser.add_argument("--unlisted", action="store_const", const="unlisted", dest="visibility")
     parser.add_argument("--private", action="store_const", const="private", dest="visibility")
-    parser.add_argument("--expiry", "-e", choices=["10M", "1H", "1D", "1W", "2W", "1M", "never"])
+    parser.add_argument("--expiry", "-e", type=str.upper,
+                        choices=["N", "NEVER", "10M", "1H", "1D", "1W", "2W", "1M", "6M", "1Y", "SELF"],
+                        help="Expiry (SELF = view once). Uploads take N, 1H, 1D, 1W or 1M")
+    parser.add_argument("--password", "-p", help="Password for --get, or to protect a new paste")
+    parser.add_argument("--keep-exif", action="store_true", help="Keep metadata on --upload")
     parser.add_argument("--limit", type=int, default=20, help="Limit results")
     parser.add_argument("--offset", type=int, default=0, help="Offset for pagination")
     parser.add_argument("--raw", "-r", action="store_true", help="Output raw content only")
@@ -277,7 +369,8 @@ Environment Variables:
         print("Error: API URL not set. Use --api-url or set PASTE_API_URL", file=sys.stderr)
         sys.exit(1)
     
-    if not args.api_key:
+    guest_ok = not (args.get or args.delete or args.update or args.list or args.search or args.user or args.delete_upload or args.album)
+    if not args.api_key and not guest_ok:
         print("Error: API key not set. Use --api-key or set PASTE_API_KEY", file=sys.stderr)
         sys.exit(1)
     
@@ -285,9 +378,28 @@ Environment Variables:
     result = None
     
     if args.get:
-        result = client.get_paste(args.get)
-        if args.raw and result.get("success") and "paste" in result:
-            print(result["paste"].get("content", ""))
+        result = client.get_paste(args.get, password=args.password, raw=args.raw)
+        if args.raw:
+            if isinstance(result, str):
+                sys.stdout.write(result)
+                return
+            print(format_output(result, json_output=args.json), file=sys.stderr)
+            sys.exit(1)
+    elif args.upload:
+        if not Path(args.upload).is_file():
+            print(f"Error: File not found: {args.upload}", file=sys.stderr)
+            sys.exit(1)
+        result = client.upload_file(args.upload, strip_exif=not args.keep_exif, expiry=args.expiry,
+                                    title=args.title)
+        if args.url_only and result.get("success"):
+            print(result["upload"].get("file", ""))
+            return
+    elif args.delete_upload:
+        result = client.delete_upload(args.delete_upload)
+    elif args.album:
+        result = client.make_album(args.album, title=args.title, description=args.description, expiry=args.expiry)
+        if args.url_only and result.get("success"):
+            print(result["album"].get("url", ""))
             return
     elif args.delete:
         result = client.delete_paste(args.delete)
@@ -333,7 +445,8 @@ Environment Variables:
             sys.exit(1)
         
         result = client.create_paste(content=content, title=title, syntax=syntax,
-                                     visibility=args.visibility or "public", expiry=args.expiry)
+                                     visibility=args.visibility or "public", expiry=args.expiry,
+                                     password=args.password)
         
         if args.url_only and result.get("success") and "paste" in result:
             print(result["paste"].get("url", ""))

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -28,7 +28,7 @@ try {
     $site = $stmt->fetch() ?: [];
 } catch (Throwable $e) { $site = []; }
 
-$baseurl   = trim($site['baseurl'] ?? '');
+$baseurl   = paste_request_baseurl(trim($site['baseurl'] ?? ''));
 $site_name = trim($site['site_name'] ?? 'Paste');
 
 // Theme + language

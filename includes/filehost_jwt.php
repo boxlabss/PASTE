@@ -5,7 +5,7 @@
  * The IRC server signs a compact JWT per upload request; this file checks
  * it against the network's public key (PEM, from the ircd's STATS
  * authtoken) and the expected issuer / audience.  No dependencies beyond
- * ext/openssl.  See docs/filehost.md.
+ * ext/openssl.  See docs/FILEHOST.md.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License

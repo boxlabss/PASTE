@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -39,7 +39,7 @@ try {
     }
     $title = trim($row['title']);
     $des = trim($row['des']);
-    $baseurl = rtrim(trim($row['baseurl']));
+    $baseurl = paste_request_baseurl(rtrim(trim($row['baseurl'])));
     $keyword = trim($row['keyword']);
     $site_name = trim($row['site_name']);
     $email = trim($row['email']);
@@ -64,57 +64,11 @@ try {
 
     // Logout
     if (isset($_GET['logout'])) {
-        header('Location: ' . ($_SERVER['HTTP_REFERER'] ?? $baseurl));
-        unset($_SESSION['token']);
-        unset($_SESSION['oauth_uid']);
-        unset($_SESSION['username']);
-        session_destroy();
-        exit;
+        paste_logout_and_redirect($baseurl);
     }
 
-	// Page views
-	$date = date('Y-m-d');
-	$ip = $_SERVER['REMOTE_ADDR'];
-
-	try {
-		// Fetch or create the page_view record for today
-		$stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-		$stmt->execute([$date]);
-		$row = $stmt->fetch();
-
-		if ($row) {
-			// Record exists for today
-			$page_view_id = $row['id'];
-			$tpage = (int)$row['tpage'] + 1; // Increment total page views
-			$tvisit = (int)$row['tvisit'];
-
-			// Check if this IP has visited today
-			$stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-			$stmt->execute([$ip, $date]);
-			if ($stmt->fetchColumn() == 0) {
-				// New unique visitor
-				$tvisit += 1;
-				$stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-				$stmt->execute([$ip, $date]);
-			}
-
-			// Update page_view with new counts
-			$stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-			$stmt->execute([$tpage, $tvisit, $page_view_id]);
-		} else {
-			// No record for today: create one
-			$tpage = 1;
-			$tvisit = 1;
-			$stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-			$stmt->execute([$date, $tpage, $tvisit]);
-
-			// Log the visitor's IP
-			$stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-			$stmt->execute([$ip, $date]);
-		}
-	} catch (PDOException $e) {
-		error_log("Page view tracking error: " . $e->getMessage());
-	}
+    // Page views
+    pageViewTrack($pdo, $ip);
 
     // Ads
     $stmt = $pdo->query("SELECT * FROM ads WHERE id = '1'");
@@ -127,41 +81,41 @@ try {
         $ads_2 = trim($row['ads_2']);
     }
 
-	// Accept both ?p=slug and ?page=slug (mod_rewrite typically maps to ?p=)
-	$page_name = isset($_GET['p']) ? trim($_GET['p']) : (isset($_GET['page']) ? trim($_GET['page']) : '');
-	if ($page_name !== '') {
-		$stmt = $pdo->prepare("
-			SELECT page_title, page_content, last_date, external_url
-			FROM pages
-			WHERE page_name = ? AND is_active = 1
-			LIMIT 1
-		");
-		$stmt->execute([$page_name]);
-		$row = $stmt->fetch();
-		if ($row) {
-			// Check for external URL redirect
-			if (!empty($row['external_url'])) {
-				$external = $row['external_url'];
-				// If relative URL, prepend baseurl
-				if (!preg_match('/^https?:\/\//', $external)) {
-					$external = rtrim($baseurl, '/') . '/' . ltrim($external, '/');
-				}
-				header('Location: ' . $external);
-				exit;
-			}
-			$page_title   = $row['page_title'];
-			$page_content = $row['page_content'];
-			$last_date    = $row['last_date'];
-			$stats        = "OK";
-			$p_title      = $page_title;
-		} else {
-			$page_title   = "Error";
-			$page_content = "<div class='alert alert-danger text-center'>Page not found or inactive.</div>";
-			$last_date    = $date;
-			$stats        = null;
-			$p_title      = "Error";
-		}
-	}
+    // Accept both ?p=slug and ?page=slug (mod_rewrite typically maps to ?p=)
+    $page_name = isset($_GET['p']) ? trim($_GET['p']) : (isset($_GET['page']) ? trim($_GET['page']) : '');
+    if ($page_name !== '') {
+        $stmt = $pdo->prepare("
+            SELECT page_title, page_content, last_date, external_url
+            FROM pages
+            WHERE page_name = ? AND is_active = 1
+            LIMIT 1
+        ");
+        $stmt->execute([$page_name]);
+        $row = $stmt->fetch();
+        if ($row) {
+            // Check for external URL redirect
+            if (!empty($row['external_url'])) {
+                $external = $row['external_url'];
+                // If relative URL, prepend baseurl
+                if (!preg_match('/^https?:\/\//', $external)) {
+                    $external = rtrim($baseurl, '/') . '/' . ltrim($external, '/');
+                }
+                header('Location: ' . $external);
+                exit;
+            }
+            $page_title   = $row['page_title'];
+            $page_content = $row['page_content'];
+            $last_date    = $row['last_date'];
+            $stats        = "OK";
+            $p_title      = $page_title;
+        } else {
+            $page_title   = "Error";
+            $page_content = "<div class='alert alert-danger text-center'>Page not found or inactive.</div>";
+            $last_date    = $date;
+            $stats        = null;
+            $p_title      = "Error";
+        }
+    }
 
     // Theme
     require_once('theme/' . $default_theme . '/header.php');

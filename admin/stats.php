@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 // Guard
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
@@ -27,6 +27,8 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '';
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('stats');
 
 try {
     $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname;charset=utf8mb4", $dbuser, $dbpassword, [
@@ -54,7 +56,7 @@ try {
     $total_un   = (int)($row['total_visit'] ?? 0);
 
     $row = $pdo->query("
-        SELECT 
+        SELECT
             COUNT(*) AS total_pastes,
             SUM(CASE WHEN expiry IS NOT NULL AND expiry <> 'SELF' AND UNIX_TIMESTAMP(expiry) < UNIX_TIMESTAMP() THEN 1 ELSE 0 END) AS exp_pastes
         FROM pastes
@@ -62,7 +64,7 @@ try {
     $total_pastes = (int)($row['total_pastes'] ?? 0);
     $exp_pastes   = (int)($row['exp_pastes'] ?? 0);
 
-    $row = $pdo->query("SELECT 
+    $row = $pdo->query("SELECT
         COUNT(*) AS total_users,
         SUM(CASE WHEN verified='2' THEN 1 ELSE 0 END) AS total_ban,
         SUM(CASE WHEN verified='0' THEN 1 ELSE 0 END) AS not_ver
@@ -203,7 +205,7 @@ function fmt_n($n){ if ($n>=1000000) return number_format($n/1000000,1).'M'; if 
 <title>Paste - Statistics</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.js" integrity="sha384-tgbB5AKnszdcfwcZtTfuhR3Ko1XZdlDfsLtkxiiAZiVkkXCkFmp+FQFh+V/UTo54" crossorigin="anonymous"></script>
 
 <style>
   :root{
@@ -280,18 +282,7 @@ function fmt_n($n){ if ($n>=1000000) return number_format($n/1000000,1).'M'; if 
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('stats.php'); ?>
     </div>
   </div>
 </div>
@@ -302,18 +293,7 @@ function fmt_n($n){ if ($n>=1000000) return number_format($n/1000000,1).'M'; if 
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('stats.php'); ?>
         </div>
       </div>
     </div>
@@ -607,7 +587,7 @@ function fmt_n($n){ if ($n>=1000000) return number_format($n/1000000,1).'M'; if 
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   const labels = <?php echo json_encode($chart_labels); ?>;

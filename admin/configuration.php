@@ -18,22 +18,13 @@
 declare(strict_types=1);
 
 ob_start();
-if (session_status() === PHP_SESSION_NONE) {
-    session_start([
-        'cookie_secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-        'cookie_httponly' => true,
-        'use_strict_mode' => true,
-        'cookie_samesite' => 'Strict',
-    ]);
-}
+require_once __DIR__ . '/../includes/admin_session.php';
 
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-error_log("configuration.php: Session started, ID: " . session_id() . ", CSRF token: {$_SESSION['csrf_token']}, HTTPS: " . (isset($_SERVER['HTTPS']) ? 'on' : 'off'));
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
-    error_log("configuration.php: Session validation failed - admin_login or admin_id not set. Session: " . json_encode($_SESSION));
     ob_end_clean();
     header("Location: index.php");
     exit();
@@ -45,6 +36,8 @@ $date = date('Y-m-d H:i:s');
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 require_once '../config.php';
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('configuration');
 // Dependency guards if vendor trees missing
 $OAUTH_VENDOR = __DIR__ . '/../oauth/vendor/autoload.php';
 $OAUTH_READY = is_file($OAUTH_VENDOR) && is_file(__DIR__ . '/../oauth/vendor/composer/autoload_real.php');
@@ -164,17 +157,21 @@ try {
     $oauth_refresh_token = trim($row['oauth_refresh_token'] ?? '');
     $oauth_status = $oauth_refresh_token ? 'OAuth refresh token is set.' : 'OAuth refresh token not set. Configure Gmail OAuth if using smtp.gmail.com.';
     $redirect_uri = $baseurl ? rtrim($baseurl, '/') . '/oauth/google_smtp.php' : '';
-    
+
     // URL settings (paste_options table)
     $current_url_mode = 'slug';
     $current_slug_length = 8;
     $current_block_numeric = false;
     $current_api_enabled = true;
     $current_api_keys_per_user = 5;
+    $current_api_rate_limit = 60;
+    $current_api_guest_pastes = false;
+    $current_api_guest_uploads = false;
+    $current_api_guest_rate_limit = 10;
     try {
         $tableCheck = $pdo->query("SHOW TABLES LIKE 'paste_options'");
         if ($tableCheck->rowCount() > 0) {
-            $stmt = $pdo->query("SELECT option_name, option_value FROM paste_options WHERE option_name IN ('url_mode', 'slug_length', 'block_numeric_urls', 'api_enabled', 'api_keys_per_user')");
+            $stmt = $pdo->query("SELECT option_name, option_value FROM paste_options WHERE option_name IN ('url_mode', 'slug_length', 'block_numeric_urls', 'api_enabled', 'api_keys_per_user', 'api_rate_limit', 'api_guest_pastes', 'api_guest_uploads', 'api_guest_rate_limit')");
             while ($row = $stmt->fetch()) {
                 if ($row['option_name'] === 'url_mode') {
                     $current_url_mode = $row['option_value'] ?: 'slug';
@@ -186,24 +183,28 @@ try {
                     $current_api_enabled = ($row['option_value'] !== '0');
                 } elseif ($row['option_name'] === 'api_keys_per_user') {
                     $current_api_keys_per_user = (int)($row['option_value'] ?: 5);
+                } elseif ($row['option_name'] === 'api_rate_limit') {
+                    $current_api_rate_limit = max(0, (int)$row['option_value']);
+                } elseif ($row['option_name'] === 'api_guest_pastes') {
+                    $current_api_guest_pastes = $row['option_value'] === '1';
+                } elseif ($row['option_name'] === 'api_guest_uploads') {
+                    $current_api_guest_uploads = $row['option_value'] === '1';
+                } elseif ($row['option_name'] === 'api_guest_rate_limit') {
+                    $current_api_guest_rate_limit = max(0, (int)$row['option_value']);
                 }
             }
         }
     } catch (PDOException $e) {
         // Table might not exist yet - use defaults
     }
-    
+
     $msg = '';
     if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-        error_log("configuration.php: POST request received with CSRF token: " . ($_POST['csrf_token'] ?? 'none') . ", Session CSRF: {$_SESSION['csrf_token']}, Session ID: " . session_id());
-        if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-            error_log("configuration.php: CSRF validation failed. Received: " . ($_POST['csrf_token'] ?? 'none') . ", Expected: {$_SESSION['csrf_token']}, Session: " . json_encode($_SESSION));
+        if (!admin_csrf_ok()) {
             $msg_plain = 'CSRF validation failed. Please try again.';
             $msg_type = 'error';
         } else {
-            error_log("configuration.php: CSRF validation passed");
             if (isset($_POST['test_recaptcha'])) {
-                error_log("configuration.php: Test reCAPTCHA requested");
                 $recaptcha_sitekey = trim($_POST['recaptcha_sitekey'] ?? '');
                 $recaptcha_secretkey = trim($_POST['recaptcha_secretkey'] ?? '');
                 $recaptcha_version = trim($_POST['recaptcha_version'] ?? 'v2');
@@ -234,7 +235,6 @@ try {
                                 error_log("configuration.php: reCAPTCHA v3 test failed: Score " . $response['score']);
                             } else {
                                 $msg = '<div class="alert alert-success text-center">reCAPTCHA keys are valid' . ($recaptcha_version === 'v3' ? ' (Score: ' . htmlspecialchars((string)($response['score'] ?? 'N/A'), ENT_QUOTES, 'UTF-8') . ')' : '') . '.</div>';
-                                error_log("configuration.php: reCAPTCHA test successful" . ($recaptcha_version === 'v3' ? ", Score: " . $response['score'] : ""));
                             }
                         }
                     }
@@ -246,7 +246,6 @@ try {
                     exit;
                 }
             } elseif (isset($_POST['test_turnstile'])) {
-                error_log("configuration.php: Test Turnstile requested");
                 $turnstile_sitekey = trim($_POST['turnstile_sitekey'] ?? '');
                 $turnstile_secretkey = trim($_POST['turnstile_secretkey'] ?? '');
                 if (empty($turnstile_sitekey) || empty($turnstile_secretkey)) {
@@ -280,7 +279,6 @@ try {
                         } elseif ($result['success']) {
                             // Unexpected with empty token, but valid
                             $msg = '<div class="alert alert-success text-center">Turnstile keys are valid.</div>';
-                            error_log("configuration.php: Turnstile test successful (unexpected success)");
                         } else {
                             $errors = $result['error-codes'] ?? [];
                             if (in_array('invalid-input-secret', $errors)) {
@@ -288,7 +286,6 @@ try {
                                 error_log("configuration.php: Turnstile test failed: Invalid secret key");
                             } elseif (in_array('missing-input-response', $errors)) {
                                 $msg = '<div class="alert alert-success text-center">Turnstile keys are valid.</div>';
-                                error_log("configuration.php: Turnstile test successful");
                             } else {
                                 $msg = '<div class="alert alert-danger text-center">Turnstile verification failed. Error codes: ' . htmlspecialchars(implode(', ', $errors), ENT_QUOTES, 'UTF-8') . '</div>';
                                 error_log("configuration.php: Turnstile test failed: " . implode(', ', $errors));
@@ -304,7 +301,6 @@ try {
                 }
             } elseif (isset($_POST['test_smtp'])) {
                 require_mail_vendor_or_json_error();
-                error_log("configuration.php: Test SMTP requested");
                 header('Content-Type: application/json; charset=utf-8');
                 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     error_log("configuration.php: Invalid or missing admin email: $email");
@@ -339,7 +335,6 @@ try {
                         </body>
                         </html>";
                     $mail_result = send_mail($email, "Test Email from $site_name", $test_message, $site_name, $_SESSION['csrf_token']);
-                    error_log("configuration.php: Test SMTP result: " . json_encode($mail_result));
                     ob_end_clean();
                     if (($mail_result['status'] ?? 'error') === 'success') {
                         echo json_encode(['status' => 'success', 'message' => '<div class="alert alert-success text-center">Test email sent successfully to ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '.</div>']);
@@ -363,13 +358,11 @@ try {
                 } elseif (!preg_match('/^[0-9a-zA-Z\-_]+$/', $client_secret)) {
                     $msg_plain = 'Invalid Client Secret format. It should contain only letters, numbers, hyphens, and underscores.';
                     $msg_type = 'error';
-                    error_log("configuration.php: Invalid OAuth Client Secret format: $client_secret");
                 } else {
                     try {
                         $stmt = $pdo->prepare("UPDATE mail SET oauth_client_id = ?, oauth_client_secret = ? WHERE id = 1");
-                        $rows_affected = $stmt->execute([$client_id, $client_secret]);
-                        error_log("configuration.php: OAuth credentials update attempted. Rows affected: $rows_affected, client_id: $client_id");
-                        if ($rows_affected === 0) {
+                        $stmt->execute([$client_id, $client_secret]);
+                        if ($stmt->rowCount() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM mail WHERE id = 1")->fetchColumn() === 0) {
                             $msg_plain = 'Failed to update OAuth credentials in database. No rows affected.';
                             $msg_type = 'error';
                         } else {
@@ -392,7 +385,6 @@ try {
                     $oauth_status = 'OAuth refresh token not set. Configure Gmail OAuth if using smtp.gmail.com.';
                     $msg_plain = 'OAuth refresh token reset successfully.';
                     $msg_type = 'success';
-                    error_log("configuration.php: OAuth refresh token reset successfully");
                 } catch (PDOException $e) {
                     error_log("configuration.php: OAuth refresh token reset error: " . $e->getMessage());
                     $msg_plain = $e->getMessage();
@@ -423,7 +415,6 @@ try {
                         $stmt->execute([$cap_e, $mode, $recaptcha_version, $mul, $allowed, $color, $recaptcha_sitekey, $recaptcha_secretkey, $turnstile_sitekey, $turnstile_secretkey]);
                         $msg_plain = 'Captcha settings saved';
                         $msg_type = 'success';
-                        error_log("configuration.php: Captcha settings updated successfully");
                     } catch (PDOException $e) {
                         error_log("configuration.php: Captcha update error: " . $e->getMessage());
                         $msg_plain = $e->getMessage();
@@ -447,7 +438,6 @@ try {
                     $stmt->execute([$title, $des, $baseurl, $keyword, $site_name, $email, $twit, $face, $gplus, $ga, $additional_scripts]);
                     $msg_plain = 'Configuration saved';
                     $msg_type = 'success';
-                    error_log("configuration.php: Site info updated successfully");
                 } catch (PDOException $e) {
                     error_log("configuration.php: Site info update error: " . $e->getMessage());
                     $msg_plain = $e->getMessage();
@@ -462,7 +452,6 @@ try {
                     $stmt->execute([$disableguest, $siteprivate, $hiderecentpastes]);
                     $msg_plain = 'Site permissions saved';
                     $msg_type = 'success';
-                    error_log("configuration.php: Site permissions updated successfully");
                 } catch (PDOException $e) {
                     error_log("configuration.php: Permissions update error: " . $e->getMessage());
                     $msg_plain = $e->getMessage();
@@ -472,7 +461,7 @@ try {
                 $url_mode = trim($_POST['url_mode'] ?? 'slug');
                 $slug_length = (int)($_POST['slug_length'] ?? 8);
                 $block_numeric_urls = isset($_POST['block_numeric_urls']) ? '1' : '0';
-                
+
                 // Validate
                 if (!in_array($url_mode, ['slug', 'numeric'], true)) {
                     $url_mode = 'slug';
@@ -480,7 +469,7 @@ try {
                 if ($slug_length < 4 || $slug_length > 32) {
                     $slug_length = 8;
                 }
-                
+
                 try {
                     // Check if paste_options table exists
                     $tableCheck = $pdo->query("SHOW TABLES LIKE 'paste_options'");
@@ -494,7 +483,7 @@ try {
                             UNIQUE KEY idx_option_name (option_name)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
                     }
-                    
+
                     // Helper function to upsert options
                     $upsertOption = function($name, $value) use ($pdo) {
                         $stmt = $pdo->prepare("SELECT id FROM paste_options WHERE option_name = ?");
@@ -507,46 +496,46 @@ try {
                             $stmt->execute([$name, $value]);
                         }
                     };
-                    
+
                     $upsertOption('url_mode', $url_mode);
                     $upsertOption('slug_length', (string)$slug_length);
                     $upsertOption('block_numeric_urls', $block_numeric_urls);
-                    
+
                     // If enabling block_numeric_urls, generate slugs for pastes that don't have them
                     $slugsGenerated = 0;
                     if ($block_numeric_urls === '1') {
                         $stmt = $pdo->query("SELECT COUNT(*) FROM pastes WHERE slug IS NULL OR slug = ''");
                         $pastesWithoutSlugs = (int)$stmt->fetchColumn();
-                        
+
                         if ($pastesWithoutSlugs > 0) {
                             // Generate slugs for pastes without them
                             $charset = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
                             $charsetLen = strlen($charset);
-                            
+
                             $stmt = $pdo->query("SELECT id FROM pastes WHERE slug IS NULL OR slug = ''");
                             $pastes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                            
+
                             foreach ($pastes as $pasteId) {
                                 $attempts = 0;
                                 $currentLength = $slug_length;
-                                
+
                                 do {
                                     $slug = '';
                                     for ($i = 0; $i < $currentLength; $i++) {
                                         $slug .= $charset[random_int(0, $charsetLen - 1)];
                                     }
-                                    
+
                                     $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM pastes WHERE slug = ?");
                                     $checkStmt->execute([$slug]);
                                     $exists = (int)$checkStmt->fetchColumn() > 0;
-                                    
+
                                     if (!$exists) {
                                         $updateStmt = $pdo->prepare("UPDATE pastes SET slug = ? WHERE id = ?");
                                         $updateStmt->execute([$slug, $pasteId]);
                                         $slugsGenerated++;
                                         break;
                                     }
-                                    
+
                                     $attempts++;
                                     if ($attempts >= 5) {
                                         $currentLength++;
@@ -556,11 +545,11 @@ try {
                             }
                         }
                     }
-                    
+
                     $msg_plain = 'URL settings saved successfully';
                     if ($slugsGenerated > 0) {
                         $msg_plain .= ". Generated slugs for $slugsGenerated existing pastes.";
-                        
+
                         // Regenerate sitemap with new slug URLs
                         require_once(__DIR__ . '/../includes/functions.php');
                         $sitemapResult = regenerateSitemap($pdo);
@@ -569,7 +558,6 @@ try {
                         }
                     }
                     $msg_type = 'success';
-                    error_log("configuration.php: URL settings updated - mode: $url_mode, length: $slug_length, block_numeric: $block_numeric_urls, slugs_generated: $slugsGenerated");
                 } catch (PDOException $e) {
                     error_log("configuration.php: URL settings update error: " . $e->getMessage());
                     $msg_plain = 'Error saving URL settings: ' . $e->getMessage();
@@ -578,7 +566,11 @@ try {
             } elseif (isset($_POST['api_settings'])) {
                 $api_enabled = isset($_POST['api_enabled']) ? '1' : '0';
                 $api_keys_per_user = max(1, min(20, (int)($_POST['api_keys_per_user'] ?? 5)));
-                
+                $api_rate_limit = max(0, min(10000, (int)($_POST['api_rate_limit'] ?? 60)));
+                $api_guest_pastes = isset($_POST['api_guest_pastes']) ? '1' : '0';
+                $api_guest_uploads = isset($_POST['api_guest_uploads']) ? '1' : '0';
+                $api_guest_rate_limit = max(0, min(10000, (int)($_POST['api_guest_rate_limit'] ?? 10)));
+
                 try {
                     // Ensure paste_options table exists
                     $tableCheck = $pdo->query("SHOW TABLES LIKE 'paste_options'");
@@ -591,16 +583,25 @@ try {
                             UNIQUE KEY idx_option_name (option_name)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
                     }
-                    
+
                     $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('api_enabled', '$api_enabled') ON DUPLICATE KEY UPDATE option_value = '$api_enabled'");
                     $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('api_keys_per_user', '$api_keys_per_user') ON DUPLICATE KEY UPDATE option_value = '$api_keys_per_user'");
-                    
+                    $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('api_rate_limit', '$api_rate_limit') ON DUPLICATE KEY UPDATE option_value = '$api_rate_limit'");
+                    $saveOption = $pdo->prepare("INSERT INTO paste_options (option_name, option_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE option_value = VALUES(option_value)");
+                    $saveOption->execute(['api_guest_pastes', $api_guest_pastes]);
+                    $saveOption->execute(['api_guest_uploads', $api_guest_uploads]);
+                    $saveOption->execute(['api_guest_rate_limit', (string)$api_guest_rate_limit]);
+
                     $msg_plain = 'API settings saved successfully';
                     $msg_type = 'success';
-                    
+
                     // Update local vars for display
                     $current_api_enabled = ($api_enabled === '1');
                     $current_api_keys_per_user = $api_keys_per_user;
+                    $current_api_rate_limit = $api_rate_limit;
+                    $current_api_guest_pastes = $api_guest_pastes === '1';
+                    $current_api_guest_uploads = $api_guest_uploads === '1';
+                    $current_api_guest_rate_limit = $api_guest_rate_limit;
                 } catch (PDOException $e) {
                     error_log("configuration.php: API settings update error: " . $e->getMessage());
                     $msg_plain = 'Error saving API settings: ' . $e->getMessage();
@@ -637,7 +638,6 @@ try {
                         $stmt->execute([$verification, $smtp_host, $smtp_port, $smtp_username, $smtp_password, $socket, $protocol, $auth]);
                         $msg_plain = 'Mail settings updated';
                         $msg_type = 'success';
-                        error_log("configuration.php: Mail settings updated successfully");
                     } catch (PDOException $e) {
                         error_log("configuration.php: Mail settings update error: " . $e->getMessage());
                         $msg_plain = $e->getMessage();
@@ -646,10 +646,6 @@ try {
                 }
             }
             if (isset($msg_plain)) {
-                if ($msg_type === 'success') {
-                    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-                    error_log("configuration.php: CSRF token regenerated: {$_SESSION['csrf_token']}, Session ID: " . session_id());
-                }
                 if (!is_ajax()) {
                     $query_param = ($msg_type === 'success') ? 'msg' : 'error';
                     ob_end_clean();
@@ -683,7 +679,7 @@ try {
     <link rel="shortcut icon" href="favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
     <style>
       :root{
         --bg:#0f1115; --card:#141821; --muted:#7f8da3; --border:#1f2633; --accent:#0d6efd;
@@ -746,18 +742,7 @@ try {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('configuration.php'); ?>
     </div>
   </div>
 </div>
@@ -767,18 +752,7 @@ try {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('configuration.php'); ?>
         </div>
       </div>
     </div>
@@ -955,6 +929,27 @@ try {
                   <input type="number" class="form-control" id="api_keys_per_user" name="api_keys_per_user" value="<?php echo $current_api_keys_per_user; ?>" min="1" max="20" style="max-width: 150px;">
                   <div class="form-text">Maximum number of API keys each user can create (1-20).</div>
                 </div>
+                <div class="mb-3">
+                  <label for="api_rate_limit" class="form-label">Requests Per Minute Per Key</label>
+                  <input type="number" class="form-control" id="api_rate_limit" name="api_rate_limit" value="<?php echo (int)$current_api_rate_limit; ?>" min="0" max="10000" style="max-width: 150px;">
+                  <div class="form-text">Requests over this answer 429 until the next minute. 0 turns the limit off.</div>
+                </div>
+                <div class="mb-4">
+                  <h6 class="mb-2">Guest Access</h6>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="api_guest_pastes" name="api_guest_pastes" <?php echo $current_api_guest_pastes ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="api_guest_pastes">Guests can create pastes through the API without a key</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="api_guest_uploads" name="api_guest_uploads" <?php echo $current_api_guest_uploads ? 'checked' : ''; ?>>
+                    <label class="form-check-label" for="api_guest_uploads">Guests can upload images and videos through the API without a key</label>
+                  </div>
+                  <label for="api_guest_rate_limit" class="form-label mt-2">Guest Requests Per Minute Per IP</label>
+                  <input type="number" class="form-control" id="api_guest_rate_limit" name="api_guest_rate_limit" value="<?php echo (int)$current_api_guest_rate_limit; ?>" min="0" max="10000" style="max-width: 150px;">
+                  <div class="form-text">Guests post as "Guest" and cannot solve the captcha through the API, so keep this low. Their pastes still go through the spam filter and cannot be private;
+                    "Only allow registered users to paste" (Permissions tab) also turns guest API pastes off. Guest uploads count against the per-IP limits in Admin &gt; Uploads,
+                    and need uploads turned on there. Guests cannot read, change or delete anything through the API.</div>
+                </div>
                 <div class="alert alert-info">
                   <strong>API Endpoints:</strong><br>
                   <code>POST /api.php?action=paste</code> - Create a paste<br>
@@ -962,8 +957,12 @@ try {
                   <code>GET /api.php?action=list</code> - List user's pastes<br>
                   <code>DELETE /api.php?action=delete&id=X</code> - Delete a paste<br>
                   <code>GET /api.php?action=search&q=X</code> - Search pastes<br>
+                  <code>POST /api.php?action=update&id=X</code> - Update a paste<br>
+                  <code>GET /api.php?action=user</code> - Key owner's details<br>
+                  <code>POST /api.php?action=upload</code> - Upload an image or video<br>
+                  <code>DELETE /api.php?action=upload_delete&key=X</code> - Delete an upload<br>
                   <code>GET /api.php?action=languages</code> - List available languages<br><br>
-                  Users can create API keys in their profile page. See ../api-docs.php
+                  Users can create API keys in their profile page. See <a href="../api-docs.php">api-docs.php</a>
                 </div>
                 <input type="hidden" name="api_settings" value="1">
                 <button type="submit" class="btn btn-primary">Save API Settings</button>
@@ -1132,7 +1131,7 @@ try {
     </div><!-- /.col-lg-10 -->
   </div><!-- /.row -->
 </div><!-- /.container -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
   // reCAPTCHA TEST
   $('#test-recaptcha').on('click', function(e) {
@@ -1238,7 +1237,6 @@ try {
 </html>
 <?php
 if (isset($_GET['logout'])) {
-    error_log("configuration.php: Admin logout requested for admin_login: {$_SESSION['admin_login']}, Session ID: " . session_id());
     $_SESSION = [];
     session_destroy();
     ob_end_clean();

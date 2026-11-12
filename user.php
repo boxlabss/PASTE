@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.4 2026/01/10 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
@@ -42,7 +42,7 @@ try {
     $si   = $stmt->fetch() ?: [];
     $title   = trim($si['title'] ?? '');
     $des     = trim($si['des'] ?? '');
-    $baseurl = rtrim(trim($si['baseurl'] ?? ''), '/') . '/';
+    $baseurl = paste_request_baseurl(rtrim(trim($si['baseurl'] ?? ''), '/') . '/');
     $keyword = trim($si['keyword'] ?? '');
     $site_name = trim($si['site_name'] ?? '');
     $email     = trim($si['email'] ?? '');
@@ -72,8 +72,8 @@ try {
     $stmt = $pdo->query("SELECT * FROM site_permissions WHERE id = '1'");
     $perm = $stmt->fetch() ?: [];
     $siteprivate = trim($perm['siteprivate'] ?? 'off');
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $siteprivate === "1") {
-        $privatesite = "1";
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $siteprivate === "on") {
+        $privatesite = "on";
     }
 
     // profile username required - accept from GET or POST
@@ -88,7 +88,7 @@ try {
 
     // Get user info and all stats in ONE query
     $stmt = $pdo->prepare("
-        SELECT 
+        SELECT
             u.id AS user_id,
             u.date AS join_date,
             COUNT(p.id) AS total_pastes,
@@ -102,7 +102,7 @@ try {
     ");
     $stmt->execute([$profile_username]);
     $stats = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    
+
     $profile_user_id        = (int)($stats['user_id'] ?? 0);
     $profile_join_date      = $stats['join_date'] ?? '';
     $profile_total_pastes   = (int)($stats['total_pastes'] ?? 0);
@@ -122,41 +122,11 @@ try {
 
     // logout
     if (isset($_GET['logout'])) {
-        $ref = $_SERVER['HTTP_REFERER'] ?? $baseurl;
-        unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username']);
-        session_destroy();
-        header('Location: ' . $ref);
-        exit;
+        paste_logout_and_redirect($baseurl);
     }
 
-    // page views tracking
-    $view_date = date('Y-m-d');
-    try {
-        $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-        $stmt->execute([$view_date]);
-        $pv = $stmt->fetch();
-        if ($pv) {
-            $page_view_id = $pv['id'];
-            $tpage = (int)$pv['tpage'] + 1;
-            $tvisit = (int)$pv['tvisit'];
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-            $stmt->execute([$ip, $view_date]);
-            if ((int)$stmt->fetchColumn() === 0) {
-                $tvisit++;
-                $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-                $stmt->execute([$ip, $view_date]);
-            }
-            $stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-            $stmt->execute([$tpage, $tvisit, $page_view_id]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-            $stmt->execute([$view_date, 1, 1]);
-            $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-            $stmt->execute([$ip, $view_date]);
-        }
-    } catch (PDOException $e) {
-        error_log("Page view tracking error: " . $e->getMessage());
-    }
+    // Page views
+    pageViewTrack($pdo, $ip);
 
     // get current user ID for ownership checks
     $getCurrentUserId = function() use ($pdo) {
@@ -181,7 +151,7 @@ try {
         if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string)$_POST['csrf_token'])) {
             send_json(false, $lang['invalidtoken'] ?? 'Invalid CSRF token.');
         }
-        
+
         $comment_id = (int)($_POST['comment_id'] ?? 0);
         if ($comment_id <= 0) {
             send_json(false, 'Invalid comment.');
@@ -256,6 +226,9 @@ try {
                 send_json(false, $lang['not_logged_in'] ?? 'You must be logged in to delete pastes.');
             }
             $error = $lang['not_logged_in'] ?? 'You must be logged in to delete pastes.';
+        } elseif (!hash_equals((string)($_SESSION['csrf_token'] ?? ''), (string)($_POST['csrf_token'] ?? $_GET['csrf_token'] ?? ''))) {
+            if ($is_ajax) send_json(false, $lang['invalidtoken'] ?? 'Invalid CSRF token.');
+            $error = $lang['invalidtoken'] ?? 'Invalid CSRF token.';
         } else {
             $paste_id = (int)($_GET['id'] ?? 0);
             $owner    = (string)($_SESSION['username'] ?? '');
@@ -296,8 +269,8 @@ try {
     $per  = max(5, min(100, (int)($_GET['per'] ?? 25)));
     $page = max(1, (int)($_GET['page'] ?? 1));
 
-    // Visibility filter: owner sees all; others see public only
-    $vis_sql = $is_me ? '' : ' AND p.visible = 0';
+    // Visibility filter: owner sees all; others see public ones that are not view-once or expired
+    $vis_sql = $is_me ? '' : " AND p.visible = '0' AND " . paste_listable_sql('p');
 
     // Count total
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM pastes p WHERE p.member = ?" . $vis_sql);
@@ -310,7 +283,7 @@ try {
 
     // Fetch pastes with views count in one query
     $stmt = $pdo->prepare("
-        SELECT 
+        SELECT
             p.id, p.slug, p.title, p.code, p.date, p.visible,
             COALESCE(v.view_count, 0) AS views
         FROM pastes p
@@ -350,8 +323,8 @@ try {
     $ads_1    = trim($ads['ads_1'] ?? '');
     $ads_2    = trim($ads['ads_2'] ?? '');
 
-    // Comments: owner sees all, others see public+unlisted pastes only
-    $vis_comment_sql = $is_me ? '' : ' AND p.visible IN (0,1)';
+    // Comments: owner sees all, others see those on public pastes that are not view-once or expired
+    $vis_comment_sql = $is_me ? '' : " AND p.visible = '0' AND " . paste_listable_sql('p');
 
     $stmt = $pdo->prepare("
         SELECT c.id, c.paste_id, c.user_id, c.username, c.body, c.created_at,

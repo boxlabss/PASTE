@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,7 +9,7 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -24,7 +24,7 @@
  * $baseurl (string), $default_theme (string), $lang (array)
  * $privatesite (optional: "on"), $mod_rewrite (string "1"/"0")
  */
- 
+
 $show_pw = isset($require_password) && $require_password === true;
 
 // Build rewrite-aware action for the password form
@@ -82,7 +82,7 @@ $generic_msg = $notfound ?? ($error ?? ($error_msg ?? ($lang['error'] ?? 'An err
                   <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)($form_identifier ?? $paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                   <div class="input-group w-50 mx-auto mb-3">
                     <span class="input-group-text"><i class="bi bi-unlock"></i></span>
-                    <input type="text" class="form-control" name="mypass" placeholder="<?php echo htmlspecialchars($lang['enterpwd'] ?? 'Enter Password', ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="password" class="form-control" name="mypass" autocomplete="off" placeholder="<?php echo htmlspecialchars($lang['enterpwd'] ?? 'Enter Password', ENT_QUOTES, 'UTF-8'); ?>">
                   </div>
                   <button type="submit" name="submit" class="btn btn-primary">
                     <?php echo htmlspecialchars($lang['submit'] ?? 'Submit', ENT_QUOTES, 'UTF-8'); ?>
@@ -130,7 +130,7 @@ $generic_msg = $notfound ?? ($error ?? ($error_msg ?? ($lang['error'] ?? 'An err
                   <input type="hidden" name="id" value="<?php echo htmlspecialchars((string)($form_identifier ?? $paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                   <div class="input-group w-50 mx-auto mb-3">
                     <span class="input-group-text"><i class="bi bi-unlock"></i></span>
-                    <input type="text" class="form-control" name="mypass" placeholder="<?php echo htmlspecialchars($lang['enterpwd'] ?? 'Enter Password', ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="password" class="form-control" name="mypass" autocomplete="off" placeholder="<?php echo htmlspecialchars($lang['enterpwd'] ?? 'Enter Password', ENT_QUOTES, 'UTF-8'); ?>">
                   </div>
                   <button type="submit" name="submit" class="btn btn-primary">
                     <?php echo htmlspecialchars($lang['submit'] ?? 'Submit', ENT_QUOTES, 'UTF-8'); ?>

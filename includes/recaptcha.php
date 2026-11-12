@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -54,7 +54,7 @@ function recaptcha_siteverify(array $payload): ?array {
 
 // v3 check
 function verify_recaptcha_v3(string $token, string $expectedAction): array {
-    $secret = $_SESSION['recaptcha_secretkey'] ?? '';
+    $secret = paste_captcha_secret('recaptcha');
     if ($token === '' || $secret === '') return ['ok' => false, 'why' => 'missing'];
 
     $data = recaptcha_siteverify([
@@ -83,7 +83,7 @@ function verify_recaptcha_v3(string $token, string $expectedAction): array {
 
 // v2 check
 function verify_recaptcha_v2(string $token): array {
-    $secret = $_SESSION['recaptcha_secretkey'] ?? '';
+    $secret = paste_captcha_secret('recaptcha');
     if ($token === '' || $secret === '') return ['ok' => false, 'why' => 'missing'];
 
     $data = recaptcha_siteverify([
@@ -97,33 +97,9 @@ function verify_recaptcha_v2(string $token): array {
     return ['ok' => true];
 }
 
-/**
- * Main gate
- * - Call from controllers like: require_human('create_paste');
- * - Sets $error for soft handling on fail
- */
+/** reCAPTCHA check for a form action; sets $error when it fails. */
 function require_human(string $expectedAction): void {
     global $error;
-
-    // Debug overrides
-    if (isset($_GET['forcefail'])) $_SESSION['forcefail'] = 1;
-    if (isset($_GET['forcepass'])) $_SESSION['forcepass'] = 1;
-
-    $consume = function(string $k): bool {
-        $v = !empty($_SESSION[$k]);
-        if ($v) unset($_SESSION[$k]);
-        return $v;
-    };
-
-    if ($consume('forcepass')) {
-        error_log("reCAPTCHA DEBUG: forced PASS for action={$expectedAction}");
-        return;
-    }
-    if ($consume('forcefail')) {
-        error_log("reCAPTCHA DEBUG: forced FAIL for action={$expectedAction}");
-        _recaptcha_fail('recaptcha_failed');
-        return;
-    }
 
     $cap_e = $_SESSION['cap_e'] ?? 'off';
     $mode  = $_SESSION['mode'] ?? 'Normal';

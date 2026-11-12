@@ -1,28 +1,71 @@
-# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 03/11/2026)
+# Changelog for **[Paste](https://phpaste.sourceforge.io/)** (Updated on 12/11/2026)
 
-Unreleased
-* Spam filter: per-user exemptions
-	New users.spam_exempt column (added by the installer, docs/upgrade-spam-exempt.sql, or automatically by the admin pages)
-	Admin > Users: exempt toggle per user, "Exempt" badge, and a "Spam filter exempt" status filter
-	Admin > Spam Filter: new Exempt tab (add by username, remove), and "Approve + exempt" in the queue
-	Exempt users skip every check on pastes, edits, forks, API calls and comments
-* Spam filter now also checks edits, forks, API updates and comments (previously these bypassed it)
-* A held paste is published instead of lost when the moderation queue table is unavailable
-* Approving a held paste picks a new slug if its reserved slug was taken in the meantime
-* Spam Filter and Users admin actions now require the CSRF token; the Spam Filter logout link works
+3.5 - 12/11/2016
+* New spam filter:
+    Scores each paste in points: your own rules (keywords, regular expressions and link domains), IP reputation (DNSBL, StopForumSpam), link domains on URI blocklists (Spamhaus DBL, SURBL; off until you turn it on in Settings) and form traps (a hidden field people never see but bots fill in, and forms sent within 3 seconds). Members can be made exempt.
+    A learned filter judges pastes by their words. It learns from the moderation queue (rejecting a held paste teaches it spam, approving one teaches it normal), the new Spam button in Admin > Pastes, examples you paste in, or the site's own pastes.
+    It scores in both directions. A paste that looks like spam gets 60 points, which holds it for review. A paste that clearly looks normal has 30 points taken off. Once you trust it, set the 60 to 100 so spam is blocked outright.
+    A held paste's author gets its link straight away (the API returns it as url), and it works once a moderator approves the paste
+    For private and password-protected pastes the spam log keeps no excerpt, excerpts leave the queue once a paste is approved or rejected, and learning from the site's own pastes skips private and password-protected ones
+* Image and video uploads, and FILEHOST uploads from IRC clients (text uploads become pastes, images and videos are stored like /img uploads):
+    Every upload is stored encrypted. Signed-in users can also keep a copy of each link in their account. "Your uploads" shows names and previews on every device ("Keep links in my account", on by default)
+    "Encrypt in my browser" encrypts a file before it is sent, so the server never sees the file or its key
+    Titles: a Title field on the upload form (with several files, each can have its own). The title is shown instead of the file name and names the download. Works without JavaScript; the API and Python client take it as title
+    Albums: several files uploaded together go into an album by default (one page and one link, with a title and description); switch it off for separate links, or make an album from separate uploads afterwards with "Make an album from these". The album's maker can add uploads, reorder, remove, rename and delete it (with or without its uploads). Admin > Uploads sets how many uploads an album can hold, for guests (5) and members (50); 0 turns albums off for that group
+    Videos play from their direct link, and download names with accents or emoji are sent as UTF-8
+    Admin > Uploads: settings and reports, find an upload or album by its link to open or delete it, and remove entries whose files are missing
+    API: upload images and videos (action=upload), delete uploads (action=upload_delete), make albums (action=album), and get pastes as plain text (format=raw). Python client: uploads and --album
+* More than one domain: list the extra domains in $alias_domains in config.php (see docs/config.example.php). Pages opened through one of them link and post to that domain.
+* Per-admin permissions: limit an admin to sections of the admin panel, such as pastes, website uploads, IRC uploads or user data. Manage Admins notes that Configuration, Ads and Pages can put scripts on the site, so they amount to full access
+* The installer upgrades existing installations in place (or php install/upgrade.php), keeping config.php, settings and data
+* API keys are stored hashed and can be limited to scopes (read, pastes, uploads), with a per-key rate limit set in Admin > Configuration > API
+* Python CLI client: uploads, paste passwords and view-once expiry
 * Fixed stored XSS through the client-side encryption field (content is validated and escaped)
 * Signed-in paste create/edit/fork requires the CSRF token; session cookie is SameSite=Lax
 * Editing a password-protected paste with the password box left empty keeps the password
 * View-once pastes can no longer be read repeatedly through raw/download, and are not embeddable
+* View-once and expired pastes are left out of Recent Pastes, the archive, profile pages, fork lists and the sitemap, so a crawler or a passing visitor cannot use up a view-once paste
 * Embeds: escaped title/content, line breaks preserved, links use the slug and respect mod_rewrite
-* Raw/download output is no longer trimmed (leading indentation kept); download filenames sanitised
-* Rejected pastes keep the typed title and content in the form
-* Client-side encryption: large pastes no longer fail to encrypt, errors are shown instead of a silent redirect, and edit/fork buttons are passed through
-* API: expiry codes now expire, content is escaped and encrypted at rest like web pastes, titles are no longer encrypted, banned IPs are refused, HTTP/2 lowercase X-API-Key headers work, malformed JSON no longer causes a fatal error, and expired pastes are hidden
-* FILEHOST text uploads: expiry codes now expire, content escaped and encrypted at rest
-* Diff viewer: fixed the built-in Myers diff (used when the xdiff extension is not installed), which produced wrong diffs
+* IP bans with wildcards (49.37.117.*)
+* Client-side encryption: large pastes no longer fail to encrypt, errors are shown instead of a redirect, and edit/fork buttons are passed through
+* Installer: database details containing quotes, &, $ or <> are saved correctly, and an existing site's installer needs a full-access admin sign-in
+* Diff viewer improvements, plus fixed the built-in Myers diff (used when the xdiff extension is not installed), which produced wrong diffs
 * A database outage now shows the themed error page instead of a fatal "undefined function paste_error()"
-* Admin login regenerates the session ID and no longer logs the password hash on failure
+* Added .hex (https://hexdroid.org) scripting to GeSHi
+* Moved language autodetection to includes/langdetect.php. Each language is scored on its own patterns (77 languages), and one is only chosen when it clearly beats every other; otherwise the paste is shown as plain text and "Why this language?" says what came closest
+    "# comment" lines no longer make Tcl, Bash, Python, Perl, Ruby, PowerShell, YAML, nginx and other code render as Markdown, and commented config files (.gitignore, SSH config) stay plain text
+    Newly recognised: Haskell, Scala, Elixir, Erlang, Clojure, Lisp, Scheme, Dart, Objective-C, Groovy, VB.NET, BASIC, Pascal, Fortran, MATLAB, Julia, OCaml, F#, Nim, CoffeeScript, D, AutoHotkey, Smalltalk, Prolog, Awk, x86, ARM, RISC-V and MIPS assembly, Ada, Haxe, Mathematica, CMake, Protocol Buffers, TeX, GLSL, Verilog, VHDL, SCSS, Less, Puppet, Nix and NSIS. Zig, COBOL and a few others are recognised and shown as plain text rather than mislabelled
+    Eggdrop scripts use GeSHi's Eggdrop Tcl highlighting, and GeSHi no longer falls back to plain text for languages it has
+    Diffs of PHP files are shown as diffs, IRC and chat logs as plain text, and only a shebang on the first line naming a known interpreter counts
+    RISC-V assembly is no longer detected as ARM
+* RISC-V assembly highlighting for both highlighters, and MIPS assembly for GeSHi (includes/geshi/riscv.php, includes/geshi/mips.php, includes/Highlight/languages/riscv.json)
+* docs/convert-hljs-to-json.mjs keeps a grammar's keyword groups (keyword, built_in, literal, meta), so each is coloured separately
+* Theme CSS and JavaScript links carry a version, so browsers load the new files after an update instead of a cached copy
+* Scripts from CDNs carry integrity hashes, so a changed file is refused. highlight.js and zxcvbn now load from jsDelivr.
+* Sign-in:
+    "Keep me signed in" works for 30 days
+    Signing in on a second device no longer signs the first one out; changing your password signs out your other devices
+    Changing your username once (Google sign-ins) moves your uploads and albums with it
+    Google sign-in only links to an account by an email address Google has verified. The first Google sign-in to an account that has a password removes the password and ends the account's other sessions and API keys, so someone who signed up with another person's address loses the account to its real owner
+* Security fixes:
+    A name whose account was deleted cannot be taken again while pastes or uploads still belong to it
+    Deleting an account, from your profile or in Admin > Users, also deletes its pastes, comments, uploads, albums and API keys (uploads and albums stayed behind, and Admin > Users kept the pastes)
+    Admin > Interface only accepts a language file from /langs and a theme folder from /theme
+    Deleting a paste from your profile or the sidebar needs the form token, and the profile list asks before deleting
+    Signing out returns you to the page you came from only if it is on this site
+    A password reset signs the account out everywhere
+    Wrong paste passwords and failed sign-ins (site and admin) are limited to 10 per IP every 10 minutes
+    Raw, download and embed links of a password-protected paste carry a token instead of the password (raw and download links last a day, the embed link until the password changes), entering the password unlocks the paste for the session for a day, and the password box hides what is typed. ?password= still works for scripts
+
+Previous version - 3.4 - 06/02/2026
+* Fixed editing of Pastes
+* Added pastebin.com-like slug support for URLs (default 8 chars)
+* Show a "View differences" link for forked Pastes
+* Show a list of all forks on an original paste
+* Added a json API (see API.md/https://paste.boxlabs.uk/api-docs.php) and a python CLI client.
+* Updated example nginx conf (for URLs)
+* Added option to disable "Recent Pastes" in sidebar
+* Bug fixes
 
 Previous version - 3.3
 * Improved autodetection for syntax highlighting for both GeSHi and Highlight.php

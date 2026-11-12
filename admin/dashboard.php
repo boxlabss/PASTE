@@ -9,14 +9,16 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require(null);
 
 // Fetch $baseurl from site_info
 try {
@@ -31,7 +33,6 @@ try {
 }
 
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
-    error_log("dashboard.php: Session validation failed - admin_login or admin_id not set. Session: " . json_encode($_SESSION));
     header("Location: " . htmlspecialchars($baseurl . 'admin/index.php', ENT_QUOTES, 'UTF-8'));
     exit();
 }
@@ -194,18 +195,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('dashboard.php'); ?>
     </div>
   </div>
 </div>
@@ -216,18 +206,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('dashboard.php'); ?>
         </div>
       </div>
     </div>
@@ -238,7 +217,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="card-body">
           <div class="d-flex align-items-center justify-content-between mb-2">
             <h4 class="card-title mb-0">Overview</h4>
-            <a class="btn btn-soft btn-sm" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up"></i> View stats</a>
+            <?php if (admin_can('stats')): ?><a class="btn btn-soft btn-sm" href="stats.php"><i class="bi bi-graph-up"></i> View stats</a><?php endif; ?>
           </div>
           <div class="row g-2">
             <div class="col-md-3">
@@ -279,6 +258,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
       <!-- Recent Pastes & Recent Users -->
       <div class="row g-2">
+        <?php if (admin_can('pastes')): ?>
         <div class="col-lg-6">
           <div class="card h-100">
             <div class="card-body">
@@ -293,8 +273,8 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                   <tbody>
                     <?php
                     $stmt = $pdo->prepare("
-                        SELECT p.id, p.title, p.member, p.s_date, p.ip, 
-                               COALESCE(COUNT(pv.id), 0) AS views, 
+                        SELECT p.id, p.title, p.member, p.s_date, p.ip,
+                               COALESCE(COUNT(pv.id), 0) AS views,
                                UNIX_TIMESTAMP(p.date) AS now_time
                         FROM pastes p
                         LEFT JOIN paste_views pv ON p.id = pv.paste_id
@@ -313,7 +293,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <td>".htmlspecialchars($p_id, ENT_QUOTES, 'UTF-8')."</td>
                                 <td>".htmlspecialchars($p_member, ENT_QUOTES, 'UTF-8')."</td>
                                 <td>".htmlspecialchars($p_date, ENT_QUOTES, 'UTF-8')."</td>
-                                <td><span class='badge'>".htmlspecialchars($p_ip, ENT_QUOTES, 'UTF-8')."</span></td>
+                                <td><span class='badge'>".htmlspecialchars(admin_personal($p_ip), ENT_QUOTES, 'UTF-8')."</span></td>
                                 <td>".htmlspecialchars($p_view, ENT_QUOTES, 'UTF-8')."</td>
                               </tr>";
                       }
@@ -328,6 +308,9 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
           </div>
         </div>
 
+        <?php endif; ?>
+
+        <?php if (admin_can('users')): ?>
         <div class="col-lg-6">
           <div class="card h-100">
             <div class="card-body">
@@ -369,10 +352,12 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
           </div>
         </div>
+        <?php endif; ?>
       </div>
 
       <!-- Admin history & Version info -->
       <div class="row g-2 mt-0">
+        <?php if (admin_full()): ?>
         <div class="col-lg-6">
           <div class="card h-100">
             <div class="card-body">
@@ -384,9 +369,9 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                   </thead>
                   <tbody>
                     <?php
-                    $stmt = $pdo->query("SELECT ah.last_date, a.user AS admin_user, ah.ip, ah.user_agent 
-                                         FROM admin_history ah 
-                                         LEFT JOIN admin a ON ah.admin_id = a.id 
+                    $stmt = $pdo->query("SELECT ah.last_date, a.user AS admin_user, ah.ip, ah.user_agent
+                                         FROM admin_history ah
+                                         LEFT JOIN admin a ON ah.admin_id = a.id
                                          ORDER BY ah.id DESC LIMIT 7");
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     if (empty($rows)) {
@@ -413,6 +398,8 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
           </div>
         </div>
 
+        <?php endif; ?>
+
         <div class="col-lg-6">
           <div class="card h-100">
             <div class="card-body">
@@ -420,7 +407,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <p class="mb-1">
                 <?php
                 $latestversion = @file_get_contents('https://raw.githubusercontent.com/boxlabss/PASTE/releases/version');
-                echo "Latest version: " . htmlspecialchars($latestversion !== false ? $latestversion : 'Unknown', ENT_QUOTES, 'UTF-8') . 
+                echo "Latest version: " . htmlspecialchars($latestversion !== false ? $latestversion : 'Unknown', ENT_QUOTES, 'UTF-8') .
                      " &mdash; Installed version: " . htmlspecialchars($currentversion ?? 'Unknown', ENT_QUOTES, 'UTF-8');
                 ?>
               </p>
@@ -429,7 +416,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 if (!empty($currentversion) && !empty($latestversion) && $currentversion == $latestversion) {
                     echo 'You have the latest version.';
                 } else {
-                    echo 'Your Paste installation is outdated. Get the latest version from 
+                    echo 'Your Paste installation is outdated. Get the latest version from
                           <a class="link-primary" href="https://sourceforge.net/projects/phpaste/files/latest/download" target="_blank" rel="noopener">SourceForge</a>.';
                 }
                 ?>
@@ -440,42 +427,49 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
       </div>
 
       <!-- Mail logs -->
+      <?php if (admin_can('users')): ?>
       <div class="card mt-3">
         <div class="card-body">
           <h4 class="card-title">Recent Mail Logs</h4>
           <div class="table-responsive">
             <table class="table table-hover table-bordered align-middle">
-				<thead>
-				  <tr><th>ID</th><th>Username</th><th>Email</th><th>Type</th><th>Sent</th></tr>
-				</thead>
-				<tbody>
-				<?php if ($mail_logs): foreach ($mail_logs as $row): ?>
-				  <tr>
-					<td><?= htmlspecialchars($row['id']) ?></td>
-					<td><?= htmlspecialchars($row['username'] ?? '') ?></td>
-					<td><?= htmlspecialchars($row['email']) ?></td>
-					<td>
-					  <?php
-						$icon = match ($row['type']) {
-						  'verification' => '<i class="bi bi-envelope-check me-2"></i>',
-						  'reset'        => '<i class="bi bi-key me-2"></i>',
-						  default        => '<i class="bi bi-envelope me-2"></i>',
-						};
-						echo $icon . htmlspecialchars(ucfirst($row['type']));
-					  ?>
-					</td>
-					<td><?= htmlspecialchars($row['sent_at']) ?></td>
-				  </tr>
-				<?php endforeach; else: ?>
-				  <tr><td colspan="5" class="text-center">No recent mail logs found.</td></tr>
-				<?php endif; ?>
-				</tbody>
+                <thead>
+                  <tr><th>ID</th><th>Username</th><th>Email</th><th>Type</th><th>Sent</th></tr>
+                </thead>
+                <tbody>
+                <?php if ($mail_logs): foreach ($mail_logs as $row): ?>
+                  <tr>
+                    <td><?= htmlspecialchars($row['id']) ?></td>
+                    <td><?= htmlspecialchars($row['username'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($row['email']) ?></td>
+                    <td>
+                      <?php
+                        $icon = match ($row['type']) {
+                          'verification' => '<i class="bi bi-envelope-check me-2"></i>',
+                          'reset'        => '<i class="bi bi-key me-2"></i>',
+                          default        => '<i class="bi bi-envelope me-2"></i>',
+                        };
+                        echo $icon . htmlspecialchars(ucfirst($row['type']));
+                      ?>
+                    </td>
+                    <td><?= htmlspecialchars($row['sent_at']) ?></td>
+                  </tr>
+                <?php endforeach; else: ?>
+                  <tr><td colspan="5" class="text-center">No recent mail logs found.</td></tr>
+                <?php endif; ?>
+                </tbody>
             </table>
           </div>
-          <div class="text-muted small mt-2">
-            <a class="text-decoration-none" href="https://github.com/jordansamuel/PASTE" target="_blank" rel="noopener">Updates</a>
+        </div>
+      </div>
+      <?php endif; ?>
+
+      <div class="card mt-3">
+        <div class="card-body">
+          <div class="text-muted small">
+            <a class="text-decoration-none" href="https://github.com/boxlabss/PASTE" target="_blank" rel="noopener">Updates</a>
             &mdash;
-            <a class="text-decoration-none" href="https://github.com/jordansamuel/PASTE/issues" target="_blank" rel="noopener">Bugs</a>
+            <a class="text-decoration-none" href="https://github.com/boxlabss/PASTE/issues" target="_blank" rel="noopener">Bugs</a>
             <span class="float-end">Powered by <a class="text-decoration-none" href="https://phpaste.sourceforge.io" target="_blank" rel="noopener">Paste</a></span>
           </div>
         </div>
@@ -485,7 +479,7 @@ $mail_logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
   </div><!-- /row -->
 </div><!-- /container -->
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>
 <?php $pdo = null; ?>

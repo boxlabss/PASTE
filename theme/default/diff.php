@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 declare(strict_types=1);
 
 $h = fn($s)=>htmlspecialchars((string)$s, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8');
@@ -46,64 +46,64 @@ $rightLabel = $rightLabel ?? 'New';
 $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
 ?>
 <div class="container-fluid diff-outer">
-	<!-- Top toolbar -->
-	<div class="diff-toolbar btn-toolbar justify-content-between flex-wrap gap-2 align-items-center">
-	  <!-- Left: context + stats -->
-	  <div class="d-flex flex-wrap align-items-center gap-2">
-		<div class="d-flex align-items-center flex-wrap gap-2 small text-body-secondary">
-		  <span>Left:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($leftLabel) ?></span>
-		  <span class="ms-2">Right:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($rightLabel) ?></span>
+    <!-- Top toolbar -->
+    <div class="diff-toolbar btn-toolbar justify-content-between flex-wrap gap-2 align-items-center">
+      <!-- Left: context + stats -->
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="d-flex align-items-center flex-wrap gap-2 small text-body-secondary">
+          <span>Left:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($leftLabel) ?></span>
+          <span class="ms-2">Right:</span><span class="badge bg-secondary-subtle text-wrap"><?= $h($rightLabel) ?></span>
 
-		  <?php if ($sameLangs): ?>
-			<span class="ms-2">Language:</span>
-			<span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? $lang_right_label ?? 'Autodetect') ?></span>
-		  <?php else: ?>
-			<span class="ms-2">Languages:</span>
-			<span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? 'Autodetect') ?></span>
-			<span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? 'Autodetect') ?></span>
-		  <?php endif; ?>
+          <?php if ($sameLangs): ?>
+            <span class="ms-2">Language:</span>
+            <span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? $lang_right_label ?? 'Autodetect') ?></span>
+          <?php else: ?>
+            <span class="ms-2">Languages:</span>
+            <span class="badge bg-secondary-subtle"><?= $h($lang_left_label ?? 'Autodetect') ?></span>
+            <span class="badge bg-secondary-subtle"><?= $h($lang_right_label ?? 'Autodetect') ?></span>
+          <?php endif; ?>
 
-		  <?php if (!empty($engine_badge_html)): ?>
-			<span class="ms-2"><?= $engine_badge_html /* safe HTML */ ?></span>
-		  <?php endif; ?>
-		</div>
+          <?php if (!empty($engine_badge_html)): ?>
+            <span class="ms-2"><?= $engine_badge_html /* safe HTML */ ?></span>
+          <?php endif; ?>
+        </div>
 
-		<?php if ($no_changes): ?>
-		  <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis ms-2">No changes</span>
-		<?php else: ?>
-		  <div class="d-flex align-items-center gap-1 ms-2">
-			<span class="badge bg-success-subtle border border-success-subtle text-success-emphasis" title="Added lines">+<?= $changes_add ?></span>
-			<span class="badge bg-danger-subtle  border border-danger-subtle  text-danger-emphasis"  title="Deleted lines">-<?= $changes_del ?></span>
-			<span class="badge bg-secondary-subtle" title="Total changed lines">±<?= $changes_total ?></span>
-		  </div>
-		  <!-- Prev/Next moved to floating overlay inside diff area -->
-		<?php endif; ?>
-	  </div>
+        <?php if ($no_changes): ?>
+          <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis ms-2">No changes</span>
+        <?php else: ?>
+          <div class="d-flex align-items-center gap-1 ms-2">
+            <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis" title="Added lines">+<?= $changes_add ?></span>
+            <span class="badge bg-danger-subtle  border border-danger-subtle  text-danger-emphasis"  title="Deleted lines">-<?= $changes_del ?></span>
+            <span class="badge bg-secondary-subtle" title="Total changed lines">±<?= $changes_total ?></span>
+          </div>
+          <!-- Prev/Next moved to floating overlay inside diff area -->
+        <?php endif; ?>
+      </div>
 
-	  <!-- Right: controls -->
-	  <div class="btn-toolbar flex-wrap gap-2 ms-lg-auto">
-		<!-- Wrap / Line / Only changes -->
-		<div class="btn-group btn-group-sm" role="group" aria-label="View toggles">
-		  <input class="btn-check" type="checkbox" id="optWrap" <?= !empty($wrap) ? 'checked':'' ?>>
-		  <label class="btn btn-outline-secondary" for="optWrap">Wrap</label>
+      <!-- Right: controls -->
+      <div class="btn-toolbar flex-wrap gap-2 ms-lg-auto">
+        <!-- Wrap / Line / Only changes -->
+        <div class="btn-group btn-group-sm" role="group" aria-label="View toggles">
+          <input class="btn-check" type="checkbox" id="optWrap" <?= !empty($wrap) ? 'checked':'' ?>>
+          <label class="btn btn-outline-secondary" for="optWrap">Wrap</label>
 
-		  <input class="btn-check" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
-		  <label class="btn btn-outline-secondary" for="optLine">Line #</label>
+          <input class="btn-check" type="checkbox" id="optLine" <?= !empty($lineno) ? 'checked':'' ?>>
+          <label class="btn btn-outline-secondary" for="optLine">Line #</label>
 
-		  <!-- Client-side filter (kept for instant toggle) -->
-		  <input class="btn-check" type="checkbox" id="btnOnlyChangesCheck" autocomplete="off">
-		  <label class="btn btn-outline-secondary" id="btnOnlyChanges" for="btnOnlyChangesCheck" aria-pressed="false">
-			Only changes
-		  </label>
-		</div>
+          <!-- Client-side filter (kept for instant toggle) -->
+          <input class="btn-check" type="checkbox" id="btnOnlyChangesCheck" autocomplete="off">
+          <label class="btn btn-outline-secondary" id="btnOnlyChanges" for="btnOnlyChangesCheck" aria-pressed="false">
+            Only changes
+          </label>
+        </div>
 
-		<a class="btn btn-outline-secondary btn-sm" id="btnWS"
-		   href="<?= $h($ws_toggle_url) ?>"
-		   role="button"
-		   title="Toggle ignoring trailing whitespace">
-		  <i class="bi bi-slash-circle" aria-hidden="true"></i>
-		  <span class="ms-1"><?= $ws_on ? 'Whitespace: Ignored' : 'Whitespace: Shown' ?></span>
-		</a>
+        <a class="btn btn-outline-secondary btn-sm" id="btnWS"
+           href="<?= $h($ws_toggle_url) ?>"
+           role="button"
+           title="Toggle ignoring trailing whitespace">
+          <i class="bi bi-slash-circle" aria-hidden="true"></i>
+          <span class="ms-1"><?= $ws_on ? 'Whitespace: Ignored' : 'Whitespace: Shown' ?></span>
+        </a>
 
         <?php if ($only_toggle_url !== ''): ?>
         <a class="btn btn-outline-secondary btn-sm" id="btnOnlyServer"
@@ -115,76 +115,92 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
         </a>
         <?php endif; ?>
 
-		<div class="btn-group btn-group-sm" role="group" aria-label="View mode">
-		  <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='side'?'active':'' ?>" id="btnSide">
-			<i class="bi bi-layout-three-columns" aria-hidden="true"></i>
-			<span class="d-none d-sm-inline ms-1">Side-by-side</span>
-		  </button>
-		  <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='unified'?'active':'' ?>" id="btnUni">
-			<i class="bi bi-menu-button-wide" aria-hidden="true"></i>
-			<span class="d-none d-sm-inline ms-1">Unified</span>
-		  </button>
-		</div>
+        <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+          <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='side'?'active':'' ?>" id="btnSide">
+            <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
+            <span class="d-none d-sm-inline ms-1">Side-by-side</span>
+          </button>
+          <button type="button" class="btn btn-outline-secondary <?= ($view_mode ?? '')==='unified'?'active':'' ?>" id="btnUni">
+            <i class="bi bi-menu-button-wide" aria-hidden="true"></i>
+            <span class="d-none d-sm-inline ms-1">Unified</span>
+          </button>
+        </div>
 
-		<button class="btn btn-primary btn-sm" id="btnDownload" type="button">
-		  <i class="bi bi-download" aria-hidden="true"></i><span class="ms-1">Download .diff</span>
-		</button>
-		<button class="btn btn-outline-primary btn-sm" id="btnPatch" type="button">
-		  <i class="bi bi-git" aria-hidden="true"></i><span class="ms-1">Download .patch</span>
-		</button>
-	  </div>
-	</div>
+        <button class="btn btn-primary btn-sm" type="submit" form="diffForm"
+                formaction="<?= $h($GLOBALS['form_action_dl_diff'] ?? 'diff.php?download=diff') ?>"
+                title="Download unified .diff">
+          <i class="bi bi-download" aria-hidden="true"></i><span class="ms-1">Download .diff</span>
+        </button>
+        <button class="btn btn-outline-primary btn-sm" type="submit" form="diffForm"
+                formaction="<?= $h($GLOBALS['form_action_dl_patch'] ?? 'diff.php?download=patch') ?>"
+                title="Download git .patch">
+          <i class="bi bi-git" aria-hidden="true"></i><span class="ms-1">Download .patch</span>
+        </button>
+      </div>
+    </div>
 
-	<!-- Language selector + actions -->
-	<div class="diff-toolbar btn-toolbar mt-2 gap-2 flex-wrap align-items-center">
-	  <div class="input-group input-group-sm w-auto" style="min-width: 14rem;">
-		<span class="input-group-text">Language</span>
-		<select class="form-select form-select-sm" id="langAll" aria-label="Diff language">
-		  <option value="autodetect" <?= ($single_id==='autodetect')?'selected':''; ?>>Autodetect</option>
-		  <option disabled>──────────</option>
-		  <?php
-			$printed = [];
-			foreach ($popular_langs as $pid):
-				$lid = strtolower($pid);
-				if (!isset($language_map[$lid])) continue;
-				$printed[$lid] = true;
-				$sel = ($lid === $single_id) ? ' selected' : '';
-		  ?>
-				<option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
-		  <?php endforeach; ?>
-		  <option disabled>──────────</option>
-		  <?php foreach ($language_map as $lid => $label):
-				if (isset($printed[$lid])) continue;
-				$sel = ($lid === $single_id) ? ' selected' : '';
-		  ?>
-				<option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
-		  <?php endforeach; ?>
-		</select>
-	  </div>
+    <!-- Language selector + actions + editors (single server-side form) -->
+    <form id="diffForm" method="post" action="<?= $h($GLOBALS['form_action_compare'] ?? 'diff.php') ?>" accept-charset="UTF-8">
+    <input type="hidden" name="left_label"  value="<?= $h($leftLabel) ?>">
+    <input type="hidden" name="right_label" value="<?= $h($rightLabel) ?>">
+    <div class="diff-toolbar btn-toolbar mt-2 gap-2 flex-wrap align-items-center">
+      <div class="input-group input-group-sm w-auto" style="min-width: 14rem;">
+        <span class="input-group-text">Language</span>
+        <select class="form-select form-select-sm" id="langAll" name="lang" aria-label="Diff language">
+          <option value="autodetect" <?= ($single_id==='autodetect')?'selected':''; ?>>Autodetect</option>
+          <option disabled>──────────</option>
+          <?php
+            $printed = [];
+            foreach ($popular_langs as $pid):
+                $lid = strtolower($pid);
+                if (!isset($language_map[$lid])) continue;
+                $printed[$lid] = true;
+                $sel = ($lid === $single_id) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($language_map[$lid]) ?></option>
+          <?php endforeach; ?>
+          <option disabled>──────────</option>
+          <?php foreach ($language_map as $lid => $label):
+                if (isset($printed[$lid])) continue;
+                $sel = ($lid === $single_id) ? ' selected' : '';
+          ?>
+                <option value="<?= $h($lid) ?>"<?= $sel ?>><?= $h($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
 
-	  <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Actions">
-		<button class="btn btn-outline-secondary" id="btnSwap" type="button" title="Swap panes">
-		  <i class="bi bi-arrow-left-right" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Swap</span>
-		</button>
-		<button class="btn btn-success" id="btnCompare" type="button" title="Recompute diff">
-		  <i class="bi bi-play" aria-hidden="true"></i><span class="ms-1">Compare</span>
-		</button>
-	  </div>
-	</div>
+      <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Actions">
+        <?php if (!empty($GLOBALS['can_undo'])): ?>
+        <button class="btn btn-outline-warning" name="action" value="merge_undo" type="submit" title="Undo last merge">
+          <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Undo merge</span>
+        </button>
+        <?php endif; ?>
+        <button class="btn btn-outline-secondary" name="action" value="swap" type="submit" title="Swap panes">
+          <i class="bi bi-arrow-left-right" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">Swap</span>
+        </button>
+        <button class="btn btn-success" name="action" value="compare" type="submit" title="Recompute diff">
+          <i class="bi bi-play" aria-hidden="true"></i><span class="ms-1">Compare</span>
+        </button>
+      </div>
+    </div>
 
   <!-- Editors -->
   <div class="diff-toolbar mt-2">
     <div class="w-100">
       <div class="row g-3">
         <div class="col-lg-6">
-          <textarea class="form-control code-input paste-textarea" rows="10" id="leftText" data-editor="true" spellcheck="false" placeholder="old version"><?= $h($GLOBALS['left'] ?? '') ?></textarea>
+          <textarea class="form-control code-input paste-textarea" rows="10" id="leftText" name="left_text" data-editor="true" spellcheck="false" placeholder="old version"><?= $h($GLOBALS['left'] ?? '') ?></textarea>
         </div>
         <div class="col-lg-6">
-          <textarea class="form-control code-input paste-textarea" rows="10" id="rightText" data-editor="true" spellcheck="false" placeholder="new version"><?= $h($GLOBALS['right'] ?? '') ?></textarea>
+          <textarea class="form-control code-input paste-textarea" rows="10" id="rightText" name="right_text" data-editor="true" spellcheck="false" placeholder="new version"><?= $h($GLOBALS['right'] ?? '') ?></textarea>
         </div>
       </div>
     </div>
   </div>
+  </form>
+
+  <!-- Server-side merge target: the per-hunk buttons below submit to this -->
+  <form id="mergeForm" method="post" action="<?= $h($GLOBALS['merge_action'] ?? 'diff.php') ?>" accept-charset="UTF-8" class="d-none"></form>
 
   <!-- Diff viewer -->
   <div class="diff-area mt-2">
@@ -234,6 +250,20 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
               }
             ?></div></td>
           </tr>
+          <?php if (!empty($r['hunk_end'])): $hid = (int)($r['hunk'] ?? 0); ?>
+          <tr class="diff-merge-row">
+            <td colspan="2" class="merge-cell merge-cell-l">
+              <button class="btn-merge btn-merge-r" type="submit" form="mergeForm"
+                      name="merge" value="<?= $hid ?>:right"
+                      title="Copy left (old) into the right side">Merge to right &#8594;</button>
+            </td>
+            <td colspan="2" class="merge-cell merge-cell-r">
+              <button class="btn-merge btn-merge-l" type="submit" form="mergeForm"
+                      name="merge" value="<?= $hid ?>:left"
+                      title="Copy right (new) into the left side">&#8592; Merge to left</button>
+            </td>
+          </tr>
+          <?php endif; ?>
         <?php endforeach; ?>
         </tbody>
       </table>
@@ -281,62 +311,6 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
   const numberWidth = () =>
     tblSide.classList.contains('lineoff') ? 0 :
       (parseFloat(getComputedStyle(root).getPropertyValue('--lno')) || 56);
-
-  // Swap (swap textareas only; one language applies to both)
-  $('#btnSwap')?.addEventListener('click', ()=>{
-    const a=$('#leftText'), b=$('#rightText'); const t=a.value; a.value=b.value; b.value=t;
-  });
-
-  // Compare
-  $('#btnCompare')?.addEventListener('click', ()=>{
-    const f=document.createElement('form'); f.method='POST';
-    const url=new URL(location.href); url.searchParams.delete('download'); f.action=url.pathname+url.search;
-    const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
-    const lang = $('#langAll')?.value ?? 'autodetect';
-    f.appendChild(mk('left_text',$('#leftText').value));
-    f.appendChild(mk('right_text',$('#rightText').value));
-    f.appendChild(mk('left_lang',lang));
-    f.appendChild(mk('right_lang',lang));
-    f.appendChild(mk('split_pct',String(splitPct)));
-    document.body.appendChild(f); f.submit();
-  });
-
-  // Download .diff
-  $('#btnDownload')?.addEventListener('click', ()=>{
-    const f=document.createElement('form'); f.method='POST';
-    const url=new URL(location.href); url.searchParams.set('download','1'); f.action=url.pathname+'?'+url.searchParams.toString();
-    const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
-    const lang = $('#langAll')?.value ?? 'autodetect';
-    f.appendChild(mk('left_text',$('#leftText').value));
-    f.appendChild(mk('right_text',$('#rightText').value));
-    f.appendChild(mk('left_lang',lang));
-    f.appendChild(mk('right_lang',lang));
-    f.appendChild(mk('left_label','<?= $h($leftLabel) ?>'));
-    f.appendChild(mk('right_label','<?= $h($rightLabel) ?>'));
-    f.appendChild(mk('split_pct',String(splitPct)));
-    document.body.appendChild(f); f.submit();
-  });
-
-  // Download .patch
-  $('#btnPatch')?.addEventListener('click', ()=>{
-    const f=document.createElement('form'); f.method='POST';
-    const url=new URL(location.href);
-    url.searchParams.set('download','patch');       // only a tiny GET flag
-    f.action = url.pathname+'?'+url.searchParams.toString();
-
-    const mk=(n,v)=>{ const i=document.createElement('input'); i.type='hidden'; i.name=n; i.value=v; return i; };
-    const lang = $('#langAll')?.value ?? 'autodetect';
-
-    f.appendChild(mk('left_text',$('#leftText').value));
-    f.appendChild(mk('right_text',$('#rightText').value));
-    f.appendChild(mk('left_lang',lang));
-    f.appendChild(mk('right_lang',lang));
-    f.appendChild(mk('left_label','<?= $h($leftLabel) ?>'));
-    f.appendChild(mk('right_label','<?= $h($rightLabel) ?>'));
-    f.appendChild(mk('split_pct',String(splitPct)));
-
-    document.body.appendChild(f); f.submit();
-  });
 
   // Layout helpers
   function placeBar(px){
@@ -393,35 +367,35 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
     requestAnimationFrame(layoutSideTable);
   });
 
-	// Only-changes toggle (client-side quick filter)
-	(function(){
-	  const btn = document.getElementById('btnOnlyChanges');
-	  if (!btn) return;
+    // Only-changes toggle (client-side quick filter)
+    (function(){
+      const btn = document.getElementById('btnOnlyChanges');
+      if (!btn) return;
 
-	  let only = false;
-	  const toggle = () => {
-		only = !only;
-		btn.setAttribute('aria-pressed', only ? 'true' : 'false');
-		btn.classList.toggle('active', only);
+      let only = false;
+      const toggle = () => {
+        only = !only;
+        btn.setAttribute('aria-pressed', only ? 'true' : 'false');
+        btn.classList.toggle('active', only);
 
-		// side-by-side: hide rows where both sides are context
-		document.querySelectorAll('#tblSide tbody tr').forEach(tr => {
-		  const l = tr.querySelector('.code.left');
-		  const r = tr.querySelector('.code.right');
-		  const hide = l?.classList.contains('ctx') && r?.classList.contains('ctx');
-		  tr.style.display = (only && hide) ? 'none' : '';
-		});
+        // side-by-side: hide rows where both sides are context
+        document.querySelectorAll('#tblSide tbody tr').forEach(tr => {
+          const l = tr.querySelector('.code.left');
+          const r = tr.querySelector('.code.right');
+          const hide = l?.classList.contains('ctx') && r?.classList.contains('ctx');
+          tr.style.display = (only && hide) ? 'none' : '';
+        });
 
-		// unified: hide rows with class ctx
-		document.querySelectorAll('#tblUni tbody tr').forEach(tr => {
-		  const cell = tr.querySelector('.code');
-		  const hide = cell?.classList.contains('ctx');
-		  tr.style.display = (only && hide) ? 'none' : '';
-		});
-	  };
+        // unified: hide rows with class ctx
+        document.querySelectorAll('#tblUni tbody tr').forEach(tr => {
+          const cell = tr.querySelector('.code');
+          const hide = cell?.classList.contains('ctx');
+          tr.style.display = (only && hide) ? 'none' : '';
+        });
+      };
 
-	  btn.addEventListener('click', toggle);
-	})();
+      btn.addEventListener('click', toggle);
+    })();
 
   (function(){
     const qs = s => Array.from(document.querySelectorAll(s));
@@ -740,204 +714,4 @@ $sameLangs = ($lang_left_label ?? '') === ($lang_right_label ?? '');
   });
 })();
 
-/* ================================================================
-   MERGE BUTTONS
-   Adds a small action bar after each changed hunk in side-by-side
-   view.  Clicking a button rewrites the target textarea in-place —
-   NO page reload, NO form submit.
-   "Merge to left"  = copy the RIGHT side's lines into the LEFT editor
-   "Merge to right" = copy the LEFT side's lines into the RIGHT editor
-   ================================================================ */
-(function () {
-  'use strict';
-
-  var tblSide = document.getElementById('tblSide');
-  var leftTA  = document.getElementById('leftText');
-  var rightTA = document.getElementById('rightText');
-  if (!tblSide || !leftTA || !rightTA) return;
-
-  /* ── Row helpers ───────────────────────────────────────────── */
-  function dataRows() {
-    return Array.from(tblSide.querySelectorAll('tbody tr:not(.diff-merge-row)'));
-  }
-
-  /* ── Hunk detection ────────────────────────────────────────── */
-  /* A row is "changed" if either side has class del or add */
-  function isChanged(tr) {
-    var lc = tr.querySelector('.code.left');
-    var rc = tr.querySelector('.code.right');
-    return (lc && (lc.classList.contains('del') || lc.classList.contains('add')))
-        || (rc && (rc.classList.contains('add') || rc.classList.contains('del')));
-  }
-
-  function collectHunks(rows) {
-    var hunks = [], cur = null;
-    rows.forEach(function (tr) {
-      if (isChanged(tr)) {
-        if (!cur) cur = [];
-        cur.push(tr);
-      } else if (cur) {
-        hunks.push(cur);
-        cur = null;
-      }
-    });
-    if (cur) hunks.push(cur);
-    return hunks;
-  }
-
-  /* ── Build / refresh merge rows ────────────────────────────── */
-  function buildMergeRows() {
-    tblSide.querySelectorAll('tr.diff-merge-row').forEach(function (r) { r.remove(); });
-    var rows  = dataRows();
-    var hunks = collectHunks(rows);
-
-    hunks.forEach(function (hunkRows) {
-      var mr = document.createElement('tr');
-      mr.className  = 'diff-merge-row';
-      mr.innerHTML  =
-        /* Left pane cell (lno + code-l) */
-        '<td colspan="2" class="merge-cell merge-cell-l">' +
-          '<button class="btn-merge btn-merge-r" type="button" ' +
-                  'title="Copy left (old) into the right editor">' +
-            'Merge to right &#8594;' +
-          '</button>' +
-        '</td>' +
-        /* Right pane cell (lno-r + code-r) */
-        '<td colspan="2" class="merge-cell merge-cell-r">' +
-          '<button class="btn-merge btn-merge-dismiss" type="button" ' +
-                  'title="Dismiss this hunk">&#x2715;</button>' +
-          '<button class="btn-merge btn-merge-l" type="button" ' +
-                  'title="Copy right (new) into the left editor">' +
-            '&#8592; Merge to left' +
-          '</button>' +
-        '</td>';
-
-      hunkRows[hunkRows.length - 1].after(mr);
-
-      (function (hunk, mergeRow) {
-        mergeRow.querySelector('.btn-merge-l').addEventListener('click', function () {
-          if (applyHunk(hunk, rows, 'left') !== false)
-            markDone(hunk, mergeRow, 'left');
-        });
-        mergeRow.querySelector('.btn-merge-r').addEventListener('click', function () {
-          if (applyHunk(hunk, rows, 'right') !== false)
-            markDone(hunk, mergeRow, 'right');
-        });
-        mergeRow.querySelector('.btn-merge-dismiss').addEventListener('click', function () {
-          mergeRow.remove();
-        });
-      })(hunkRows, mr);
-    });
-  }
-
-  /* ── Read 1-based line number from the correct td.no cell ── */
-  function tdLineNo(tr, side) {
-    var nos = tr.querySelectorAll('td.no');
-    return parseInt((nos[side === 'left' ? 0 : 1] || {}).textContent || '', 10) || 0;
-  }
-
-  /* ── Apply a hunk merge using direct line-number indexing ────────────
-     td.no line numbers come from the diff engine — they are exact.
-     We use them as direct 0-based array indices with no content checking. ── */
-  function applyHunk(hunkRows, allRows, dest) {
-    var delInfo = [], addInfo = [];
-    hunkRows.forEach(function (tr) {
-      var lc = tr.querySelector('.code.left');
-      var rc = tr.querySelector('.code.right');
-      if (lc && lc.classList.contains('del')) {
-        var n = tdLineNo(tr, 'left');
-        if (n) delInfo.push(n);
-      }
-      if (rc && rc.classList.contains('add')) {
-        var n = tdLineNo(tr, 'right');
-        if (n) addInfo.push(n);
-      }
-    });
-
-    var leftLines  = leftTA.value.split('\n');
-    var rightLines = rightTA.value.split('\n');
-
-    if (dest === 'right') {
-      /* Pull exact source lines from left textarea at their diff positions */
-      var srcLines = delInfo.map(function(n) { return leftLines[n - 1]; });
-
-      if (addInfo.length > 0) {
-        /* Replace the add-lines in right at their exact positions */
-        rightLines.splice(addInfo[0] - 1, addInfo.length, ...srcLines);
-      } else {
-        /* Pure deletion: insert after nearest context line in right */
-        var anchor = contextAnchorDirect(hunkRows, allRows, 'right');
-        rightLines.splice(anchor + 1, 0, ...srcLines);
-      }
-      rightTA.value = rightLines.join('\n');
-
-    } else {
-      /* Pull exact source lines from right textarea at their diff positions */
-      var srcLines2 = addInfo.map(function(n) { return rightLines[n - 1]; });
-
-      if (delInfo.length > 0) {
-        /* Replace the del-lines in left at their exact positions */
-        leftLines.splice(delInfo[0] - 1, delInfo.length, ...srcLines2);
-      } else {
-        /* Pure addition: insert after nearest context line in left */
-        var anchor2 = contextAnchorDirect(hunkRows, allRows, 'left');
-        leftLines.splice(anchor2 + 1, 0, ...srcLines2);
-      }
-      leftTA.value = leftLines.join('\n');
-    }
-    return true;
-  }
-
-  /* Walk back to the nearest context row and return its 0-based line index. */
-  function contextAnchorDirect(hunkRows, allRows, side) {
-    var start = allRows.indexOf(hunkRows[0]);
-    for (var i = start - 1; i >= 0; i--) {
-      var cell = allRows[i].querySelector('.code.' + side);
-      if (!cell || !cell.classList.contains('ctx')) continue;
-      var n = tdLineNo(allRows[i], side);
-      if (n) return n - 1;
-    }
-    return -1;
-  }
-
-  /* ── Visual feedback after merge (no reload) ────────────────── */
-  function markDone(hunkRows, mergeRow, dest) {
-    var label = dest === 'left' ? '← Merged to left' : 'Merged to right →';
-
-    /* Fade the changed rows */
-    hunkRows.forEach(function (tr) {
-      tr.style.opacity    = '0.35';
-      tr.style.transition = 'opacity .25s';
-    });
-
-    /* Replace bar with confirmation + undo */
-    var prevLeft  = leftTA.value;
-    var prevRight = rightTA.value;
-
-    mergeRow.innerHTML =
-      '<td colspan="4"><div class="diff-merge-bar diff-merge-done">' +
-        '<span class="merge-done-label">&#10003; ' + label + '</span>' +
-        '<button class="btn-merge btn-merge-dismiss" type="button">Undo</button>' +
-      '</div></td>';
-
-    mergeRow.querySelector('.btn-merge-dismiss').addEventListener('click', function () {
-      /* restore textarea values */
-      leftTA.value  = prevLeft;
-      rightTA.value = prevRight;
-      /* restore row appearance */
-      hunkRows.forEach(function (tr) { tr.style.opacity = ''; });
-      mergeRow.remove();
-      buildMergeRows();
-      if (window.diffMinimapRebuild) window.diffMinimapRebuild();
-    });
-
-    if (window.diffMinimapRebuild) window.diffMinimapRebuild();
-  }
-
-  /* ── Init ───────────────────────────────────────────────────── */
-  setTimeout(buildMergeRows, 400);
-
-  var btnSide = document.getElementById('btnSide');
-  if (btnSide) btnSide.addEventListener('click', function () { setTimeout(buildMergeRows, 160); });
-})();
 </script>

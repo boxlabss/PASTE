@@ -1,5 +1,5 @@
 //
-// Paste 3 <old repo: https://github.com/jordansamuel/PASTE>  new: https://github.com/boxlabss/PASTE
+// Paste 3 <old repo: https://github.com/boxlabss/PASTE>  new: https://github.com/boxlabss/PASTE
 // demo: https://paste.boxlabs.uk/
 // https://phpaste.sourceforge.io/  -  https://sourceforge.net/projects/phpaste/
 //
@@ -18,7 +18,6 @@ $(document).ready(function() {
     // Handle database configuration form submission
     $('#db-form').on('submit', function(e) {
         e.preventDefault();
-        console.log('Database form submitted:', $(this).serialize());
         $('#install').hide();
         $('#configure').hide();
         $('#pre_load').show();
@@ -53,10 +52,16 @@ $(document).ready(function() {
         });
     });
 
+    // Show the upload options only when uploads are being turned on
+    $('#img_enabled').on('change', function() {
+        $('.img-opt').prop('hidden', $(this).val() !== 'yes');
+    }).trigger('change');
+
     // Handle admin configuration form submission
     $('#admin-form').on('submit', function(e) {
         e.preventDefault();
-        console.log('Admin form submitted:', $(this).serialize());
+        var formData = $(this).serialize() + '&' + $('#db-form .img-setting').serialize();
+        console.log('Admin form submitted.');
         $('#configure').hide();
         $('#pre_load').show();
         $('#alertfailed').hide();
@@ -65,7 +70,7 @@ $(document).ready(function() {
         $.ajax({
             url: 'install.php',
             method: 'POST',
-            data: $(this).serialize(),
+            data: formData,
             dataType: 'json',
             timeout: 300000, // 5 minute timeout
             success: function(response) {
@@ -98,10 +103,70 @@ $(document).ready(function() {
         });
     });
 
+    // Upgrade: sign in as an admin, then upgrade in place or reinstall
+    function upgradeError(msg) {
+        $('#upgrade-alert').html(msg || 'Something went wrong.').prop('hidden', false);
+    }
+    function showReinstall() {
+        $('#upgrade-card').prop('hidden', true);
+        $('#db-card').prop('hidden', false);
+    }
+    $('#upgrade-signin').on('submit', function(e) {
+        e.preventDefault();
+        $('#upgrade-alert').prop('hidden', true);
+        $.ajax({ url: 'upgrade.php', method: 'POST', data: $(this).serialize() + '&action=signin', dataType: 'json' })
+            .done(function(response) {
+                if (response.status !== 'success') {
+                    upgradeError(response.message);
+                    return;
+                }
+                $('#upgrade-signin').prop('hidden', true);
+                if ($('#upgrade-form').data('upgradable') === 1) {
+                    $('#upgrade-form').prop('hidden', false);
+                } else {
+                    showReinstall();
+                }
+            })
+            .fail(function(xhr) {
+                upgradeError(xhr.responseJSON && xhr.responseJSON.message);
+            });
+    });
+    $('#show-reinstall').on('click', function(e) {
+        e.preventDefault();
+        showReinstall();
+    });
+    $('#up_img').on('change', function() {
+        $('.up-img-opt').prop('hidden', $(this).val() !== 'yes');
+    }).trigger('change');
+    $('#upgrade-form').on('submit', function(e) {
+        e.preventDefault();
+        $('#upgrade-alert').prop('hidden', true);
+        $('#install').hide();
+        $('#pre_load .card-title').text('Upgrading Paste. Please wait...');
+        $('#pre_load').show();
+        $.ajax({ url: 'upgrade.php', method: 'POST', data: $(this).serialize() + '&action=upgrade', dataType: 'json', timeout: 300000 })
+            .done(function(response) {
+                $('#pre_load').hide();
+                if (response.status === 'success') {
+                    $('#logpanel').show();
+                    $('#log').html('<div class="alert alert-success">' + response.message + '</div>');
+                } else {
+                    $('#install').show();
+                    upgradeError(response.message);
+                }
+            })
+            .fail(function(xhr, status) {
+                $('#pre_load').hide();
+                $('#install').show();
+                upgradeError(status === 'timeout'
+                    ? 'The upgrade timed out. It may still be running; check the error log, or run php install/upgrade.php from a shell.'
+                    : (xhr.responseJSON && xhr.responseJSON.message) || ('Upgrade failed: ' + status));
+            });
+    });
+
     // Warn about OAuth without HTTPS
-    $('#enablegoog, #enablefb').on('change', function() {
-        if (($(this).attr('id') === 'enablegoog' && $(this).val() === 'yes') || 
-            ($(this).attr('id') === 'enablefb' && $(this).val() === 'yes')) {
+    $('#enablegoog').on('change', function() {
+        if ($(this).val() === 'yes') {
             if (window.location.protocol !== 'https:') {
                 alert('Warning: Enabling OAuth without HTTPS is insecure and may cause issues with OAuth providers. Consider enabling SSL/TLS.');
             }

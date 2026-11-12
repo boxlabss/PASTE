@@ -9,14 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-require_once('../includes/password.php'); 
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 require_once('../config.php');
 require_once('../mail/mail.php');
 
@@ -45,7 +44,6 @@ if (isset($_SESSION['admin_login']) && isset($_SESSION['admin_id'])) {
         $stmt->execute([$_SESSION['admin_id']]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row && $row['user'] === $_SESSION['admin_login']) {
-            error_log("index.php: Admin already logged in - user: {$_SESSION['admin_login']}, redirecting to dashboard.php");
             header("Location: dashboard.php");
             exit();
         } else {
@@ -60,6 +58,14 @@ if (isset($_SESSION['admin_login']) && isset($_SESSION['admin_id'])) {
 
 $action = $_GET['action'] ?? '';
 $msg = '';
+
+/** Counts a failed sign-in from this IP when $count is true; true once it has used its 10 tries in 10 minutes. */
+function admin_login_throttled(PDO $pdo, bool $count = false): bool
+{
+    require_once __DIR__ . '/../includes/api_keys.php';
+    $fails = api_rate($pdo, 'adminlogin:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 600, $count);
+    return $fails !== null && $fails >= 10;
+}
 
 // Reset password
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -107,7 +113,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $hash = password_hash($password, PASSWORD_DEFAULT);
                         $stmt = $pdo->prepare('UPDATE admin SET pass = ?, reset_code = NULL, reset_expiry = NULL WHERE user = ?');
                         $stmt->execute([$hash, $username]);
-                        error_log("index.php: Password reset successful for user: '$username'");
                         $msg = '<div class="alert alert-success text-center mb-3">Password reset successful. You can now log in.</div>';
                     } else {
                         error_log("index.php: Password reset failed - invalid/expired code for user: '$username'");
@@ -125,6 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if ($username === '' || $password === '') {
                 error_log("index.php: Login failed - username or password empty. Username: '$username'");
                 $msg = '<div class="alert alert-warning text-center mb-3">Username and password are required</div>';
+            } elseif (admin_login_throttled($pdo)) {
+                $msg = '<div class="alert alert-danger text-center mb-3">Too many failed sign-ins. Try again in a few minutes.</div>';
             } else {
                 try {
                     $stmt = $pdo->prepare('SELECT id, user, pass FROM admin WHERE user = :user LIMIT 1');
@@ -135,7 +142,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         session_regenerate_id(true);
                         $_SESSION['admin_login'] = $row['user'];
                         $_SESSION['admin_id'] = $row['id'];
-                        error_log("index.php: Login successful for user: '$username', redirecting to dashboard.php");
                         // Login Admin History
                         $date = date('Y-m-d H:i:s');
                         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
@@ -145,6 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         header("Location: dashboard.php");
                         exit();
                     } else {
+                        admin_login_throttled($pdo, true);
                         error_log("index.php: Login failed - invalid username or password. Username: '$username'");
                         $msg = '<div class="alert alert-danger text-center mb-3">Invalid login details.</div>';
                     }
@@ -253,7 +260,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>
 <?php $pdo = null; ?>

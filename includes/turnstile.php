@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -22,7 +22,7 @@ if (!function_exists('require_human_turnstile')) {
 
         $token = $_POST['cf-turnstile-response'] ?? '';
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        $secret = $_SESSION['turnstile_secretkey'] ?? '';
+        $secret = paste_captcha_secret('turnstile');
 
         if (empty($token)) {
             $error = 'Turnstile token missing. Please try again.';
@@ -60,8 +60,21 @@ if (!function_exists('require_human_turnstile')) {
 
         $result = json_decode($response, true);
 
-        if (!$result || !$result['success']) {
-            $error_codes = implode(', ', $result['error-codes'] ?? ['unknown']);
+        if (!$result || empty($result['success'])) {
+            $codes = (array)($result['error-codes'] ?? ['unknown']);
+            $error_codes = implode(', ', $codes);
+
+            // A token is single use and only lives about 300 seconds. Cloudflare
+            // returns timeout-or-duplicate for both cases, and in practice that
+            // means a replayed POST (refresh, back/forward, session restore)
+            // rather than a bot. Say something the user can act on, and log it
+            // distinctly so real failures stay visible.
+            if (in_array('timeout-or-duplicate', $codes, true)) {
+                $error = 'This form was already submitted. Please reload the page and try again.';
+                error_log("Turnstile: replayed or expired token for action '$action'");
+                return false;
+            }
+
             $error = 'Turnstile verification failed.';
             error_log("Turnstile: Verification failed for action '$action'. Errors: $error_codes");
             return false;

@@ -1,18 +1,19 @@
 <?php
 /*
- * Paste Admin — Spam Filter
+ * Paste Admin: Spam Filter
  *
- * One page, six tabs:
- *   Settings  — toggles, thresholds, heuristic weights, DNSBL + StopForumSpam
- *   Rules     — keyword / regex / domain rules with weights
- *   Exempt    — registered users who bypass the filter
- *   Queue     — held pastes: approve (publish) or reject (discard)
- *   Log       — recent block/hold (and optionally allow) events
- *   Test      — paste some text and see how it would score
+ * Tabs:
+ *   Settings  thresholds, heuristic weights, learned filter, link and IP blocklists, form traps
+ *   Rules     keyword / regex / domain rules with weights
+ *   Exempt    registered users who bypass the filter
+ *   Queue     held pastes: approve (publish, learn as normal) or reject (discard, learn as spam)
+ *   Learn     teach the learned filter examples or this site's pastes
+ *   Log       recent block/hold (and optionally allow) events
+ *   Test      paste some text and see how it would score
  *
  * Every mutating action requires the session CSRF token.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
     header("Location: ../index.php");
@@ -32,6 +33,8 @@ if (empty($_SESSION['csrf_token'])) {
 $csrf = (string)$_SESSION['csrf_token'];
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('spamfilter');
 require_once(__DIR__ . '/../includes/spam.php');
 
 try {
@@ -52,7 +55,7 @@ try {
 $h   = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 $msg = '';
 $tab = (string)($_GET['tab'] ?? 'settings');
-$allowedTabs = ['settings','rules','exempt','queue','log','test'];
+$allowedTabs = ['settings','rules','exempt','queue','learn','log','test'];
 if (!in_array($tab, $allowedTabs, true)) $tab = 'settings';
 
 /* Are the tables present? If not, point the admin at the installer. */
@@ -61,6 +64,7 @@ try { $pdo->query("SELECT 1 FROM spam_settings LIMIT 1"); }
 catch (Throwable $e) { $installed = false; }
 
 $exemptReady = $installed && spam_ensure_exempt_column($pdo);
+$learnReady  = $installed && spam_learn_ready($pdo);
 
 /* Slug helpers for approving held pastes. */
 function spamadmin_url_mode(PDO $pdo): string {
@@ -108,9 +112,16 @@ if ($installed && $isMutation && !$csrfOk) {
     $canAct = $installed;
 }
 
+/** Learn a held paste's payload as 'spam' or 'ham'. */
+function spamadmin_learn_queued(PDO $pdo, string $payload, string $label): void {
+    $fields = json_decode($payload, true);
+    if (is_array($fields)) spam_learn_row($pdo, $fields, $label);
+}
+
 /* ── Actions ─────────────────────────────────────────────────────────── */
 if ($canAct && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_settings'])) {
     $intf = function(string $k, int $def): int { return isset($_POST[$k]) ? max(0, (int)$_POST[$k]) : $def; };
+    $pct  = fn(string $k, int $def): int => min(100, $intf($k, $def));
     $chk  = fn(string $k) => isset($_POST[$k]) ? 1 : 0;
     try {
         $pdo->prepare(
@@ -129,6 +140,18 @@ if ($canAct && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_setti
             $chk('dnsbl_enabled'), trim((string)($_POST['dnsbl_zones'] ?? '')), $intf('dnsbl_weight',40),
             $chk('sfs_enabled'), $intf('sfs_weight',50), $intf('sfs_confidence',30),
             $intf('ip_cache_ttl',3600), $chk('log_allowed'),
+        ]);
+        $pdo->prepare(
+            "UPDATE spam_settings SET
+                uribl_enabled=?, uribl_zones=?, uribl_weight=?,
+                bayes_enabled=?, bayes_min_docs=?, bayes_spam_pct=?, bayes_spam_weight=?, bayes_ham_pct=?, bayes_ham_weight=?,
+                trap_enabled=?, trap_weight=?, trap_min_seconds=?, trap_fast_weight=?
+             WHERE id=1"
+        )->execute([
+            $chk('uribl_enabled'), trim((string)($_POST['uribl_zones'] ?? '')), $intf('uribl_weight',50),
+            $chk('bayes_enabled'), max(1, $intf('bayes_min_docs',5)), $pct('bayes_spam_pct',90), $intf('bayes_spam_weight',60),
+            $pct('bayes_ham_pct',10), $intf('bayes_ham_weight',30),
+            $chk('trap_enabled'), $intf('trap_weight',150), $intf('trap_min_seconds',3), $intf('trap_fast_weight',30),
         ]);
         $msg = '<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Settings saved.</div>';
     } catch (Throwable $e) {
@@ -205,7 +228,8 @@ if ($canAct && isset($_GET['approve'])) {
                 if ($slug !== null) $fields['slug'] = $slug; else unset($fields['slug']);
             }
             $newId = spam_insert_paste_row($pdo, $fields);
-            $pdo->prepare("UPDATE spam_queue SET status = 'approved' WHERE id = ?")->execute([$id]);
+            $pdo->prepare("UPDATE spam_queue SET status = 'approved', excerpt = NULL WHERE id = ?")->execute([$id]);
+            spamadmin_learn_queued($pdo, (string)$payload, 'ham');
             $note = '';
             $member = (string)($fields['member'] ?? 'Guest');
             if (!empty($_GET['exempt']) && $exemptReady && $member !== 'Guest' && spamadmin_set_exempt($pdo, $member, true)) {
@@ -219,8 +243,50 @@ if ($canAct && isset($_GET['approve'])) {
     $tab = 'queue';
 }
 if ($canAct && isset($_GET['reject'])) {
-    $pdo->prepare("UPDATE spam_queue SET status = 'rejected' WHERE id = ?")->execute([(int)$_GET['reject']]);
+    $id = (int)$_GET['reject'];
+    $row = $pdo->prepare("SELECT payload FROM spam_queue WHERE id = ? AND status = 'pending'");
+    $row->execute([$id]);
+    $payload = $row->fetchColumn();
+    $pdo->prepare("UPDATE spam_queue SET status = 'rejected', excerpt = NULL WHERE id = ?")->execute([$id]);
+    if ($payload !== false) spamadmin_learn_queued($pdo, (string)$payload, 'spam');
     $msg = '<div class="alert alert-success">Paste rejected and discarded.</div>'; $tab = 'queue';
+}
+
+if ($canAct && $learnReady && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['learn_examples'])) {
+    $label  = ($_POST['learn_label'] ?? '') === 'ham' ? 'ham' : 'spam';
+    $chunks = preg_split('/^\s*-{3,}\s*$/m', (string)($_POST['examples'] ?? '')) ?: [];
+    $done   = ['learned' => 0, 'relearned' => 0, 'known' => 0, 'empty' => 0];
+    foreach (array_slice(array_filter(array_map('trim', $chunks), 'strlen'), 0, 200) as $chunk) {
+        $done[spam_learn($pdo, '', $chunk, $label)]++;
+    }
+    $what = $label === 'spam' ? 'spam' : 'normal';
+    $msg  = '<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Learned ' . ($done['learned'] + $done['relearned']) . ' example(s) as ' . $what . '.'
+          . ($done['relearned'] ? ' ' . $done['relearned'] . ' of them had been learned the other way.' : '')
+          . ($done['known'] ? ' ' . $done['known'] . ' were already known.' : '')
+          . ($done['empty'] ? ' ' . $done['empty'] . ' had too few words to learn.' : '') . '</div>';
+    $tab = 'learn';
+}
+
+if ($canAct && $learnReady && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['learn_site'])) {
+    @set_time_limit(300);
+    $limit = max(1, min(2000, (int)($_POST['learn_count'] ?? 300)));
+    $where = "encrypt <> '2' AND visible IN ('0', '1') AND password = 'NONE'" . (isset($_POST['learn_guests']) ? '' : " AND member <> 'Guest'");
+    $st = $pdo->prepare("SELECT title, content, encrypt FROM pastes WHERE $where ORDER BY id DESC LIMIT ?");
+    $st->bindValue(1, $limit, PDO::PARAM_INT);
+    $st->execute();
+    $done = ['learned' => 0, 'relearned' => 0, 'known' => 0, 'empty' => 0];
+    foreach ($st->fetchAll() as $p) {
+        $done[spam_learn_row($pdo, $p, 'ham')]++;
+    }
+    $msg = '<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>Learned ' . $done['learned'] . ' paste(s) as normal.'
+         . ($done['known'] + $done['relearned'] ? ' ' . ($done['known'] + $done['relearned']) . ' were already known and left as they were.' : '') . '</div>';
+    $tab = 'learn';
+}
+
+if ($canAct && $learnReady && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['forget_all'])) {
+    $pdo->exec("DELETE FROM spam_learned");
+    $pdo->exec("DELETE FROM spam_tokens");
+    $msg = '<div class="alert alert-success">The learned filter has forgotten everything.</div>'; $tab = 'learn';
 }
 if ($canAct && isset($_GET['clear_log'])) {
     $pdo->exec("DELETE FROM spam_log");
@@ -250,6 +316,13 @@ if ($installed) {
     catch (Throwable $e) {}
 }
 
+$learned = ['spam' => 0, 'ham' => 0]; $tokenCount = 0; $topTokens = [];
+if ($learnReady && $tab === 'learn') {
+    $learned    = spam_learned_counts($pdo);
+    $tokenCount = (int)$pdo->query("SELECT COUNT(*) FROM spam_tokens")->fetchColumn();
+    $topTokens  = $pdo->query("SELECT token, spam, ham FROM spam_tokens WHERE spam > ham ORDER BY spam - ham DESC, spam DESC LIMIT 20")->fetchAll();
+}
+
 $exemptUsers = [];
 if ($exemptReady) {
     try {
@@ -264,6 +337,10 @@ if ($canAct && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['run_test']
     $tBody  = (string)($_POST['test_body'] ?? '');
     $tGuest = isset($_POST['test_guest']);
     [$score, $reasons] = spam_score_content($settings, spam_get_rules($pdo), $tTitle, $tBody, $tGuest);
+    [$lScore, $lReasons] = spam_score_links($settings, $tBody);
+    [$bScore, $bReasons] = spam_score_learned($pdo, $settings, $tTitle, $tBody);
+    $score  += $lScore + $bScore;
+    $reasons = array_merge($reasons, $lReasons, $bReasons);
     $verdict = 'allow';
     if ((int)$settings['block_threshold'] > 0 && $score >= (int)$settings['block_threshold']) $verdict = 'block';
     elseif ((int)$settings['review_threshold'] > 0 && $score >= (int)$settings['review_threshold']) $verdict = 'hold';
@@ -284,7 +361,7 @@ $verdictBadge = function(string $a): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spam Filter — Paste Admin</title>
+<title>Spam Filter - Paste Admin</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <style>
@@ -336,28 +413,7 @@ $verdictBadge = function(string $a): string {
 </nav>
 
 <?php
-$navItems = [
-    ['dashboard.php','bi-house','Dashboard'],
-    ['configuration.php','bi-gear','Configuration'],
-    ['interface.php','bi-eye','Interface'],
-    ['admin.php','bi-person','Admin Account'],
-    ['pastes.php','bi-clipboard','Pastes'],
-    ['users.php','bi-people','Users'],
-    ['ipbans.php','bi-ban','IP Bans'],
-    ['spamfilter.php','bi-shield-exclamation','Spam Filter'],
-    ['stats.php','bi-graph-up','Statistics'],
-    ['ads.php','bi-currency-pound','Ads'],
-    ['pages.php','bi-file-earmark','Pages'],
-    ['sitemap.php','bi-map','Sitemap'],
-    ['tasks.php','bi-list-task','Tasks'],
-];
-$renderNav = function() use ($navItems, $baseurl, $h) {
-    foreach ($navItems as [$file,$icon,$label]) {
-        $active = $file === 'spamfilter.php' ? ' active' : '';
-        $badge  = '';
-        echo '<a class="list-group-item' . $active . '" href="' . $h($baseurl.'admin/'.$file) . '"><i class="bi ' . $icon . ' me-2"></i>' . $h($label) . $badge . '</a>';
-    }
-};
+$renderNav = fn() => admin_nav('spamfilter.php');
 ?>
 
 <div class="offcanvas offcanvas-start offcanvas-nav" tabindex="-1" id="navOffcanvas">
@@ -388,7 +444,7 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
 
       <ul class="nav nav-tabs mb-3">
         <?php
-          $tabs = ['settings'=>'Settings','rules'=>'Rules','exempt'=>'Exempt','queue'=>'Queue','log'=>'Log','test'=>'Test'];
+          $tabs = ['settings'=>'Settings','rules'=>'Rules','exempt'=>'Exempt','queue'=>'Queue','learn'=>'Learn','log'=>'Log','test'=>'Test'];
           foreach ($tabs as $k=>$label):
             $extra = ($k==='queue' && $pendingCount>0) ? ' <span class="badge bg-warning text-dark">'.$pendingCount.'</span>' : '';
             if ($k==='exempt' && $exemptUsers) $extra = ' <span class="badge bg-secondary">'.count($exemptUsers).'</span>';
@@ -434,6 +490,58 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
             <div class="col-md-3"><label class="form-label">All-caps weight</label><input type="number" min="0" class="form-control" name="caps_weight" value="<?= $h($settings['caps_weight']) ?>"></div>
             <div class="col-md-3"><label class="form-label">Guest weight</label><input type="number" min="0" class="form-control" name="guest_weight" value="<?= $h($settings['guest_weight']) ?>"></div>
           </div>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <h6 class="mb-1">Learned filter</h6>
+          <p class="text-secondary small mb-3">Judges a paste by its words and shape, using what it has learned in the <a href="?tab=learn">Learn</a> tab,
+            from pastes you reject or approve in the queue, and from pastes you mark as spam in Pastes.</p>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="bayes_enabled" name="bayes_enabled" <?= (int)$settings['bayes_enabled']?'checked':'' ?>>
+            <label class="form-check-label" for="bayes_enabled">Use the learned filter</label>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-4"><label class="form-label">Looks like spam at ≥ %</label><input type="number" min="50" max="100" class="form-control" name="bayes_spam_pct" value="<?= $h($settings['bayes_spam_pct']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Points added</label><input type="number" min="0" class="form-control" name="bayes_spam_weight" value="<?= $h($settings['bayes_spam_weight']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Examples needed of each kind</label><input type="number" min="1" class="form-control" name="bayes_min_docs" value="<?= $h($settings['bayes_min_docs']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Looks normal at ≤ %</label><input type="number" min="0" max="50" class="form-control" name="bayes_ham_pct" value="<?= $h($settings['bayes_ham_pct']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Points taken off</label><input type="number" min="0" class="form-control" name="bayes_ham_weight" value="<?= $h($settings['bayes_ham_weight']) ?>"></div>
+          </div>
+          <div class="form-text mt-2">Points taken off let a normal paste with a link through when a rule or the guest weight would hold it.
+            Set the points added to the block score once you trust it.</div>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <h6 class="mb-1">Link domains</h6>
+          <p class="text-secondary small mb-3">Looks up the domains a paste links to on URI blocklists, so one link to a known spam site counts.</p>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="uribl_enabled" name="uribl_enabled" <?= (int)$settings['uribl_enabled']?'checked':'' ?>>
+            <label class="form-check-label" for="uribl_enabled">Check link domains</label>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-9">
+              <label class="form-label">URI blocklist zones (one per line)</label>
+              <textarea class="form-control mono" name="uribl_zones" rows="2"><?= $h($settings['uribl_zones']) ?></textarea>
+            </div>
+            <div class="col-md-3"><label class="form-label">Weight per listed domain</label><input type="number" min="0" class="form-control" name="uribl_weight" value="<?= $h($settings['uribl_weight']) ?>"></div>
+          </div>
+          <div class="form-text mt-2">Spamhaus and SURBL refuse lookups made through public DNS such as 8.8.8.8 or 1.1.1.1. On a server that uses one,
+            these lookups and the DNSBLs below find nothing, so use your host's resolver or a local one.</div>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <h6 class="mb-1">Form traps</h6>
+          <p class="text-secondary small mb-3">The paste form carries a hidden field that people never see but bots fill in, and the time it was shown.</p>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="trap_enabled" name="trap_enabled" <?= (int)$settings['trap_enabled']?'checked':'' ?>>
+            <label class="form-check-label" for="trap_enabled">Use form traps</label>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-4"><label class="form-label">Hidden field filled in</label><input type="number" min="0" class="form-control" name="trap_weight" value="<?= $h($settings['trap_weight']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Sent within (seconds)</label><input type="number" min="0" class="form-control" name="trap_min_seconds" value="<?= $h($settings['trap_min_seconds']) ?>"></div>
+            <div class="col-md-4"><label class="form-label">Points for sending that fast</label><input type="number" min="0" class="form-control" name="trap_fast_weight" value="<?= $h($settings['trap_fast_weight']) ?>"></div>
+          </div>
+          <div class="form-text mt-2">Applies to the website's paste, edit and fork forms, not the API.</div>
         </div>
 
         <div class="card p-3 mb-3">
@@ -593,7 +701,8 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
 
       <?php elseif ($tab === 'queue'): ?>
       <div class="card p-3">
-        <h6 class="mb-3">Held for moderation (<?= $pendingCount ?>)</h6>
+        <h6 class="mb-1">Held for moderation (<?= $pendingCount ?>)</h6>
+        <p class="text-secondary small mb-3">Approving teaches the learned filter that the paste is normal; rejecting teaches it spam.</p>
         <?php if (!$queue): ?>
           <p class="text-secondary mb-0">Nothing waiting. Pastes that score between the review and block thresholds appear here.</p>
         <?php else: foreach ($queue as $q): ?>
@@ -602,7 +711,7 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
               <div>
                 <strong><?= $h($q['title'] ?: '(untitled)') ?></strong>
                 <span class="badge bg-warning text-dark ms-1">score <?= (int)$q['score'] ?></span>
-                <div class="small text-secondary">by <?= $h($q['member']) ?> · <span class="mono"><?= $h($q['ip']) ?></span> · <?= $h($q['created']) ?></div>
+                <div class="small text-secondary">by <?= $h($q['member']) ?> · <span class="mono"><?= $h(admin_personal($q['ip'])) ?></span> · <?= $h($q['created']) ?></div>
               </div>
               <div class="text-end">
                 <a class="btn btn-sm btn-success" href="<?= $actionUrl(['tab' => 'queue', 'approve' => (int)$q['id']]) ?>" onclick="return confirm('Publish this paste?')"><i class="bi bi-check-lg"></i> Approve</a>
@@ -617,6 +726,85 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
           </div>
         <?php endforeach; endif; ?>
       </div>
+
+      <?php elseif ($tab === 'learn'): ?>
+      <?php if (!$learnReady): ?>
+        <div class="alert alert-warning">
+          <i class="bi bi-exclamation-triangle me-2"></i>
+          The learned filter's tables don't exist yet. Run the upgrader (<code><?= $h($baseurl) ?>install/</code>) to add them.
+        </div>
+      <?php else:
+        $minDocs = max(1, (int)$settings['bayes_min_docs']);
+        $active  = $learned['spam'] >= $minDocs && $learned['ham'] >= $minDocs;
+      ?>
+      <div class="card p-3 mb-3">
+        <div class="d-flex flex-wrap gap-4 align-items-center">
+          <div><div class="fs-4 fw-semibold"><?= number_format($learned['spam']) ?></div><div class="small text-secondary">spam examples</div></div>
+          <div><div class="fs-4 fw-semibold"><?= number_format($learned['ham']) ?></div><div class="small text-secondary">normal examples</div></div>
+          <div><div class="fs-4 fw-semibold"><?= number_format($tokenCount) ?></div><div class="small text-secondary">words known</div></div>
+          <div class="ms-auto">
+            <?php if (!(int)$settings['bayes_enabled']): ?>
+              <span class="badge bg-secondary">Off in Settings</span>
+            <?php elseif ($active): ?>
+              <span class="badge bg-success">Scoring pastes</span>
+            <?php else: ?>
+              <span class="badge bg-warning text-dark">Needs <?= $minDocs ?> of each kind to start</span>
+            <?php endif; ?>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-3 mb-3">
+        <h6 class="mb-1">Teach it examples</h6>
+        <p class="text-secondary small mb-3">Paste one or more examples. Put a line of dashes (<code>-----</code>) between them.</p>
+        <form method="post" action="?tab=learn">
+          <input type="hidden" name="learn_examples" value="1">
+          <input type="hidden" name="csrf_token" value="<?= $h($csrf) ?>">
+          <textarea class="form-control mono mb-2" name="examples" rows="8" required></textarea>
+          <button class="btn btn-danger" name="learn_label" value="spam"><i class="bi bi-hand-thumbs-down me-1"></i>These are spam</button>
+          <button class="btn btn-success" name="learn_label" value="ham"><i class="bi bi-hand-thumbs-up me-1"></i>These are normal</button>
+        </form>
+      </div>
+
+      <div class="card p-3 mb-3">
+        <h6 class="mb-1">Learn this site's pastes as normal</h6>
+        <p class="text-secondary small mb-3">Learns the most recent public and unlisted pastes, newest first, skipping private, password-protected, client-encrypted and banned ones.
+          Mark any spam among them first (Pastes &gt; Spam) so it isn't learned as normal. Pastes it already knows are left as they are.</p>
+        <form method="post" action="?tab=learn" class="row g-2 align-items-end">
+          <input type="hidden" name="learn_site" value="1">
+          <input type="hidden" name="csrf_token" value="<?= $h($csrf) ?>">
+          <div class="col-md-3">
+            <label class="form-label" for="learn_count">How many</label>
+            <input type="number" min="1" max="2000" class="form-control" id="learn_count" name="learn_count" value="300">
+          </div>
+          <div class="col-md-5">
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="learn_guests" name="learn_guests">
+              <label class="form-check-label" for="learn_guests">Include guest pastes</label>
+            </div>
+          </div>
+          <div class="col-md-4"><button class="btn btn-primary w-100"><i class="bi bi-mortarboard me-1"></i>Learn</button></div>
+        </form>
+      </div>
+
+      <?php if ($topTokens): ?>
+      <div class="card p-3 mb-3">
+        <h6 class="mb-3">What it sees most in spam</h6>
+        <div class="d-flex flex-wrap gap-2">
+          <?php foreach ($topTokens as $t): ?>
+            <span class="badge bg-secondary mono fw-normal" title="spam <?= (int)$t['spam'] ?>, normal <?= (int)$t['ham'] ?>"><?= $h($t['token']) ?> <span class="text-warning"><?= (int)$t['spam'] ?></span>/<?= (int)$t['ham'] ?></span>
+          <?php endforeach; ?>
+        </div>
+        <div class="form-text mt-2">Each word shows how many spam and normal examples it appeared in.</div>
+      </div>
+      <?php endif; ?>
+
+      <form method="post" action="?tab=learn" onsubmit="return confirm('Forget every learned example?')">
+        <input type="hidden" name="forget_all" value="1">
+        <input type="hidden" name="csrf_token" value="<?= $h($csrf) ?>">
+        <button class="btn btn-sm btn-soft"><i class="bi bi-eraser me-1"></i>Forget everything</button>
+      </form>
+      <?php endif; ?>
 
       <?php elseif ($tab === 'log'): ?>
       <div class="card p-3">
@@ -636,7 +824,7 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
                 <td><?= $verdictBadge((string)$l['action']) ?></td>
                 <td><?= (int)$l['score'] ?></td>
                 <td class="small"><?= $h($l['member']) ?></td>
-                <td class="mono small"><?= $h($l['ip']) ?></td>
+                <td class="mono small"><?= $h(admin_personal($l['ip'])) ?></td>
                 <td class="small"><?= $h(mb_strimwidth((string)$l['title'], 0, 40, '…')) ?></td>
                 <td class="reason"><?= $h(mb_strimwidth((string)$l['reasons'], 0, 80, '…')) ?></td>
               </tr>
@@ -648,7 +836,7 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
 
       <?php elseif ($tab === 'test'): ?>
       <div class="card p-3 mb-3">
-        <h6 class="mb-3">Test a sample (rules + content heuristics only; no IP lookups, no DB writes)</h6>
+        <h6 class="mb-3">Test a sample (rules, content heuristics, link domains and the learned filter; no IP lookups, nothing saved)</h6>
         <form method="post" action="?tab=test">
           <input type="hidden" name="run_test" value="1">
           <input type="hidden" name="csrf_token" value="<?= $h($csrf) ?>">
@@ -680,6 +868,6 @@ $renderNav = function() use ($navItems, $baseurl, $h) {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>

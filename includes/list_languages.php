@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,7 +9,7 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See LICENCE for details.
@@ -71,7 +71,7 @@ function highlight_label_overrides(): array {
         'ldif' => 'LDIF','lisp' => 'Lisp','livecodeserver' => 'LiveCode Server','livescript' => 'LiveScript',
         'llvm' => 'LLVM IR','lsl' => 'LSL (Linden Scripting)','lua' => 'Lua','makefile' => 'Makefile',
         'mathematica' => 'Mathematica (Wolfram)','matlab' => 'MATLAB','maxima' => 'Maxima','mel' => 'MEL (Maya)',
-        'mercury' => 'Mercury','mipsasm' => 'MIPS Assembly','mirc' => 'mIRC Scripting','mizar' => 'Mizar',
+        'mercury' => 'Mercury','mipsasm' => 'MIPS Assembly','mirc' => 'mIRC Scripting','hex' => 'HexDroid Scripting','mizar' => 'Mizar',
         'mojolicious' => 'Mojolicious','monkey' => 'Monkey','moonscript' => 'MoonScript','n1ql' => 'N1QL',
         'nginx' => 'Nginx','nimrod' => 'Nim (Nimrod)','nix' => 'Nix','nsis' => 'NSIS','objectivec' => 'Objective-C',
         'ocaml' => 'OCaml','openscad' => 'OpenSCAD','oxygene' => 'Oxygene','parser3' => 'Parser3','perl' => 'Perl',
@@ -79,7 +79,7 @@ function highlight_label_overrides(): array {
         'pony' => 'Pony','powershell' => 'PowerShell','processing' => 'Processing','profile' => 'Profile',
         'protobuf' => 'Protocol Buffers','properties' => 'Properties','prolog' => 'Prolog','puppet' => 'Puppet',
         'purebasic' => 'PureBasic','python' => 'Python','q' => 'Q (kdb+)','qml' => 'QML','r' => 'R',
-        'reasonml' => 'ReasonML','rib' => 'RenderMan RIB','roboconf' => 'Roboconf',
+        'reasonml' => 'ReasonML','rib' => 'RenderMan RIB','riscv' => 'RISC-V Assembly','roboconf' => 'Roboconf',
         'rsl' => 'RenderMan Shader Language','routeros' => 'RouterOS (MikroTik)','ruby' => 'Ruby',
         'ruleslanguage' => 'Rules Language','rust' => 'Rust','sas' => 'SAS','scala' => 'Scala','scilab' => 'Scilab',
         'scheme' => 'Scheme','scss' => 'SCSS','shell' => 'Shell Session','smalltalk' => 'Smalltalk','smali' => 'Smali',
@@ -211,7 +211,7 @@ function geshi_language_map(): array {
         'klonecpp'=>'KLone C++','latex'=>'LaTeX','lb'=>'Liberty BASIC','ldif'=>'LDIF','lisp'=>'Lisp','llvm'=>'LLVM','locobasic'=>'Locomotive Basic',
         'logtalk'=>'Logtalk','lolcode'=>'LOLcode','lotusformulas'=>'Lotus Notes @Formulas','lotusscript'=>'LotusScript','lscript'=>'Lightwave Script',
         'lsl2'=>'Linden Script','lua'=>'LUA','m68k'=>'Motorola 68000 Assembler','magiksf'=>'MagikSF','make'=>'GNU make','mapbasic'=>'MapBasic',
-        'markdown'=>'Markdown','matlab'=>'Matlab M','mirc'=>'mIRC Scripting','mmix'=>'MMIX','modula2'=>'Modula-2','modula3'=>'Modula-3',
+        'markdown'=>'Markdown','matlab'=>'Matlab M','mips'=>'MIPS Assembly','mirc' => 'mIRC Scripting','hex' => 'HexDroid Scripting','mmix'=>'MMIX','modula2'=>'Modula-2','modula3'=>'Modula-3',
         'mpasm'=>'Microchip Assembler','mxml'=>'MXML','mysql'=>'MySQL','nagios'=>'Nagios','netrexx'=>'NetRexx','newlisp'=>'NewLisp','nginx'=>'Nginx',
         'nsis'=>'NSIS','oberon2'=>'Oberon-2','objc'=>'Objective-C','objeck'=>'Objeck','ocaml'=>'Ocaml','ocaml-brief'=>'OCaml (Brief)',
         'octave'=>'GNU/Octave','oobas'=>'OpenOffice.org Basic','oorexx'=>'ooRexx','oracle11'=>'Oracle 11 SQL','oracle8'=>'Oracle 8 SQL',
@@ -220,10 +220,10 @@ function geshi_language_map(): array {
         'pixelbender'=>'Pixel Bender','pli'=>'PL/I','plsql'=>'PL/SQL','postgresql'=>'PostgreSQL','povray'=>'POVRAY','powerbuilder'=>'PowerBuilder',
         'powershell'=>'PowerShell','proftpd'=>'ProFTPd config','progress'=>'Progress','prolog'=>'Prolog','properties'=>'Properties','providex'=>'ProvideX',
         'purebasic'=>'PureBasic','pycon'=>'Python (console mode)','pys60'=>'Python for S60','python'=>'Python','qbasic'=>'QuickBASIC','racket'=>'Racket',
-        'rails'=>'Ruby on Rails','rbs'=>'RBScript','rebol'=>'REBOL','reg'=>'Microsoft REGEDIT','rexx'=>'Rexx','robots'=>'robots.txt',
+        'rails'=>'Ruby on Rails','rbs'=>'RBScript','rebol'=>'REBOL','reg'=>'Microsoft REGEDIT','rexx'=>'Rexx','riscv'=>'RISC-V Assembly','robots'=>'robots.txt',
         'rpmspec'=>'RPM Specification File','rsplus'=>'R / S+','ruby'=>'Ruby','sas'=>'SAS','scala'=>'Scala','scheme'=>'Scheme','scilab'=>'SciLab',
         'scl'=>'SCL','sdlbasic'=>'sdlBasic','smalltalk'=>'Smalltalk','smarty'=>'Smarty','spark'=>'SPARK','sparql'=>'SPARQL','sql'=>'SQL',
-        'stonescript'=>'StoneScript','systemverilog'=>'SystemVerilog','tcl'=>'TCL','teraterm'=>'Tera Term Macro','text'=>'Plain Text','thinbasic'=>'thinBasic',
+        'stonescript'=>'StoneScript','systemverilog'=>'SystemVerilog','tcl'=>'TCL','tclegg'=>'TCL (Eggdrop)','teraterm'=>'Tera Term Macro','text'=>'Plain Text','thinbasic'=>'thinBasic',
         'tsql'=>'T-SQL','typoscript'=>'TypoScript','unicon'=>'Unicon','upc'=>'UPC','urbi'=>'Urbi','unrealscript'=>'Unreal Script','vala'=>'Vala',
         'vb'=>'Visual Basic','vbnet'=>'VB.NET','vbscript'=>'VB Script','vedit'=>'Vedit Macro','verilog'=>'Verilog','vhdl'=>'VHDL','vim'=>'Vim',
         'visualfoxpro'=>'Visual FoxPro','visualprolog'=>'Visual Prolog','whitespace'=>'Whitespace','whois'=>'WHOIS (RPSL format)','winbatch'=>'WinBatch',
@@ -238,6 +238,7 @@ function geshi_alias_map(array $geshi_map): array {
         'text' => 'text',
         // common file extensions / shorthands
         'md'=>'markdown','mkd'=>'markdown','mkdown'=>'markdown','mdown'=>'markdown',
+        'hex'=>'hex', // HexDroid
         'yml'=>'yaml','htm'=>'html5','html'=>'html5','xhtml'=>'html5',
         'js'=>'javascript','es6'=>'ecmascript','ts'=>'javascript', // TS closest fit
         'ps1'=>'powershell','pwsh'=>'powershell',
@@ -245,6 +246,7 @@ function geshi_alias_map(array $geshi_map): array {
         'sh'=>'bash','zsh'=>'bash','ksh'=>'bash','dash'=>'bash','csh'=>'bash','tcsh'=>'bash','shell'=>'bash','shellscript'=>'bash',
         'pl'=>'perl','rb'=>'ruby','py'=>'python','r'=>'rsplus','rscript'=>'rsplus',
         'x86asm'=>'asm','nasm'=>'asm','masm'=>'asm',
+        'mipsasm'=>'mips','risc-v'=>'riscv','rv32'=>'riscv','rv64'=>'riscv',
         'mrc'=>'mirc',
     ];
     // identities for available ids
@@ -272,7 +274,7 @@ function paste_popular_formats_highlight(): array {
 
 function paste_popular_formats_geshi(): array {
     return [
-        'autodetect','markdown','text','html4strict','html5','css','javascript','php','perl',
+        'autodetect','markdown','text','hex','html5','css','javascript','php','perl',
         'python','postgresql','sql','xml','java','c','csharp','cpp',
     ];
 }

@@ -158,10 +158,13 @@ function normalizeKeywords(kw) {
   if (typeof kw === 'string') return kw;
   if (Array.isArray(kw)) return kw.join(' ');
   if (typeof kw === 'object') {
-    return Object.values(kw)
-      .map(v => Array.isArray(v) ? v.join(' ') : String(v))
-      .join(' ')
-      .trim();
+    // Keep keyword groups (keyword, built_in, literal, meta...) so each gets its own class
+    const out = {};
+    for (const [group, words] of Object.entries(kw)) {
+      if (group === '$pattern') continue;
+      out[group] = (Array.isArray(words) ? words.join(' ') : String(words)).trim();
+    }
+    return out;
   }
   return String(kw);
 }
@@ -169,6 +172,9 @@ function normalizeKeywords(kw) {
 function finalize(def, idOpt, nameOpt, nameHint, aliasesOpt) {
   const plain = toPlain(def);
   normalizeClassNames(plain);
+  if (plain.keywords && typeof plain.keywords === 'object' && plain.keywords.$pattern && !plain.lexemes) {
+    plain.lexemes = plain.keywords.$pattern;
+  }
   if (plain.keywords) plain.keywords = normalizeKeywords(plain.keywords);
 
   const out = {};

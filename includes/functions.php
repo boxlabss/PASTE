@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 declare(strict_types=1);
 
 // Set default timezone
@@ -36,18 +36,8 @@ try {
 }
 
 /**
- * Enforce account status on every request.
- *
- * Banning a user sets users.verified = '2'. login.php already refuses to issue a
- * new session for that, but an already-authenticated session used to keep working
- * because nothing re-checked the account once logged in (and the session token was
- * never compared against the DB). This downgrades any banned, deleted, or
- * token-rotated session back to a guest, so a ban takes effect immediately on the
- * banned user's very next request, on every page.
- *
- * Safe to call unconditionally: it no-ops under CLI, when there is no active
- * session, or when nobody is logged in, and it only ever touches the front-end
- * user session (admin sessions live in separate keys / the `admin` table).
+ * Signs the visitor out when their account was deleted or banned, or its token changed
+ * (a password change or reset); signs them back in from a "Keep me signed in" cookie.
  */
 function paste_enforce_account_status(PDO $pdo): void
 {
@@ -57,7 +47,16 @@ function paste_enforce_account_status(PDO $pdo): void
 
     if (PHP_SAPI === 'cli') return;
     if (session_status() !== PHP_SESSION_ACTIVE) return;
+    if (empty($_SESSION['username']) && !empty($_COOKIE[PASTE_REMEMBER_COOKIE])) {
+        paste_restore_remembered($pdo);
+    }
     if (empty($_SESSION['username'])) return;
+
+    // Accounts named Guest cannot stay signed in
+    if (paste_is_guest_name((string)$_SESSION['username'])) {
+        unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username'], $_SESSION['pic']);
+        return;
+    }
 
     try {
         $stmt = $pdo->prepare('SELECT verified, token FROM users WHERE username = ? LIMIT 1');
@@ -80,71 +79,21 @@ function paste_enforce_account_status(PDO $pdo): void
     }
 }
 
+require_once __DIR__ . '/remember.php';
+require_once __DIR__ . '/account.php';
+
 // Apply account status (ban / forced logout) as early as possible on every request.
 if (isset($pdo) && $pdo instanceof PDO) {
     paste_enforce_account_status($pdo);
 }
 
-function str_contains_polyfill(string $haystack, string $needle, bool $ignoreCase = false): bool
-{
-    if (function_exists('str_contains')) {
-        return str_contains($haystack, $needle);
-    }
-    if ($ignoreCase) {
-        $haystack = strtolower($haystack);
-        $needle = strtolower($needle);
-    }
-    return strpos($haystack, $needle) !== false;
-}
-
-// Encrypt pastes with AES-256-CBC from our randomly generated $sec_key
-function encrypt(string $value, string $sec_key): string
-{
-    $cipher = "AES-256-CBC";
-    $ivlen = openssl_cipher_iv_length($cipher);
-    $iv = openssl_random_pseudo_bytes($ivlen);
-    $encrypted = openssl_encrypt($value, $cipher, $sec_key, OPENSSL_RAW_DATA, $iv);
-    if ($encrypted === false) {
-        throw new RuntimeException('Encryption failed.');
-    }
-    $hmac = hash_hmac('sha256', $encrypted, $sec_key, true);
-    return base64_encode($iv . $hmac . $encrypted);
-}
-
-function decrypt(string $value, string $sec_key): ?string
-{
-    $decoded = base64_decode($value, true);
-    if ($decoded === false) {
-        return null;
-    }
-    $cipher = "AES-256-CBC";
-    $ivlen = openssl_cipher_iv_length($cipher);
-    $sha256len = 32;
-    if (strlen($decoded) < $ivlen + $sha256len) {
-        return null;
-    }
-    $iv = substr($decoded, 0, $ivlen);
-    $hmac = substr($decoded, $ivlen, $sha256len);
-    $encrypted = substr($decoded, $ivlen + $sha256len);
-    $calculated_hmac = hash_hmac('sha256', $encrypted, $sec_key, true);
-    if (!hash_equals($hmac, $calculated_hmac)) {
-        return null;
-    }
-    $decrypted = openssl_decrypt($encrypted, $cipher, $sec_key, OPENSSL_RAW_DATA, $iv);
-    return $decrypted !== false ? $decrypted : null;
-}
+require_once __DIR__ . '/paste_crypt.php';
 
 // ============================================================================
 // SLUG (Randomized URL) Functions
 // ============================================================================
 
-/**
- * Generate a random URL-safe slug for paste URLs
- * Uses alphanumeric characters excluding ambiguous ones (0/O, 1/l/I)
- * 
- * @param int $length Length of the slug (default 8)
- * @return string Random slug like "jbFzprF6"
- */
+/** Random URL slug from letters and digits that cannot be confused (no 0/O, 1/l/I). */
 function generatePasteSlug(int $length = 8): string
 {
     // Characters that are URL-safe and unambiguous
@@ -157,25 +106,18 @@ function generatePasteSlug(int $length = 8): string
     return $slug;
 }
 
-/**
- * Generate a unique slug that doesn't exist in the database
- * 
- * @param PDO $pdo Database connection
- * @param int $length Initial slug length
- * @param int $maxAttempts Maximum attempts before increasing length
- * @return string Unique slug
- */
+/** A slug no paste uses yet; grows by one character after $maxAttempts collisions. */
 function generateUniquePasteSlug(PDO $pdo, int $length = 8, int $maxAttempts = 10): string
 {
     $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM pastes WHERE slug = ?");
     $attempts = 0;
-    
+
     do {
         $slug = generatePasteSlug($length);
         $checkStmt->execute([$slug]);
         $exists = (int)$checkStmt->fetchColumn() > 0;
         $attempts++;
-        
+
         // If we're having trouble finding unique slugs, increase length
         if ($attempts >= $maxAttempts) {
             $length++;
@@ -183,17 +125,11 @@ function generateUniquePasteSlug(PDO $pdo, int $length = 8, int $maxAttempts = 1
             error_log("generateUniquePasteSlug: Increased slug length to $length due to collisions");
         }
     } while ($exists && $attempts < $maxAttempts * 3);
-    
+
     return $slug;
 }
 
-/**
- * Get paste URL mode from config or database
- * Returns 'slug' for randomized URLs or 'numeric' for traditional numeric IDs
- * 
- * @param PDO|null $pdo Database connection (optional, for DB-stored setting)
- * @return string 'slug' or 'numeric'
- */
+/** Paste URL mode from the admin setting: 'slug' (default) or 'numeric'. */
 function getPasteUrlMode(?PDO $pdo = null): string
 {
     // Get from database only (admin panel settings)
@@ -214,11 +150,11 @@ function getPasteUrlMode(?PDO $pdo = null): string
                 $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('url_mode', 'slug'), ('slug_length', '8')");
                 return 'slug';
             }
-            
+
             $stmt = $pdo->prepare("SELECT option_value FROM paste_options WHERE option_name = 'url_mode'");
             $stmt->execute();
             $result = $stmt->fetchColumn();
-            
+
             // Handle null, false, empty string
             if ($result !== false && $result !== null && $result !== '') {
                 $result = trim((string)$result);
@@ -226,26 +162,21 @@ function getPasteUrlMode(?PDO $pdo = null): string
                     return $result;
                 }
             }
-            
+
             // Row doesn't exist or has invalid value, insert/update default
-            $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('url_mode', 'slug') 
+            $pdo->exec("INSERT INTO paste_options (option_name, option_value) VALUES ('url_mode', 'slug')
                         ON DUPLICATE KEY UPDATE option_value = 'slug'");
             return 'slug';
         } catch (PDOException $e) {
             error_log("getPasteUrlMode error: " . $e->getMessage());
         }
     }
-    
+
     // Default to slug for new installs
     return 'slug';
 }
 
-/**
- * Get configured slug length
- * 
- * @param PDO|null $pdo Database connection (optional)
- * @return int Slug length (default 8)
- */
+/** Configured slug length (default 8). */
 function getPasteSlugLength(?PDO $pdo = null): int
 {
     // Get from database only (admin panel settings)
@@ -260,7 +191,7 @@ function getPasteSlugLength(?PDO $pdo = null): int
                     return $len;
                 }
             }
-            
+
             // Row doesn't exist, insert default
             $pdo->exec("INSERT IGNORE INTO paste_options (option_name, option_value) VALUES ('slug_length', '8')");
             return 8;
@@ -268,34 +199,27 @@ function getPasteSlugLength(?PDO $pdo = null): int
             error_log("getPasteSlugLength error: " . $e->getMessage());
         }
     }
-    
+
     return 8; // Default
 }
 
-/**
- * Look up a paste by ID or slug
- * Supports both numeric IDs and alphanumeric slugs for backwards compatibility
- * 
- * @param PDO $pdo Database connection
- * @param string $identifier Paste ID (numeric) or slug (alphanumeric)
- * @return array|null Paste row or null if not found
- */
+/** A paste row by numeric id or slug, or null. */
 function getPasteByIdentifier(PDO $pdo, string $identifier): ?array
 {
     $identifier = trim($identifier);
     if ($identifier === '') {
         return null;
     }
-    
-    // Check if it's purely numeric (legacy ID lookup)
+
+    // Numeric id
     if (ctype_digit($identifier)) {
         $stmt = $pdo->prepare("SELECT * FROM pastes WHERE id = ? LIMIT 1");
         $stmt->execute([(int)$identifier]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $row : null;
     }
-    
-    // Otherwise, look up by slug
+
+    // Slug
     $stmt = $pdo->prepare("SELECT * FROM pastes WHERE slug = ? LIMIT 1");
     $stmt->execute([$identifier]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -303,60 +227,137 @@ function getPasteByIdentifier(PDO $pdo, string $identifier): ?array
 }
 
 /**
- * Get the URL identifier for a paste (slug or ID based on mode)
- * 
- * @param array $paste Paste row from database
- * @param PDO|null $pdo Database connection (for URL mode check)
- * @return string The identifier to use in URLs
+ * Look up a paste for a page other than its own (diff, forks), by the identifier its own page uses:
+ * a paste with a slug is only found by that slug, and numeric ids follow "block numeric URLs".
  */
+function paste_find_linked(PDO $pdo, string $identifier): ?array
+{
+    $row = getPasteByIdentifier($pdo, $identifier);
+    if (!$row || !ctype_digit(trim($identifier))) {
+        return $row;
+    }
+    if ((string)($row['slug'] ?? '') !== '' || shouldBlockNumericUrls($pdo)) {
+        return null;
+    }
+    return $row;
+}
+
+/**
+ * True if the visitor may see this paste's content outside its own page.
+ * Private and password-protected pastes are left to their owner; expired, view-once
+ * and browser-encrypted pastes are only shown on their own page.
+ */
+function paste_readable_elsewhere(array $row, string $viewer): bool
+{
+    $owner = $viewer !== '' && (string)($row['member'] ?? '') === $viewer;
+    if (paste_is_expired((string)($row['expiry'] ?? ''))) return false;
+    if (trim((string)($row['expiry'] ?? '')) === 'SELF') return false;
+    if ((string)($row['encrypt'] ?? '0') === '2') return false;
+    if ((string)($row['visible'] ?? '0') === '2' && !$owner) return false;
+    if ((string)($row['password'] ?? 'NONE') !== 'NONE' && !$owner) return false;
+    return true;
+}
+
+/** The Referer when it points at this site, otherwise $fallback. */
+function paste_same_site_referer(string $baseurl, string $fallback): string
+{
+    $ref  = (string)($_SERVER['HTTP_REFERER'] ?? '');
+    $host = parse_url($baseurl, PHP_URL_HOST);
+    if ($ref === '' || !$host || strcasecmp((string)parse_url($ref, PHP_URL_HOST), (string)$host) !== 0) {
+        return $fallback;
+    }
+    return $ref;
+}
+
+/** Sign the visitor out and send them back to the page they came from on this site. */
+function paste_logout_and_redirect(string $baseurl): never
+{
+    $dest = paste_same_site_referer($baseurl, $baseurl !== '' ? $baseurl : './');
+    $_SESSION = [];
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_destroy();
+    }
+    paste_remember_cookie(null);
+    header('Location: ' . $dest);
+    exit;
+}
+
+/**
+ * Token that opens a password-protected paste's raw, download and embed links in place of the password.
+ * Bound to the paste and its password, so changing the password ends it; $expires 0 never expires.
+ */
+function paste_access_token(int $id, string $passwordHash, int $expires): string
+{
+    if (!defined('SECRET') || (string)SECRET === '') return '';
+    return $expires . '.' . substr(hash_hmac('sha256', 'paste-access|' . $id . '|' . $passwordHash . '|' . $expires, (string)SECRET), 0, 32);
+}
+
+/** True if $token came from paste_access_token() for this paste and password and has not expired. */
+function paste_access_token_ok(string $token, int $id, string $passwordHash): bool
+{
+    if (!preg_match('/^(\d{1,10})\.[0-9a-f]{32}$/', $token, $m)) return false;
+    $expires = (int)$m[1];
+    if ($expires !== 0 && $expires < time()) return false;
+    $want = paste_access_token($id, $passwordHash, $expires);
+    return $want !== '' && hash_equals($want, $token);
+}
+
+/**
+ * Counts a failed attempt of $kind (paste password, login) from this IP when $count is true,
+ * and reports whether the IP has used its 10 tries in the current 10 minutes. Uses the API's rate-limit table.
+ */
+function paste_throttled(PDO $pdo, string $kind, bool $count = false): bool
+{
+    require_once __DIR__ . '/api_keys.php';
+    $fails = api_rate($pdo, $kind . ':' . ($_SERVER['REMOTE_ADDR'] ?? ''), 600, $count);
+    return $fails !== null && $fails >= 10;
+}
+
+/** A paste's URL identifier: its slug when it has one, else its id. */
 function getPasteUrlIdentifier(array $paste, ?PDO $pdo = null): string
 {
     $mode = getPasteUrlMode($pdo);
-    
+
     // If slug mode and paste has a slug, use it
     if ($mode === 'slug' && !empty($paste['slug'])) {
         return $paste['slug'];
     }
-    
+
     // Fallback to numeric ID
     return (string)($paste['id'] ?? '');
 }
 
-/**
- * Build paste URL
- * 
- * @param array|int|string $paste Paste array, paste ID, or paste slug
- * @param string $baseurl Base URL of the site
- * @param string $mod_rewrite '1' for pretty URLs, '0' for query strings
- * @param PDO|null $pdo Database connection
- * @return string Full paste URL
- */
-function buildPasteUrl($paste, string $baseurl, string $mod_rewrite = '0', ?PDO $pdo = null): string
+/** URL of a theme file with its modification time appended, so browsers fetch it again after an update. */
+function paste_theme_asset(string $baseurl, string $theme, string $file): string
 {
-    $baseurl = rtrim($baseurl, '/') . '/';
-    
-    // Get identifier
-    if (is_array($paste)) {
-        $identifier = getPasteUrlIdentifier($paste, $pdo);
-    } else {
-        $identifier = (string)$paste;
-    }
-    
-    if ($mod_rewrite === '1') {
-        return $baseurl . rawurlencode($identifier);
-    } else {
-        return $baseurl . 'paste.php?id=' . rawurlencode($identifier);
-    }
+    $theme = basename($theme);
+    $path = dirname(__DIR__) . '/theme/' . $theme . '/' . ltrim($file, '/');
+    $v = is_file($path) ? (string) filemtime($path) : '';
+    return $baseurl . 'theme/' . $theme . '/' . ltrim($file, '/') . ($v !== '' ? '?v=' . $v : '');
 }
 
 /**
- * Check if a column exists in a table
- * 
- * @param PDO $pdo Database connection
- * @param string $table Table name
- * @param string $column Column name
- * @return bool True if column exists
+ * Site URL for this request: $stored, with its host switched to the requested
+ * one when that host is listed in $alias_domains (config.php). The scheme is
+ * https when the request is, otherwise the stored one.
  */
+function paste_request_baseurl(string $stored): string
+{
+    $aliases = $GLOBALS['alias_domains'] ?? [];
+    $host = strtolower(trim((string)($_SERVER['HTTP_HOST'] ?? '')));
+    if (!is_array($aliases) || !$aliases || !preg_match('/^[a-z0-9.-]+(?::\d{1,5})?$/', $host)) {
+        return $stored;
+    }
+    $listed = array_map(static fn($d): string => strtolower(trim((string)$d)), $aliases);
+    if (!in_array($host, $listed, true) || !preg_match('#^(https?)://[^/]+#i', $stored, $m)) {
+        return $stored;
+    }
+    $https = !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off';
+    $scheme = $https ? 'https' : strtolower($m[1]);
+    return $scheme . '://' . $host . substr($stored, strlen($m[0]));
+}
+
+/** True if $table has $column. */
 function columnExists(PDO $pdo, string $table, string $column): bool
 {
     try {
@@ -370,13 +371,7 @@ function columnExists(PDO $pdo, string $table, string $column): bool
     }
 }
 
-/**
- * Ensure the slug column exists in the pastes table.
- * Creates it if missing.
- * 
- * @param PDO $pdo Database connection
- * @return bool True if column exists (or was created), false on error
- */
+/** Add the pastes.slug column when missing; true when it exists. */
 function ensureSlugColumnExists(PDO $pdo): bool
 {
     // First check if column exists
@@ -388,7 +383,7 @@ function ensureSlugColumnExists(PDO $pdo): bool
     } catch (PDOException $e) {
         // Continue to try creating it
     }
-    
+
     try {
         // Add the slug column after the id column
         $pdo->exec("ALTER TABLE pastes ADD COLUMN slug VARCHAR(32) DEFAULT NULL AFTER id");
@@ -401,29 +396,24 @@ function ensureSlugColumnExists(PDO $pdo): bool
         error_log("ensureSlugColumnExists error: " . $e->getMessage());
         return false;
     }
-    
+
     // Add unique index (ignore if already exists)
     try {
         $pdo->exec("CREATE UNIQUE INDEX idx_pastes_slug ON pastes(slug)");
     } catch (PDOException $e) {
         // Index might already exist - that's OK
     }
-    
+
     return true;
 }
 
-/**
- * Check if numeric URL access should be blocked (404)
- * 
- * @param PDO|null $pdo Database connection
- * @return bool True if numeric URLs should return 404
- */
+/** True when pastes may not be opened by numeric id. */
 function shouldBlockNumericUrls(?PDO $pdo = null): bool
 {
     if ($pdo === null) {
         return false;
     }
-    
+
     try {
         $stmt = $pdo->prepare("SELECT option_value FROM paste_options WHERE option_name = 'block_numeric_urls'");
         $stmt->execute();
@@ -476,6 +466,27 @@ function paste_is_expired(?string $expiry, ?int $now = null): bool
     return $ts > 0 && $ts < ($now ?? time());
 }
 
+/** SQL condition for pastes that may appear in public lists: not view-once and not expired. $alias qualifies the column. */
+function paste_listable_sql(string $alias = ''): string
+{
+    $c = ($alias !== '' ? $alias . '.' : '') . 'expiry';
+    return "(COALESCE($c, '') <> 'SELF' AND ($c IS NULL OR $c NOT REGEXP '^[0-9]+$'"
+         . " OR CAST($c AS UNSIGNED) = 0 OR CAST($c AS UNSIGNED) >= UNIX_TIMESTAMP()))";
+}
+
+/** A title as stored: one line, HTML-escaped, at most 255 characters after escaping. */
+function paste_store_title(string $title): string
+{
+    $title = trim((string)preg_replace('/[\x00-\x1f\x7f]+/u', ' ', $title));
+    $out = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    while (mb_strlen($out) > 255) {
+        $cut = max(1, intdiv(mb_strlen($out) - 255 + 5, 6));
+        $title = rtrim(mb_substr($title, 0, max(0, mb_strlen($title) - $cut)));
+        $out = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+    return $out;
+}
+
 function deleteMyPaste(PDO $pdo, int $paste_id): bool
 {
     try {
@@ -488,37 +499,17 @@ function deleteMyPaste(PDO $pdo, int $paste_id): bool
     }
 }
 
-if (isset($_POST['delete']) && isset($_SESSION['username']) && isset($paste_id)) {
-    try {
-        // Verify ownership
-        $stmt = $pdo->prepare("SELECT member FROM pastes WHERE id = ?");
-        $stmt->execute([$paste_id]);
-        $paste = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($paste && $paste['member'] === $_SESSION['username']) {
-            if (deleteMyPaste($pdo, $paste_id)) {
-                header("Location: " . ($mod_rewrite ? $baseurl . "/profile" : $baseurl . "/profile.php"));
-                exit;
-            } else {
-                $error = "Failed to delete paste.";
-            }
-        } else {
-            $error = "You do not have permission to delete this paste.";
-        }
-    } catch (Exception $e) {
-        $error = "Error deleting paste: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
-    }
-}
-
 function getRecent(PDO $pdo, int $count = 5, int $offset = 0, string $sortColumn = 'date', string $sortDirection = 'DESC'): array
 {
     try {
         $sortColumn = in_array($sortColumn, ['date', 'title', 'code', 'views']) ? $sortColumn : 'date';
         $sortDirection = in_array($sortDirection, ['ASC', 'DESC']) ? $sortDirection : 'DESC';
-        // Check if slug column exists (for backwards compatibility)
+        // Databases not yet upgraded may lack the slug column
         $hasSlug = columnExists($pdo, 'pastes', 'slug');
         $slugCol = $hasSlug ? ', slug' : '';
-        $query = "SELECT id{$slugCol}, title, content, visible, code, expiry, password, member, date, UNIX_TIMESTAMP(date) AS now_time, encrypt 
-                  FROM pastes WHERE visible = '0' AND password = 'NONE' ORDER BY $sortColumn $sortDirection LIMIT :count OFFSET :offset";
+        $query = "SELECT id{$slugCol}, title, visible, code, expiry, password, member, date, UNIX_TIMESTAMP(date) AS now_time, encrypt
+                  FROM pastes WHERE visible = '0' AND password = 'NONE' AND " . paste_listable_sql() . "
+                  ORDER BY $sortColumn $sortDirection LIMIT :count OFFSET :offset";
         $stmt = $pdo->prepare($query);
         $stmt->bindValue(':count', $count, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -526,7 +517,6 @@ function getRecent(PDO $pdo, int $count = 5, int $offset = 0, string $sortColumn
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$row) {
             if ($row['encrypt'] == "1") {
-                $row['content'] = decrypt($row['content'], hex2bin(SECRET)) ?? '';
                 $row['title'] = decrypt($row['title'], hex2bin(SECRET)) ?? $row['title'];
             }
             // Ensure slug key exists even if column doesn't
@@ -545,10 +535,10 @@ function getRecent(PDO $pdo, int $count = 5, int $offset = 0, string $sortColumn
 function getUserRecent(PDO $pdo, string $username, int $count = 5): array
 {
     try {
-        // Check if slug column exists (for backwards compatibility)
+        // Databases not yet upgraded may lack the slug column
         $hasSlug = columnExists($pdo, 'pastes', 'slug');
         $slugCol = $hasSlug ? ', slug' : '';
-        $query = "SELECT id{$slugCol}, title, content, visible, code, expiry, password, member, date, UNIX_TIMESTAMP(date) AS now_time, encrypt 
+        $query = "SELECT id{$slugCol}, title, visible, code, expiry, password, member, date, UNIX_TIMESTAMP(date) AS now_time, encrypt
                   FROM pastes WHERE member = :username ORDER BY id DESC LIMIT :count";
         $stmt = $pdo->prepare($query);
         $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -557,7 +547,6 @@ function getUserRecent(PDO $pdo, string $username, int $count = 5): array
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as &$row) {
             if ($row['encrypt'] == "1") {
-                $row['content'] = decrypt($row['content'], hex2bin(SECRET)) ?? '';
                 $row['title'] = decrypt($row['title'], hex2bin(SECRET)) ?? $row['title'];
             }
             // Ensure slug key exists even if column doesn't
@@ -569,45 +558,6 @@ function getUserRecent(PDO $pdo, string $username, int $count = 5): array
         return $rows;
     } catch (PDOException $e) {
         error_log("Failed to fetch user recent pastes for {$username}: " . $e->getMessage());
-        return [];
-    }
-}
-
-function getUserPastes(PDO $pdo, string $username): array
-{
-    try {
-        // Check if slug column exists (for backwards compatibility)
-        $hasSlug = columnExists($pdo, 'pastes', 'slug');
-        $slugCol = $hasSlug ? ', p.slug' : '';
-        $slugGroup = $hasSlug ? ', p.slug' : '';
-        $query = "
-            SELECT p.id{$slugCol}, p.title, p.content, p.visible, p.code, p.password, p.member, p.date, 
-                   UNIX_TIMESTAMP(p.date) AS now_time, p.encrypt, p.expiry, 
-                   COALESCE(COUNT(pv.id), 0) AS views
-            FROM pastes p
-            LEFT JOIN paste_views pv ON p.id = pv.paste_id
-            WHERE p.member = :username
-            GROUP BY p.id, p.title, p.content, p.visible, p.code, p.password, p.member, p.date, p.encrypt, p.expiry{$slugGroup}
-            ORDER BY p.id DESC
-        ";
-        $stmt = $pdo->prepare($query);
-        $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-        $stmt->execute();
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($rows as &$row) {
-            if ($row['encrypt'] == "1") {
-                $row['content'] = decrypt($row['content'], hex2bin(SECRET)) ?? '';
-                $row['title'] = decrypt($row['title'], hex2bin(SECRET)) ?? $row['title'];
-            }
-            // Ensure slug key exists even if column doesn't
-            if (!isset($row['slug'])) {
-                $row['slug'] = '';
-            }
-        }
-        unset($row);
-        return $rows;
-    } catch (PDOException $e) {
-        error_log("Failed to fetch user pastes for $username: " . $e->getMessage());
         return [];
     }
 }
@@ -656,37 +606,21 @@ function getPasteViewCount(PDO $pdo, int $paste_id): int
     }
 }
 
-function pageViewTrack(PDO $pdo, string $ip): void {
+/** Count a page view for today, and the visitor once per day. */
+function pageViewTrack(PDO $pdo, string $ip): void
+{
     $date = date('Y-m-d');
     try {
-        $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-        $stmt->execute([$date]);
-        $row = $stmt->fetch();
-
-        if ($row) {
-            $page_view_id = $row['id'];
-            $tpage = (int)$row['tpage'] + 1;
-            $tvisit = (int)$row['tvisit'];
-
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-            $stmt->execute([$ip, $date]);
-            if ($stmt->fetchColumn() == 0) {
-                $tvisit += 1;
-                $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-                $stmt->execute([$ip, $date]);
-            }
-
-            $stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-            $stmt->execute([$tpage, $tvisit, $page_view_id]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-            $stmt->execute([$date, 1, 1]);
-
-            $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-            $stmt->execute([$ip, $date]);
+        $st = $pdo->prepare("INSERT IGNORE INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
+        $st->execute([$ip, $date]);
+        $newVisitor = $st->rowCount() > 0 ? 1 : 0;
+        $st = $pdo->prepare("UPDATE page_view SET tpage = tpage + 1, tvisit = tvisit + ? WHERE date = ?");
+        $st->execute([$newVisitor, $date]);
+        if ($st->rowCount() === 0) {
+            $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, 1, ?)")->execute([$date, $newVisitor]);
         }
     } catch (PDOException $e) {
-        error_log("Page view tracking error: " . $e->getMessage());
+        error_log('pageViewTrack: ' . $e->getMessage());
     }
 }
 
@@ -699,7 +633,7 @@ function updateMyView(PDO $pdo, int $paste_id): bool
         // Use INSERT IGNORE to handle race conditions - if the row already exists, it's silently ignored
         $stmt = $pdo->prepare("INSERT IGNORE INTO paste_views (paste_id, ip, view_date) VALUES (:paste_id, :ip, :view_date)");
         $stmt->execute(['paste_id' => $paste_id, 'ip' => $ip, 'view_date' => $view_date]);
-        
+
         // rowCount() returns 1 if inserted, 0 if ignored (duplicate)
         return $stmt->rowCount() > 0;
     } catch (PDOException $e) {
@@ -748,34 +682,6 @@ function conTime(int $timestamp): string
     return trim($result) ?: 'just now';
 }
 
-function getRelativeTime(int $seconds): string
-{
-    if ($seconds <= 0) {
-        return '0 seconds';
-    }
-    $now = new DateTime('@0');
-    $then = new DateTime("@$seconds");
-    $diff = $now->diff($then);
-    $ret = '';
-    foreach ([
-        'y' => 'year',
-        'm' => 'month',
-        'd' => 'day',
-        'h' => 'hour',
-        'i' => 'minute',
-        's' => 'second'
-    ] as $time => $timename) {
-        if ($diff->$time !== 0) {
-            $ret .= $diff->$time . ' ' . $timename;
-            if (abs($diff->$time) !== 1) {
-                $ret .= 's';
-            }
-            $ret .= ' ';
-        }
-    }
-    return trim($ret);
-}
-
 function formatRealTime(string $dateStr): string
 {
     // Convert database date (Y-m-d H:i:s) to a formatted date with time
@@ -809,7 +715,7 @@ function truncate(string $input, int $maxWords, int $maxChars): string
 
 function doDownload(int $paste_id, string $p_title, string $p_content, string $p_code): bool
 {
-    if (!$p_code || !$p_content) {
+    if ($p_code === '' || $p_content === '') {
         header('HTTP/1.1 404 Not Found');
         return false;
     }
@@ -842,9 +748,8 @@ function doDownload(int $paste_id, string $p_title, string $p_content, string $p
 
 function rawView(int $paste_id, string $p_title, string $p_content, string $p_code): bool
 {
-    if (!$paste_id || !$p_code || !$p_content) {
+    if (!$paste_id || $p_code === '' || $p_content === '') {
         header('HTTP/1.1 404 Not Found');
-        error_log("Debug: rawView - Invalid input: paste_id=$paste_id, p_code=$p_code, p_content length=" . strlen($p_content));
         return false;
     }
     header('Content-Type: text/plain; charset=utf-8');
@@ -859,7 +764,7 @@ function rawView(int $paste_id, string $p_title, string $p_content, string $p_co
 function embedView( $paste_id, $p_title, $p_content, $p_code, $title, $baseurl, $ges_style, $lang ) {
     global $mod_rewrite;
     $stats = false;
-    if ( $p_content ) {
+    if ( (string)$p_content !== '' ) {
         $e        = static fn($s) => htmlspecialchars(html_entity_decode((string)$s, ENT_QUOTES, 'UTF-8'), ENT_QUOTES, 'UTF-8');
         $base     = rtrim((string)$baseurl, '/') . '/';
         $ident    = rawurlencode((string)$paste_id);
@@ -959,7 +864,7 @@ function addToSitemap(PDO $pdo, int $paste_id, string $priority, string $changef
     try {
         global $baseurl;
         $c_date = date('Y-m-d');
-        
+
         // Use slug if provided, otherwise try to get it from database
         $identifier = $paste_id;
         if ($slug !== null && $slug !== '') {
@@ -980,16 +885,16 @@ function addToSitemap(PDO $pdo, int $paste_id, string $priority, string $changef
                 // Use numeric ID as fallback
             }
         }
-        
+
         $server_name = $mod_rewrite
             ? rtrim($baseurl, '/') . '/' . $identifier
             : rtrim($baseurl, '/') . "/paste.php?id=" . $identifier;
-        
+
         $sitemap_path = 'sitemap.xml';
-        
+
         // Build the new URL entry
         $new_entry = "  <url>\n    <loc>" . htmlspecialchars($server_name, ENT_QUOTES, 'UTF-8') . "</loc>\n    <priority>$priority</priority>\n    <changefreq>$changefreq</changefreq>\n    <lastmod>$c_date</lastmod>\n  </url>\n";
-        
+
         if (file_exists($sitemap_path)) {
             $site_data = file_get_contents($sitemap_path);
             if ($site_data === false) {
@@ -1002,7 +907,7 @@ function addToSitemap(PDO $pdo, int $paste_id, string $priority, string $changef
             // Create new sitemap
             $full_map = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n" . $new_entry . "</urlset>\n";
         }
-        
+
         return file_put_contents($sitemap_path, $full_map) !== false;
     } catch (Exception $e) {
         error_log("Failed to update sitemap for paste ID {$paste_id}: " . $e->getMessage());
@@ -1019,25 +924,25 @@ function removeFromSitemap(PDO $pdo, int $paste_id): bool
         if (!file_exists('sitemap.xml')) {
             return true; // Nothing to remove
         }
-        
+
         global $baseurl, $mod_rewrite;
-        
+
         $site_data = file_get_contents('sitemap.xml');
         if ($site_data === false) {
             return false;
         }
-        
+
         // Build possible URL patterns for this paste
         $patterns = [];
-        
+
         // With mod_rewrite
         $patterns[] = preg_quote($baseurl . $paste_id, '/');
         $patterns[] = preg_quote(rtrim($baseurl, '/') . '/' . $paste_id, '/');
-        
+
         // Without mod_rewrite
         $patterns[] = preg_quote($baseurl . "paste.php?id=" . $paste_id, '/');
         $patterns[] = preg_quote(rtrim($baseurl, '/') . "/paste.php?id=" . $paste_id, '/');
-        
+
         // Also try to get the slug for this paste
         try {
             $stmt = $pdo->prepare("SELECT slug FROM pastes WHERE id = ?");
@@ -1052,13 +957,13 @@ function removeFromSitemap(PDO $pdo, int $paste_id): bool
         } catch (PDOException $e) {
             // Ignore - slug column might not exist
         }
-        
+
         // Remove any <url> block containing these patterns
         foreach ($patterns as $pattern) {
             $regex = '/<url>\s*<loc>' . $pattern . '<\/loc>.*?<\/url>\s*/s';
             $site_data = preg_replace($regex, '', $site_data);
         }
-        
+
         return file_put_contents('sitemap.xml', $site_data) !== false;
     } catch (Exception $e) {
         error_log("Failed to remove paste ID {$paste_id} from sitemap: " . $e->getMessage());
@@ -1073,121 +978,103 @@ function removeFromSitemap(PDO $pdo, int $paste_id): bool
 function regenerateSitemap(PDO $pdo): array
 {
     $result = ['success' => false, 'count' => 0, 'message' => ''];
-    
+
     try {
         global $baseurl, $mod_rewrite;
-        
+
         // Get sitemap options
         $stmt = $pdo->query("SELECT priority, changefreq FROM sitemap_options WHERE id = 1");
         $opt = $stmt->fetch() ?: ['priority' => '0.5', 'changefreq' => 'weekly'];
         $priority = number_format((float)($opt['priority'] ?? 0.5), 1, '.', '');
         $changefreq = $opt['changefreq'] ?? 'weekly';
-        
+
         // Check URL mode
         $urlMode = getPasteUrlMode($pdo);
-        
+
         // Check if slug column exists
         $hasSlug = false;
         try {
             $chk = $pdo->query("SHOW COLUMNS FROM pastes LIKE 'slug'");
             $hasSlug = ($chk && $chk->rowCount() > 0);
         } catch (Exception $e) {}
-        
+
         $useSlug = ($hasSlug && $urlMode === 'slug');
-        
+
         $today = date('Y-m-d');
         $sitemap_path = rtrim(dirname(__DIR__), '/\\') . '/sitemap.xml';
         $tmp_path = $sitemap_path . '.tmp';
-        
+
         $fh = fopen($tmp_path, 'wb');
         if (!$fh) {
             $result['message'] = 'Unable to open sitemap file for writing';
             return $result;
         }
-        
+
         // XML header
         fwrite($fh, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         fwrite($fh, "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
-        
+
         // Homepage
         $home = htmlspecialchars(rtrim($baseurl, '/') . '/', ENT_QUOTES, 'UTF-8');
         fwrite($fh, "  <url>\n    <loc>{$home}</loc>\n    <priority>1.0</priority>\n    <changefreq>daily</changefreq>\n    <lastmod>{$today}</lastmod>\n  </url>\n");
-        
+
         $written = 1;
         $selectCols = $useSlug ? "id, slug, date" : "id, date";
-        
+
         // Stream public pastes in chunks
-        $total = (int)$pdo->query("SELECT COUNT(*) FROM pastes WHERE visible = '0'")->fetchColumn();
+        $listable = paste_listable_sql();
+        $total = (int)$pdo->query("SELECT COUNT(*) FROM pastes WHERE visible = '0' AND $listable")->fetchColumn();
         $limit = 500;
-        
+
         for ($offset = 0; $offset < $total; $offset += $limit) {
-            $stmt = $pdo->prepare("SELECT {$selectCols} FROM pastes WHERE visible = '0' ORDER BY id DESC LIMIT ? OFFSET ?");
+            $stmt = $pdo->prepare("SELECT {$selectCols} FROM pastes WHERE visible = '0' AND $listable ORDER BY id DESC LIMIT ? OFFSET ?");
             $stmt->execute([$limit, $offset]);
-            
+
             while ($row = $stmt->fetch()) {
                 $identifier = ($useSlug && !empty($row['slug'])) ? $row['slug'] : $row['id'];
-                $url = $mod_rewrite 
+                $url = $mod_rewrite
                     ? rtrim($baseurl, '/') . '/' . rawurlencode($identifier)
                     : rtrim($baseurl, '/') . '/paste.php?id=' . urlencode($identifier);
                 $loc = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
                 $lastmod = !empty($row['date']) ? substr($row['date'], 0, 10) : $today;
-                
+
                 fwrite($fh, "  <url>\n    <loc>{$loc}</loc>\n    <priority>{$priority}</priority>\n    <changefreq>{$changefreq}</changefreq>\n    <lastmod>{$lastmod}</lastmod>\n  </url>\n");
                 $written++;
             }
         }
-        
+
         fwrite($fh, "</urlset>\n");
         fclose($fh);
-        
+
         // Atomic replace
         if (!rename($tmp_path, $sitemap_path)) {
             @unlink($tmp_path);
             $result['message'] = 'Failed to move sitemap into place';
             return $result;
         }
-        
+
         $result['success'] = true;
         $result['count'] = $written;
         $result['message'] = "Sitemap regenerated with {$written} URLs";
-        
+
     } catch (Exception $e) {
         error_log("regenerateSitemap error: " . $e->getMessage());
         $result['message'] = $e->getMessage();
     }
-    
+
     return $result;
 }
 
 function is_banned(PDO $pdo, string $ip): bool
 {
     try {
-        $query = "SELECT COUNT(*) FROM ban_user WHERE ip = :ip";
-        $stmt = $pdo->prepare($query);
-        $stmt->execute(['ip' => $ip]);
+        // Exact addresses, and patterns such as 1.2.3.* where * stands for the rest of the address
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM ban_user WHERE ip = ? OR (ip LIKE '%*' AND ? LIKE REPLACE(ip, '*', '%'))");
+        $stmt->execute([$ip, $ip]);
         return $stmt->fetchColumn() > 0;
     } catch (PDOException $e) {
         error_log("Failed to check ban status for IP {$ip}: " . $e->getMessage());
         return false;
-    }
-}
-
-// Get a single page by its slug-like name (pages.page_name), only if active.
-function getPageByName(PDO $pdo, string $page_name): ?array
-{
-    try {
-        $stmt = $pdo->prepare("
-            SELECT id, last_date, page_name, page_title, page_content, location, nav_parent, sort_order, is_active
-            FROM pages
-            WHERE page_name = :name AND is_active = 1
-            LIMIT 1
-        ");
-        $stmt->execute(['name' => $page_name]);
-        $row = $stmt->fetch();
-        return $row ?: null;
-    } catch (PDOException $e) {
-        error_log("getPageByName failed for {$page_name}: " . $e->getMessage());
-        return null;
     }
 }
 
@@ -1229,7 +1116,7 @@ function getNavLinks(PDO $pdo, string $location): array
         } catch (PDOException $e) {
             // Table might not exist, default to showing API
         }
-        
+
         // Get all active pages that match this location or are marked for both
         $stmt = $pdo->prepare("
             SELECT id, page_name, page_title, nav_parent, sort_order, external_url
@@ -1246,12 +1133,12 @@ function getNavLinks(PDO $pdo, string $location): array
             if ($r['page_name'] === 'api' && !$api_enabled) {
                 continue;
             }
-            
+
             // Determine URL: use external_url if set, otherwise use page URL
-            $url = !empty($r['external_url']) 
-                ? $r['external_url'] 
+            $url = !empty($r['external_url'])
+                ? $r['external_url']
                 : getPageUrl((string)$r['page_name']);
-            
+
             $items[(int)$r['id']] = [
                 'id'       => (int)$r['id'],
                 'name'     => (string)$r['page_name'],
@@ -1329,25 +1216,6 @@ function renderNavListSimple(array $links, string $separator = ''): string
         return $html;
     };
     return $render($links);
-}
-
-// Fetch only the content of a page by name if active (helper for page.php).
-function getPageContentByName(PDO $pdo, string $page_name): ?array
-{
-    try {
-        $stmt = $pdo->prepare("
-            SELECT page_title, page_content, last_date
-            FROM pages
-            WHERE page_name = :name AND is_active = 1
-            LIMIT 1
-        ");
-        $stmt->execute(['name' => $page_name]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ?: null;
-    } catch (PDOException $e) {
-        error_log("getPageContentByName failed for {$page_name}: " . $e->getMessage());
-        return null;
-    }
 }
 
 /**
@@ -1456,569 +1324,12 @@ if (!function_exists('sanitize_allowlist_html')) {
         return $doc->saveHTML() ?: '';
     }
 }
-// ------------------------------------------------------------
-// Autodetect helpers (shared by highlight.php & GeSHi paths)
-// ------------------------------------------------------------
+// Language autodetection (paste_autodetect_language and helpers)
+require_once __DIR__ . '/langdetect.php';
 
-/** Stricter Markdown sniff: avoid false matches from lists-only or C/C++ code. */
-function paste_probable_markdown(string $s): bool {
-    // Strong MD signals
-    $fenced  = (bool) preg_match('/^\s*(```|~~~)\s*[a-z0-9._+-]*\s*$/mi', $s);
-    $links   = (bool) preg_match('/\[[^\]]+\]\([^)]+\)/', $s) || preg_match('/!\[[^\]]*\]\([^)]+\)/', $s);
-    $tables  = (bool) (preg_match('/^\s*\|.+\|\s*$/m', $s) &&
-                       preg_match('/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m', $s));
-    if ($fenced || $links || $tables) return true;
-
-    // ATX/Setext headings — but guard against YAML (comments with "# ..." on first lines)
-    $atx     = (bool) preg_match('/^\s*#{1,6}\s+\S/m', $s);
-    $setext  = (bool) preg_match('/^[^\r\n]+\r?\n=+\s*$/m', $s) || preg_match('/^[^\r\n]+\r?\n-+\s*$/m', $s);
-
-    // Weaker cues need at least one "markdown-only" feature
-    $bullets2   = (preg_match_all('/^\s*[-*+]\s+\S/m', $s) >= 2);
-    $blockquote = (bool) preg_match('/^\s*>\s+\S/m', $s);
-    $inlinecode = (bool) preg_match('/`[^`\r\n]+`/', $s);
-
-    // If likely YAML (lots of key: value lines), do NOT treat single "# ..." as markdown
-    $yaml_like = (preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $s) ?: 0) >= 3;
-
-    if ($yaml_like && $atx && !($fenced || $links || $tables)) {
-        // Prefer YAML in this ambiguous case
-        return false;
-    }
-
-    return ($atx || $setext) || ($bullets2 && ($blockquote || $inlinecode));
-}
-
-/** Friendly label if none is provided. */
-function paste_friendly_label(string $id): string {
-    $t = str_replace(['-', '_'], ' ', strtolower($id));
-    $t = ucwords($t);
-    $t = preg_replace('/\bSql\b/i','SQL',$t);
-    $t = preg_replace('/\bJson\b/i','JSON',$t);
-    $t = preg_replace('/\bYaml\b/i','YAML',$t);
-    $t = preg_replace('/\bXml\b/i','XML',$t);
-    return $t;
-}
-
-/** Map a detection "source" to a short UI label. */
-function paste_detect_source_label(string $src): string {
-    $map = [
-        'filename'  => 'Filename',
-        'modeline'  => 'Editor modeline',
-        'shebang'   => 'Shebang',
-        'php-tag'   => 'PHP tag',
-        'markdown'  => 'Markdown markers',
-        'hljs'      => 'Highlighter auto',
-        'auto'      => 'Highlighter auto',
-        'ensemble'  => 'Heuristics',
-        'heuristic' => 'Heuristics',
-        'explicit'  => 'Selected',
-        'fallback'  => 'Fallback',
-    ];
-    return $map[$src] ?? paste_friendly_label($src);
-}
-
-/** Synonym map used by shebangs/heuristics -> highlight ids. */
-function paste_synonyms_map(): array {
-    return [
-        // shells
-        'sh'=>'bash','bash'=>'bash','zsh'=>'bash','ksh'=>'bash','dash'=>'bash','csh'=>'bash','tcsh'=>'bash','busybox'=>'bash','fish'=>'bash',
-        // node/js/ts
-        'node'=>'javascript','nodejs'=>'javascript','deno'=>'javascript','bun'=>'javascript',
-        'ts'=>'typescript','tsx'=>'typescript','ts-node'=>'typescript','ts-node-script'=>'typescript',
-        // python
-        'python'=>'python','python2'=>'python','python3'=>'python','pypy'=>'python','pypy3'=>'python',
-        // perl/raku
-        'perl'=>'perl','perl5'=>'perl','perl6'=>'perl','raku'=>'perl',
-        // ruby
-        'ruby'=>'ruby','jruby'=>'ruby','truffleruby'=>'ruby',
-        // jvm & friends
-        'groovysh'=>'groovy','kscript'=>'kotlin',
-        // R
-        'rscript'=>'r',
-        // lua
-        'luajit'=>'lua',
-        // haskell
-        'runghc'=>'haskell','runhaskell'=>'haskell',
-        // lisp/scheme
-        'guile'=>'scheme','racket'=>'scheme','clisp'=>'lisp',
-        // erlang/elixir
-        'escript'=>'erlang','iex'=>'elixir',
-        // math / sci
-        'octave'=>'matlab',
-        // nim
-        'nim'=>'nimrod','nimscript'=>'nimrod',
-        // tcl
-        'tcl'=>'tcl','tclsh'=>'tcl','wish'=>'tcl',
-        // awk/sed
-        'awk'=>'awk','gawk'=>'awk','mawk'=>'awk','nawk'=>'awk','sed'=>'bash',
-        // powershell
-        'pwsh'=>'powershell','powershell.exe'=>'powershell',
-        // php variants
-        'php'=>'php','php-cgi'=>'php',
-        // qml tools
-        'qmlscene'=>'qml','qmlcachegen'=>'qml'
-    ];
-}
-
-/**
- * Normalize a language id to highlight.php or GeSHi id.
- * $engine: 'highlight' or 'geshi'
- */
-function paste_normalize_lang(string $id, string $engine = 'highlight', $hl = null): string {
-    global $HL_ALIAS_MAP; // set by includes/list_languages.php
-    $id0 = strtolower(trim($id));
-    if ($id0 === '') return '';
-
-    $syn = paste_synonyms_map();
-    if (isset($syn[$id0])) $id0 = $syn[$id0];
-
-    if ($engine === 'highlight') {
-        if (isset($HL_ALIAS_MAP[$id0])) $id0 = $HL_ALIAS_MAP[$id0];
-        if ($hl && method_exists($hl, 'listLanguages')) {
-            $set = array_map('strtolower', (array)$hl->listLanguages());
-            if (!in_array($id0, $set, true)) {
-                if ($id0 === 'pgsql' && in_array('sql', $set, true)) return 'sql';
-            }
-        }
-        return $id0;
-    }
-
-    // GeSHi mapping
-    static $HL_TO_GESHI = [
-        'plaintext'=>'text',
-        'text'     =>'text',
-        'xml'      =>'xml',
-        'html'     =>'html5',
-        'bash'     =>'bash',
-        'dos'      =>'dos',
-        'javascript'=>'javascript',
-        'typescript'=>'javascript',
-        'json'     =>'javascript',
-        'yaml'     =>'yaml',
-        'ini'      =>'ini',
-        'toml'     =>'ini',
-        'properties'=>'properties',
-        'php'      =>'php',
-        'python'   =>'python',
-        'ruby'     =>'ruby',
-        'perl'     =>'perl',
-        'java'     =>'java',
-        'c'        =>'c',
-        'cpp'      =>'cpp',
-        'csharp'   =>'csharp',
-        'go'       =>'go',
-        'rust'     =>'rust',
-        'kotlin'   =>'java',
-        'pgsql'    =>'postgresql',
-        'sql'      =>'sql',
-        'scss'     =>'css',
-        'less'     =>'css',
-        'markdown' =>'markdown',
-        'powershell'=>'powershell',
-        'vbnet'    =>'vbnet',
-        'objectivec'=>'objc',
-        'ocaml'    =>'ocaml',
-        'haskell'  =>'haskell',
-        'lua'      =>'lua',
-        'matlab'   =>'matlab',
-        'makefile' =>'make',
-        'nginx'    =>'nginx',
-        'apache'   =>'apache',
-        'dockerfile'=>'bash',
-        'vbscript' =>'vbscript',
-        'vbscript-html'=>'vbscript-html',
-        'vhdl'     =>'vhdl',
-        'verilog'  =>'verilog',
-        'x86asm'   =>'asm',
-        'mirc'     =>'mirc',
-        'qml'      =>'qml',
-    ];
-    return $HL_TO_GESHI[$id0] ?? 'text';
-}
-
-/** Robust shebang detection; returns *highlight* id (normalized) or null. */
-function paste_detect_shebang(string $s): ?string {
-    if (!preg_match('/^\s*#!\s*(.+)$/m', $s, $m)) return null;
-    $line = strtolower(trim($m[1]));
-    if (preg_match('/env(?:\s+-s)?\s+([^\s]+)/', $line, $em)) {
-        $prog = $em[1];
-    } else {
-        $parts = preg_split('/\s+/', $line);
-        $exe   = $parts[0] ?? '';
-        $prog  = basename($exe);
-    }
-    $prog = preg_replace('/(\.exe)?$/', '', $prog);
-    $prog = preg_replace('/\d+$/', '', $prog);
-    return paste_normalize_lang($prog, 'highlight', null);
-}
-
-/** Modeline detection (vim/emacs). Returns highlight id or null. */
-function paste_detect_modeline(string $s): ?string {
-    // Vim: "vim: set ft=python", "vi: set filetype=javascript", "vim:ft=sh"
-    if (preg_match('/\b(?:vi|vim):.*?\b(?:ft|filetype)\s*=\s*([a-z0-9._+-]+)/i', $s, $m)) {
-        return paste_normalize_lang(strtolower($m[1]), 'highlight', null);
-    }
-    // Emacs: "-*- mode: ruby -*-" or "-*- ruby -*-"
-    if (preg_match('/-\*-\s*(?:mode:\s*)?([a-z0-9._+-]+)\s*-\*-/i', $s, $m)) {
-        return paste_normalize_lang(strtolower($m[1]), 'highlight', null);
-    }
-    return null;
-}
-
-/** From file title extension. Returns highlight id or null. */
-function paste_detect_from_title_ext(?string $title, string $code): ?string {
-    if (!$title) return null;
-    $t = strtolower(trim($title));
-    // Pull last ".ext" (handles "name.tar.gz" -> gz; acceptable for our use)
-    if (!preg_match('/\.([a-z0-9_+-]+)\s*$/', $t, $m)) return null;
-    $ext = $m[1];
-
-    // Disambiguate certain extensions using content when needed
-    if ($ext === 'm') {
-        // Objective-C vs MATLAB
-        if (preg_match('/@interface|@implementation|#\s*import\s*<Foundation/i', $code)) return 'objectivec';
-        return 'matlab';
-    }
-
-    static $MAP = [
-        'php'=>'php', 'phtml'=>'php', 'php3'=>'php', 'php4'=>'php', 'php5'=>'php', 'phps'=>'php',
-        'html'=>'html','htm'=>'html','xhtml'=>'xml','xml'=>'xml',
-        'js'=>'javascript','mjs'=>'javascript','cjs'=>'javascript',
-        'ts'=>'typescript','tsx'=>'typescript','jsx'=>'javascript',
-        'json'=>'json','ndjson'=>'json',
-        'yml'=>'yaml','yaml'=>'yaml',
-        'ini'=>'ini','cfg'=>'ini','conf'=>'ini','properties'=>'properties','toml'=>'toml',
-        'md'=>'markdown','markdown'=>'markdown','mkd'=>'markdown',
-        'sh'=>'bash','bash'=>'bash','zsh'=>'bash','ksh'=>'bash','bat'=>'dos','cmd'=>'dos','ps1'=>'powershell',
-        'py'=>'python','rb'=>'ruby','pl'=>'perl','raku'=>'perl','pm'=>'perl','t'=>'perl',
-        'java'=>'java','c'=>'c','h'=>'c','cpp'=>'cpp','cc'=>'cpp','cxx'=>'cpp','hpp'=>'cpp','hh'=>'cpp','hxx'=>'cpp',
-        'cs'=>'csharp','go'=>'go','rs'=>'rust','swift'=>'swift','kt'=>'kotlin','kts'=>'kotlin',
-        'sql'=>'sql','pgsql'=>'pgsql','psql'=>'pgsql',
-        'makefile'=>'makefile','mk'=>'makefile',
-        'psh'=>'powershell',
-        'lua'=>'lua','tcl'=>'tcl','mrc'=>'mirc','qml'=>'qml',
-        'tex'=>'tex','bib'=>'bibtex',
-    ];
-    return $MAP[$ext] ?? null;
-}
-
-/** Fast PHP tag check to hard-lock PHP when present. */
-function paste_detect_php_tag(string $s): bool {
-    return (bool) preg_match('/<\?(php|=)/i', $s);
-}
-
-function paste_natural_language_score(string $code): float {
-    // Top 50 common English words (source: Oxford English Corpus; case-insensitive)
-    $commonWords = [
-        'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'have',
-        'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
-        'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she',
-        'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what',
-        'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me'
-    ];
-    
-    // Normalize text: lowercase, split into words (alphanumeric only for simplicity)
-    $lower = strtolower($code);
-    preg_match_all('/\b[a-z]+\b/', $lower, $matches);
-    $words = $matches[0] ?? [];
-    $totalWords = count($words);
-    if ($totalWords < 10) return 0.0; // Too short to judge
-    
-    $commonCount = 0;
-    foreach ($words as $w) {
-        if (in_array($w, $commonWords, true)) $commonCount++;
-    }
-    
-    return $commonCount / $totalWords;
-}
-
-/**
- * Feature extractor used by the ensemble. Fast & language-agnostic.
- * Returns an array of simple counts/ratios.
- */
-function paste_feature_extract(string $code): array {
-    $len  = max(1, strlen($code));
-    $lines = preg_split('/\R/', $code);
-    $lc   = max(1, count($lines));
-
-    // For very large code (>500KB), sample to cap regex time
-    if ($len > 500000) {
-        $code = substr($code, 0, 250000) . substr($code, -250000);
-        $len = strlen($code);
-    }
-
-    $semicolon = substr_count($code, ';');
-    $braces    = preg_match_all('/[{}]/', $code) ?: 0;
-
-    // HTML/XML-like tags (rough)
-    $tags = preg_match_all('/<\s*\/?\s*[A-Za-z!?][^>\n]*>/', $code) ?: 0;
-
-    // C/C++ preprocessor-ish
-    $has_preproc = (bool) preg_match('/^\s*#\s*(include|define|if|ifdef|ifndef|endif|pragma)\b/m', $code);
-
-    // YAML-like "key: value" lines (avoid JSON with colons)
-    $yaml_key_lines = preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $code) ?: 0;
-
-    // INI headers
-    $ini_headers = preg_match_all('/^\s*\[[^\]]+\]\s*$/m', $code) ?: 0;
-
-    // Very rough JSON sniff
-    $trim = ltrim($code);
-    $json_like = false;
-    if ($trim !== '' && ($trim[0] === '{' || $trim[0] === '[') && $len < 2000000) {
-        $tmp = json_decode($code, true);
-        $json_like = (json_last_error() === JSON_ERROR_NONE) && (is_array($tmp) || is_object($tmp));
-    }
-
-    // SQL keywords
-    $sql_kw = preg_match_all('/\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i', $code) ?: 0;
-
-    // Makefile targets & tab-indented commands
-    $make_targets = preg_match_all('/^[A-Za-z0-9_.-]+(?:\s+|)[:](?![=]).*$/m', $code) ?: 0;
-    $has_make_tab = (bool) preg_match('/^\t\S+/m', $code);
-    if (!$has_make_tab) $make_targets = 0;
-
-    // mIRC signals
-    $mirc_patterns = preg_match_all('/(^|\n)\s*on\s+[^:]+:[^:]+:/i', $code) ?: 0;
-
-    // PowerShell cues
-    $powershell_sig = preg_match_all('/(^|\n)\s*param\s*\(|\$\w+:\w+|Write-Host|Get-Process|^\s*function\s+\w+\s*\{|Begin\s*\{|Process\s*\{|End\s*\{/i', $code) ?: 0;
-
-    // TCL cues
-    $tcl_signals = preg_match_all('/\bproc\s+\w+|\bset\s+\w+|\bputs\s+|\bforeach\s+|\bswitch\s+|\bnamespace\s+|\bexpr\s*\{|(\[string\s+\w+)/i', $code) ?: 0;
-
-    // QML hints
-    $qml_hint = 0;
-    $qml_hint += preg_match_all('/(^|\n)\s*import\s+Qt[^\r\n]*/', $code) ?: 0;
-    $qml_hint += preg_match_all('/(^|\n)\s*[A-Z][A-Za-z0-9_]*\s*\{\s*$/m', $code) ?: 0;
-
-    // Assembly opcodes (for GeSHi/Highlight asm variants like 6502, armasm, z80)
-    $assembly_opcodes = preg_match_all('/\b(mov|jmp|add|sub|push|pop|lea|call|ret|int|cmp|test|ldr|str|bl|bx|movz|movk)\b/i', $code) ?: 0;
-
-    // Lisp/Scheme parens density (for lisp, scheme, clojure, racket)
-    $lisp_parens = substr_count($code, '(') + substr_count($code, ')');
-    $lisp_parens_ratio = $lisp_parens / $len;
-
-    // Fortran fixed-format (columns 1-5 label, 6 continuation, 7-72 code; for fortran)
-    $fortran_fixed = preg_match_all('/^ {0,5}\d| {6}[^ !*]/m', $code) ?: 0;
-
-    // BNF/ABNF/EBNF rules (::= or | or <rule>)
-    $bnf_rules = preg_match_all('/::=|\||<[^>]+>/', $code) ?: 0;
-
-    // GLSL shaders (for glsl)
-    $glsl_keywords = preg_match_all('/\b(gl_Position|vec[234]|mat[234]|uniform|varying|attribute|shader|fragment|vertex)\b/i', $code) ?: 0;
-
-    return [
-        'len'              => $len,
-        'lines'            => $lc,
-        'semicolon'        => $semicolon,
-        'braces'           => $braces,
-        'brace_ratio'      => $braces / $len,
-        'semicolon_ratio'  => $semicolon / $lc,
-        'tag_count'        => $tags,
-        'tag_density'      => $tags / $lc,
-        'has_preproc'      => $has_preproc,
-        'yaml_key_lines'   => $yaml_key_lines,
-        'ini_headers'      => $ini_headers,
-        'json_like'        => $json_like,
-        'sql_keywords'     => $sql_kw,
-        'make_targets'     => $make_targets,
-        'mirc_patterns'    => $mirc_patterns,
-        'powershell_sig'   => $powershell_sig,
-        'tcl_signals'      => $tcl_signals,
-        'qml_hint'         => $qml_hint,
-        'assembly_opcodes' => $assembly_opcodes,
-        'lisp_parens_ratio' => $lisp_parens_ratio,
-        'fortran_fixed'    => $fortran_fixed,
-        'bnf_rules'        => $bnf_rules,
-        'glsl_keywords'    => $glsl_keywords,
-    ];
-}
-
-/** Build a reduced autodetect allowlist for highlight.php */
-function paste_hl_autodetect_allowlist($hl, string $code, bool $allowPhp): ?array {
-    if (!$hl || !method_exists($hl, 'listLanguages')) return null;
-    $langs = (array)$hl->listLanguages();
-    $out = [];
-    foreach ($langs as $L) {
-        $id = strtolower((string)$L);
-        if ($id === 'markdown') continue;          // we render Markdown via Parsedown
-        if (!$allowPhp && $id === 'php') continue; // avoid PHP false positives when tags absent
-        $out[] = $id;
-    }
-    return $out;
-}
-
-/**
- * Build engine-specific candidate ids from generic features.
- * Keeps YAML out unless it actually looks like YAML, and avoids HTML when C/C++ preproc is present.
- */
-function paste_candidate_languages(string $engine, array $f): array {
-    $c_like    = ['cpp','c','java','csharp','go','rust','kotlin','objectivec','javascript','typescript'];
-    $scripting = ['python','ruby','perl','php','lua','tcl','javascript','typescript','bash','powershell'];
-    $data      = ['json','ini','properties','toml','sql','pgsql']; // YAML added below only on signal
-    $markup    = ['xml','html','xhtml'];
-    $build     = ['makefile','cmake','nginx','apache','dos'];
-    $misc      = ['mirc','qml','markdown', ($engine === 'highlight' ? 'plaintext' : 'text')];
-
-    $cand = [];
-
-    // Strong signals
-    if ($f['json_like'])                $cand[] = 'json';
-    if ($f['ini_headers'] > 0)          array_push($cand, 'ini', 'properties');
-    if ($f['sql_keywords'] > 0)         array_push($cand, 'sql', 'pgsql');
-    if ($f['make_targets'] > 0)         $cand[] = 'makefile';
-    if ($f['mirc_patterns'] > 0)        $cand[] = 'mirc';
-    if ($f['powershell_sig'] > 0)       $cand[] = 'powershell';
-    if ($f['tcl_signals'] > 0)          array_push($cand, 'tcl','perl');
-    if ($f['qml_hint'] > 0)             array_push($cand, 'qml','javascript');
-
-    // Markup only when it dominates and no preprocessor
-    if ($f['tag_density'] > 0.015 && !$f['has_preproc']) {
-        $cand = array_merge($cand, $markup);
-    }
-
-    // YAML only with clear YAML shape and low C-like signals
-    if ($f['yaml_key_lines'] >= 3 && $f['brace_ratio'] < 0.02 && $f['semicolon_ratio'] < 0.15) {
-        $cand[] = 'yaml';
-    }
-
-    // C-like?
-    if ($f['has_preproc'] || $f['semicolon_ratio'] >= 0.15 || $f['brace_ratio'] >= 0.02) {
-        $cand = array_merge($cand, $c_like);
-    }
-
-    // Always consider scripting & some data/build & misc
-    $cand = array_merge($cand, $scripting, $data, $build, $misc);
-
-    // Dedup & cap
-    $seen = []; $out = [];
-    foreach ($cand as $id) {
-        $id = strtolower($id);
-        if (!isset($seen[$id])) { $seen[$id] = true; $out[] = $id; }
-        if (count($out) >= 24) break;
-    }
-
-    if ($engine !== 'highlight') {
-        $mapped = [];
-        foreach ($out as $id) $mapped[] = paste_normalize_lang($id, 'geshi', null);
-        return array_values(array_unique($mapped));
-    }
-    return $out;
-}
-
-/** Simple heuristic pick for GeSHi (returns a *highlight* id). */
-function paste_pick_from_features(array $f): string {
-    if ($f['json_like']) return 'json';
-    if ($f['yaml_key_lines'] >= 3 && $f['semicolon_ratio'] < 0.15) return 'yaml';
-    if ($f['sql_keywords'] > 0) return 'sql';
-    if ($f['mirc_patterns'] > 0) return 'mirc';
-    if ($f['powershell_sig'] > 0) return 'powershell';
-    if ($f['tcl_signals'] > 0) return 'tcl';
-    if ($f['ini_headers'] > 0) return 'ini';
-    if ($f['make_targets'] > 0) return 'makefile';
-    if ($f['tag_density'] > 0.02 && !$f['has_preproc']) return 'xml';
-    if ($f['qml_hint'] > 0) return 'qml';
-    if ($f['has_preproc'] || $f['brace_ratio'] >= 0.02) return 'cpp';
-    if ($f['semicolon_ratio'] >= 0.15) return 'javascript';
-    // Assembly if opcodes present and low semicolons (for 6502, arm, z80, etc.)
-    if ($f['assembly_opcodes'] >= 5 && $f['semicolon_ratio'] < 0.1) return 'x86asm'; // or 'armasm', etc.; group as 'asm'
-    // Lisp if high parens ratio
-    if ($f['lisp_parens_ratio'] > 0.05) return 'lisp'; // or 'scheme', 'clojure'
-    // Fortran fixed-format
-    if ($f['fortran_fixed'] >= 3) return 'fortran';
-    // BNF/ABNF if rules present
-    if ($f['bnf_rules'] >= 5) return 'bnf'; // or 'abnf', 'ebnf'
-    // GLSL if keywords present
-    if ($f['glsl_keywords'] >= 3) return 'glsl';
-    return 'plaintext';
-}
-
-/**
- * One entry-point: detect language.
- * Returns: ['id' => engine id, 'label' => display, 'source' => 'filename|modeline|shebang|php-tag|markdown|hljs|heuristic|explicit|fallback']
- * $engine: 'highlight' or 'geshi'
- *
- * NOTE: Uses global $p_title (paste title) for filename extension hints.
- */
-function paste_autodetect_language(string $code, string $engine = 'highlight', $hl = null): array {
-    global $p_title;
-
-    // 0) Hard locks
-    if (paste_detect_php_tag($code)) {
-        $id = ($engine === 'geshi') ? paste_normalize_lang('php', 'geshi', null) : 'php';
-        return ['id'=>$id, 'label'=>'PHP', 'source'=>'php-tag'];
-    }
-
-    // 1) Filename extension from title
-    if ($p_title && ($extId = paste_detect_from_title_ext($p_title, $code))) {
-        $id = ($engine === 'geshi') ? paste_normalize_lang($extId, 'geshi', null) : paste_normalize_lang($extId, 'highlight', $hl);
-        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'filename'];
-    }
-
-    // 2) Shebang
-    if ($lang = paste_detect_shebang($code)) {
-        $id = ($engine === 'geshi') ? paste_normalize_lang($lang, 'geshi', null) : $lang;
-        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'shebang'];
-    }
-
-    // 3) Editor modelines
-    if ($lang = paste_detect_modeline($code)) {
-        $id = ($engine === 'geshi') ? paste_normalize_lang($lang, 'geshi', null) : $lang;
-        return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'modeline'];
-    }
-
-    // 4) Markdown quick sniff (guard against YAML-dominant text)
-    if (paste_probable_markdown($code)) {
-        // If strong YAML shape, prefer YAML over markdown
-        $yaml_keys = preg_match_all('/^\s*[A-Za-z0-9_.-]+\s*:\s+[^#\r\n]+$/m', $code) ?: 0;
-        if ($yaml_keys < 3) {
-            $id = ($engine === 'geshi') ? 'markdown' : 'markdown';
-            return ['id'=>$id, 'label'=>'Markdown', 'source'=>'markdown'];
-        }
-    }
-
-    // 5) Quick natural language check for plaintext
-    $nlScore = paste_natural_language_score($code);
-    if ($nlScore > 0.20 && strlen($code) > 100) {  // Threshold: 20% common words, min length to avoid noise
-        // Confirm no strong code signals (adjust thresholds as needed)
-        $F = paste_feature_extract($code);  // Extract features if not already
-        if ($F['semicolon_ratio'] < 0.15 && $F['brace_ratio'] < 0.02 && !$F['has_preproc'] && $F['tag_density'] < 0.01) {
-            $id = ($engine === 'highlight') ? 'plaintext' : 'text';
-            return ['id' => $id, 'label' => 'Plain Text', 'source' => 'heuristic'];
-        }
-    }
-
-    // 6) Feature-driven ensemble (no auto for 'highlight')
-    $F = paste_feature_extract($code);
-    $lang = paste_pick_from_features($F);
-    if ($lang === 'markdown') {
-        return ['id'=>'markdown', 'label'=>'Markdown', 'source'=>'heuristic'];
-    }
-    $id = paste_normalize_lang($lang, $engine, $hl);
-    if ($id === '') $id = ($engine === 'highlight' ? 'plaintext' : 'text');
-    return ['id'=>$id, 'label'=>paste_friendly_label($id), 'source'=>'heuristic'];
-}
-
-/** Comments: fetch latest (simple, no threading) */
-function getPasteComments(PDO $pdo, int $paste_id, int $limit = 50, int $offset = 0): array {
-    try {
-        $sql = "SELECT c.id, c.paste_id, c.user_id, c.username, c.body, c.created_at, c.ip
-                FROM paste_comments c
-                WHERE c.paste_id = :pid
-                ORDER BY c.created_at DESC
-                LIMIT :lim OFFSET :off";
-        $st = $pdo->prepare($sql);
-        $st->bindValue(':pid', $paste_id, PDO::PARAM_INT);
-        $st->bindValue(':lim', $limit, PDO::PARAM_INT);
-        $st->bindValue(':off', $offset, PDO::PARAM_INT);
-        $st->execute();
-        return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    } catch (PDOException $e) {
-        error_log("getPasteComments($paste_id): " . $e->getMessage());
-        return [];
-    }
+// Configs written by older installers label autodetection "experimental"
+if (($GLOBALS['geshiformats']['autodetect'] ?? '') === 'Autodetect (experimental)') {
+    $GLOBALS['geshiformats']['autodetect'] = 'Autodetect';
 }
 
 function addPasteComment(
@@ -2137,6 +1448,16 @@ function render_comment_html(string $text): string {
 // --- Fatal Errors ---
 function paste_error(string $msg, int $httpCode = 200): void
 {
+    // Endpoints that answer machines get the error as JSON
+    if (defined('PASTE_JSON_ERRORS')) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
+        if (!headers_sent()) {
+            http_response_code($httpCode);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        exit(json_encode(['success' => false, 'error' => $msg]));
+    }
+
     // Variables expected by theme/default/errors.php
     $error            = $msg;
     $notfound         = null;
@@ -2160,7 +1481,6 @@ function paste_error(string $msg, int $httpCode = 200): void
     $privatesite   = (string)($GLOBALS['privatesite'] ?? 'off');
     $noguests      = (string)($GLOBALS['noguests'] ?? 'off');
     $enablegoog    = (string)($GLOBALS['enablegoog'] ?? 'no');
-    $enablefb      = (string)($GLOBALS['enablefb'] ?? 'no');
     $hl_style      = (string)($GLOBALS['hl_style'] ?? 'hybrid.css');
     $ges_style     = (string)($GLOBALS['ges_style'] ?? '');
 
@@ -2262,10 +1582,11 @@ function paste_enable_themed_errors(): void
         $ml = ini_get('memory_limit') ?: '';
         $mlText = $ml !== '' ? " Current memory_limit in php.ini settings: $ml." : '';
 
+        $diffHint = basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'diff.php' ? ' Try unified view or download the .diff.' : '';
         if ($isOOM) {
-            $error = 'The operation needs more memory than the server allows. Try unified view or download the .diff.' . $mlText;
+            $error = 'The page needs more memory than the server allows.' . $diffHint . $mlText;
         } elseif ($isTimeout) {
-            $error = 'The operation took too long and timed out. Try unified view or downloading the .diff.';
+            $error = 'The page took too long and timed out.' . $diffHint;
         } else {
             $error = 'A fatal error occurred while rendering this page.';
         }
@@ -2276,5 +1597,24 @@ function paste_enable_themed_errors(): void
     });
 }
 
+/**
+ * Headers for pages that hold a decryption key in the URL fragment: only
+ * first-party and CDN scripts may run, and nothing may be sent elsewhere.
+ * Templates also skip ads, analytics and captcha scripts when $no_third_party is set.
+ */
+function paste_privacy_headers(): void
+{
+    header("Content-Security-Policy: default-src 'self'; "
+        . "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net cdnjs.cloudflare.com; "
+        . "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net fonts.googleapis.com; "
+        . "font-src 'self' data: cdn.jsdelivr.net fonts.gstatic.com; "
+        . "img-src 'self' blob: data: https:; media-src 'self' blob:; connect-src 'self'; "
+        . "frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'");
+    header('Referrer-Policy: no-referrer');
+}
+
 // Spam detection engine (rules, heuristics, DNSBL, StopForumSpam)
 require_once __DIR__ . '/spam.php';
+
+// Web uploads (/img) on the FILEHOST store
+require_once __DIR__ . '/img_store.php';

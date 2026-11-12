@@ -9,6 +9,8 @@
  */
 declare(strict_types=1);
 
+require_once __DIR__ . '/filecrypt.php';
+
 /** Declared MIME type -> stored extension.  Anything not listed within an
  *  accepted major type is stored as .bin and served as
  *  application/octet-stream; SVG and HTML never get served inline. */
@@ -17,7 +19,8 @@ const FILEHOST_EXT = [
     'image/webp' => 'webp', 'image/avif' => 'avif', 'image/heic' => 'heic',
     'image/bmp' => 'bmp',
     'video/mp4' => 'mp4',   'video/webm' => 'webm', 'video/quicktime' => 'mov',
-    'video/x-matroska' => 'mkv', 'video/ogg' => 'ogv',
+    'video/x-matroska' => 'mkv', 'video/ogg' => 'ogv', 'video/x-msvideo' => 'avi',
+    'video/x-m4v' => 'm4v',
     'audio/mpeg' => 'mp3',  'audio/ogg' => 'ogg',   'audio/wav' => 'wav',
     'audio/x-wav' => 'wav', 'audio/flac' => 'flac', 'audio/mp4' => 'm4a',
     'audio/webm' => 'weba', 'audio/aac' => 'aac',
@@ -98,6 +101,79 @@ function filehost_disposition_filename(string $cd): ?string
 }
 
 /**
+ * Storage directory for binaries. A relative FILEHOST_DIR is taken from the
+ * site root, so it resolves the same from every entry point.
+ */
+function filehost_storage_dir(): string
+{
+    $root = dirname(__DIR__);
+    $dir = defined('FILEHOST_DIR') ? (string)FILEHOST_DIR : $root . '/../filehost_files';
+    if ($dir === '' || ($dir[0] !== '/' && !preg_match('#^[A-Za-z]:[\\\\/]#', $dir))) {
+        $dir = $root . '/' . preg_replace('#^\./#', '', $dir);
+    }
+    return rtrim($dir, '/\\');
+}
+
+/**
+ * Stream a stored file with safe headers and single-range support, then exit.
+ */
+function filehost_send_file(string $path, string $mime, int $size, ?string $filename, bool $headOnly): never
+{
+    header('Content-Type: ' . ($mime !== '' ? $mime : 'application/octet-stream'));
+    header('X-Content-Type-Options: nosniff');
+    header('Accept-Ranges: bytes');
+    header('Cache-Control: public, max-age=86400, immutable');
+    header('Content-Security-Policy: ' . filecrypt_csp($mime));
+    header('Content-Disposition: ' . filecrypt_disposition($filename));
+
+    $start = 0;
+    $end = $size - 1;
+    $range = $_SERVER['HTTP_RANGE'] ?? '';
+    if ($range !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $range, $r) && ($r[1] !== '' || $r[2] !== '')) {
+        if ($r[1] === '') {
+            $start = max(0, $size - (int)$r[2]);
+        } else {
+            $start = (int)$r[1];
+            if ($r[2] !== '') {
+                $end = min($size - 1, (int)$r[2]);
+            }
+        }
+        if ($start > $end || $start >= $size) {
+            http_response_code(416);
+            header('Content-Range: bytes */' . $size);
+            exit;
+        }
+        http_response_code(206);
+        header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
+    } else {
+        http_response_code(200);
+    }
+    header('Content-Length: ' . ($end - $start + 1));
+    if ($headOnly) {
+        exit;
+    }
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    $fp = fopen($path, 'rb');
+    if ($fp === false) {
+        exit;
+    }
+    fseek($fp, $start);
+    $left = $end - $start + 1;
+    while ($left > 0 && !feof($fp)) {
+        $chunk = fread($fp, min(65536, $left));
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+        echo $chunk;
+        $left -= strlen($chunk);
+    }
+    fclose($fp);
+    exit;
+}
+
+/**
  * Random URL slug for a stored file, unique in filehost_files.
  */
 function filehost_new_slug(PDO $pdo, int $length = 12): string
@@ -127,23 +203,23 @@ function filehost_store_text(PDO $pdo, string $body, ?string $filename, string $
     $title = $filename ?? 'IRC upload';
     $ext = $filename ? strtolower(pathinfo($filename, PATHINFO_EXTENSION)) : '';
     $syntax = FILEHOST_SYNTAX[$ext] ?? 'text';
-    if ($syntax === 'text' && function_exists('paste_detect_shebang')) {
+    if ($syntax === 'text') {
         $syntax = paste_detect_shebang($body) ?? 'text';
     }
 
     $slug = null;
-    if (function_exists('getPasteUrlMode') && getPasteUrlMode($pdo) === 'slug') {
+    if (getPasteUrlMode($pdo) === 'slug') {
         $slug = generateUniquePasteSlug($pdo, getPasteSlugLength($pdo));
     }
     $now = date('Y-m-d H:i:s');
     $today = date('Y-m-d');
-    $expires = function_exists('paste_expiry_value') ? paste_expiry_value($expiry) : 'NULL';
+    $expires = paste_expiry_value($expiry);
 
     // Stored like web pastes: HTML-escaped, content encrypted at rest when a key is set
-    $title = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+    $title = paste_store_title($title) ?: 'IRC upload';
     $content = htmlspecialchars($body, ENT_QUOTES, 'UTF-8');
     $encrypt = '0';
-    if (defined('SECRET') && SECRET !== '' && function_exists('encrypt')) {
+    if (defined('SECRET') && SECRET !== '') {
         $content = encrypt($content, hex2bin(SECRET));
         $encrypt = '1';
     }
@@ -181,17 +257,23 @@ function filehost_store_file(string $dir, string $body, string $slug, string $ex
 }
 
 /**
- * Remove expired jti rows and expired files (a few per call; cheap enough
- * to run on every POST, or all of them from the CLI cron).
+ * Remove expired jti rows and expired IRC files (a few per call; cheap enough
+ * to run on every POST, or all of them from the CLI cron). Website uploads
+ * are swept by img_sweep().
  */
 function filehost_sweep(PDO $pdo, string $dir, int $now, int $limit = 20): void
 {
-    $pdo->prepare('DELETE FROM filehost_jti WHERE exp < ?')->execute([$now - 3600]);
-    $st = $pdo->prepare('SELECT id, slug, ext FROM filehost_files WHERE expires IS NOT NULL AND expires < FROM_UNIXTIME(?) AND paste_id IS NULL LIMIT ' . (int)$limit);
-    $st->execute([$now]);
+    try {
+        $pdo->prepare('DELETE FROM filehost_jti WHERE exp < ?')->execute([$now - 3600]);
+    } catch (PDOException $e) {
+        // filehost_jti only exists once IRC FILEHOST is set up
+    }
+    $st = $pdo->prepare('SELECT id, slug, ext FROM filehost_files WHERE expires IS NOT NULL AND expires < FROM_UNIXTIME(?) AND paste_id IS NULL AND network <> ? LIMIT ' . (int)$limit);
+    $st->execute([$now, defined('IMG_NETWORK') ? IMG_NETWORK : 'web']);
     $del = $pdo->prepare('DELETE FROM filehost_files WHERE id = ?');
     foreach ($st->fetchAll() as $row) {
         @unlink($dir . '/' . $row['slug'] . '.' . $row['ext']);
+        @unlink($dir . '/' . $row['slug'] . '.enc');
         $del->execute([$row['id']]);
     }
 }

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste Installer $v3.4 https://github.com/boxlabss/PASTE
+ * Paste Installer https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,7 +9,7 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -49,22 +49,41 @@ if (!empty($missing_required)) {
     exit;
 }
 
-// Sanitize and validate POST data
-$dbhost     = isset($_POST['data_host']) ? filter_var(trim($_POST['data_host']), FILTER_SANITIZE_SPECIAL_CHARS) : '';
-$dbname     = isset($_POST['data_name']) ? filter_var(trim($_POST['data_name']), FILTER_SANITIZE_SPECIAL_CHARS) : '';
-$dbuser     = isset($_POST['data_user']) ? filter_var(trim($_POST['data_user']), FILTER_SANITIZE_SPECIAL_CHARS) : '';
-$dbpassword = isset($_POST['data_pass']) ? (string)$_POST['data_pass'] : ''; // Password may contain special chars
+// Database details are used exactly as entered; config.php is written with var_export
+$dbhost     = trim((string)($_POST['data_host'] ?? ''));
+$dbname     = trim((string)($_POST['data_name'] ?? ''));
+$dbuser     = trim((string)($_POST['data_user'] ?? ''));
+$dbpassword = (string)($_POST['data_pass'] ?? '');
 
 $enablegoog = (isset($_POST['enablegoog']) && $_POST['enablegoog'] === 'yes') ? 'yes' : 'no';
-$enablefb   = (isset($_POST['enablefb'])   && $_POST['enablefb']   === 'yes') ? 'yes' : 'no';
 $enablesmtp = (isset($_POST['enablesmtp']) && $_POST['enablesmtp'] === 'yes') ? 'yes' : 'no';
 
-// Validate database name (alphanumeric and underscore only)
-if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbname)) {
+$img_choice = in_array($_POST['img_enabled'] ?? '', ['yes', 'no', 'keep'], true) ? $_POST['img_enabled'] : 'keep';
+$img_dir_in = trim((string)($_POST['img_dir'] ?? ''));
+
+require_once __DIR__ . '/lib.php';
+
+// An existing site, or a config.php whose database cannot be checked, needs an admin sign-in first
+installer_session_start();
+$existing = installer_existing('../config.php');
+if ($existing['locked'] && !installer_signed_in()) {
     ob_end_clean();
-    error_log("configure.php: Invalid database name: $dbname");
-    echo json_encode(['status' => 'error', 'message' => 'Database name must be alphanumeric with underscores only.']);
+    http_response_code(403);
+    echo json_encode(['status' => 'error', 'message' => installer_locked_message($existing)]);
     exit;
+}
+
+if (!preg_match('/^[A-Za-z0-9_$-]{1,64}$/', $dbname)) {
+    ob_end_clean();
+    echo json_encode(['status' => 'error', 'message' => 'The database name can only contain letters, numbers, underscores, hyphens and $.']);
+    exit;
+}
+foreach (['host' => $dbhost, 'user' => $dbuser] as $field => $value) {
+    if (preg_match('/[\x00-\x1F\x7F]/', $value)) {
+        ob_end_clean();
+        echo json_encode(['status' => 'error', 'message' => "The database $field contains a control character such as a line break. Check it and try again."]);
+        exit;
+    }
 }
 
 if (empty($dbhost) || empty($dbname) || empty($dbuser)) {
@@ -82,7 +101,6 @@ try {
         PDO::ATTR_EMULATE_PREPARES   => false,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
-    error_log("configure.php: Database connection successful");
 } catch (PDOException $e) {
     ob_end_clean();
     error_log("configure.php: Database connection failed: " . $e->getMessage());
@@ -96,7 +114,7 @@ $host      = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'];
 $base_path = rtrim(dirname($_SERVER['SCRIPT_NAME'], 2), '/\\'); // Adjust for /install directory
 $baseurl   = $protocol . $host . ($base_path ? $base_path . '/' : '/');
 $redirect_uri  = $baseurl . 'oauth/google.php';
-$https_warning = ($enablegoog === 'yes' || $enablefb === 'yes') && $protocol === 'http://' ? 'Warning: OAuth is enabled without HTTPS. This is insecure and may cause issues with OAuth providers.' : '';
+$https_warning = $enablegoog === 'yes' && $protocol === 'http://' ? 'Warning: OAuth is enabled without HTTPS. This is insecure and may cause issues with OAuth providers.' : '';
 
 // --- File Permission Check for config.php and its directory ---
 $config_file = '../config.php';
@@ -143,6 +161,9 @@ $existing_comments_on_protected = false;
 $existing_version = null;
 $is_upgrade = false;
 
+// FILEHOST_* and PASTE_* defines to carry over (IRC FILEHOST, upload folder, debug switches)
+$preserved_defines = [];
+
 // OAuth settings to preserve
 $existing_g_client_id = '';
 $existing_g_client_secret = '';
@@ -152,12 +173,11 @@ $existing_g_application_name = 'Paste';
 if (file_exists($config_file)) {
     // Read existing config to preserve settings
     $existing_content = @file_get_contents($config_file);
-    error_log("configure.php: Found existing config.php, length: " . ($existing_content !== false ? strlen($existing_content) : 'read failed'));
     if ($existing_content !== false) {
         // Extract version
         if (preg_match('/\$currentversion\s*=\s*["\']?([0-9.]+)["\']?/', $existing_content, $m)) {
-            $existing_version = (float)$m[1];
-            if ($existing_version < 3.4) {
+            $existing_version = $m[1];
+            if (version_compare($existing_version, PASTE_VERSION, '<')) {
                 $is_upgrade = true;
             }
         }
@@ -165,17 +185,14 @@ if (file_exists($config_file)) {
         // Supports: $sec_key = "abc123"; or $sec_key = 'abc123'; or $sec_key = abc123;
         if (preg_match('/\$sec_key\s*=\s*["\']?([a-f0-9]{64})["\']?\s*;/', $existing_content, $m)) {
             $existing_sec_key = $m[1];
-            error_log("configure.php: Preserving existing sec_key: " . substr($m[1], 0, 8) . "...");
         } elseif (preg_match("/define\s*\(\s*['\"]SECRET['\"]\s*,\s*['\"]([a-f0-9]{64})['\"]\s*\)/", $existing_content, $m)) {
             // Fallback: try to get from define('SECRET', 'xxx')
             $existing_sec_key = $m[1];
-            error_log("configure.php: Preserving existing sec_key from SECRET define: " . substr($m[1], 0, 8) . "...");
         }
         // Extract mod_rewrite
         // Supports: $mod_rewrite = "1"; or $mod_rewrite = '1'; or $mod_rewrite = 1;
         if (preg_match('/\$mod_rewrite\s*=\s*["\']?([01])["\']?\s*;/', $existing_content, $m)) {
             $existing_mod_rewrite = $m[1];
-            error_log("configure.php: Preserving existing mod_rewrite: " . $m[1]);
         }
         // Extract highlighter
         if (preg_match('/\$highlighter\s*=.*["\']?(highlight|geshi)["\']?/', $existing_content, $m)) {
@@ -199,27 +216,20 @@ if (file_exists($config_file)) {
         // Format: define('G_CLIENT_ID', 'value');
         if (preg_match("/define\('G_CLIENT_ID',\s*'([^']*)'\)/", $existing_content, $m)) {
             $existing_g_client_id = $m[1];
-            error_log("configure.php: Preserving existing G_CLIENT_ID: " . (strlen($m[1]) > 0 ? substr($m[1], 0, 15) . "..." : "(empty)"));
         }
         if (preg_match("/define\('G_CLIENT_SECRET',\s*'([^']*)'\)/", $existing_content, $m)) {
             $existing_g_client_secret = $m[1];
-            error_log("configure.php: Preserving existing G_CLIENT_SECRET: " . (strlen($m[1]) > 0 ? "***" : "(empty)"));
         }
         if (preg_match("/define\('G_REDIRECT_URI',\s*'([^']*)'\)/", $existing_content, $m)) {
             $existing_g_redirect_uri = $m[1];
-            error_log("configure.php: Preserving existing G_REDIRECT_URI: " . $m[1]);
         }
         if (preg_match("/define\('G_APPLICATION_NAME',\s*'([^']*)'\)/", $existing_content, $m)) {
             $existing_g_application_name = $m[1];
-            error_log("configure.php: Preserving existing G_APPLICATION_NAME: " . $m[1]);
         }
-        
-        // Log summary of what was preserved
-        error_log("configure.php: Extraction summary - sec_key: " . ($existing_sec_key !== null ? 'YES' : 'NO') . 
-                  ", mod_rewrite: $existing_mod_rewrite, version: " . ($existing_version ?? 'unknown') .
-                  ", g_client_id: " . (!empty($existing_g_client_id) ? 'YES' : 'NO'));
+
+        $preserved_defines = installer_config_defines($existing_content, ['FILEHOST_', 'PASTE_']);
     }
-    
+
     if (!is_writable($config_file)) {
         ob_end_clean();
         error_log("configure.php: config.php exists but is not writable (owner: {$owner_name($config_file)}, group: {$group_name($config_file)}, perms: {$fmt_perms($config_file)})");
@@ -269,11 +279,33 @@ $g_client_secret = $existing_g_client_secret;
 $g_redirect_uri = $existing_g_redirect_uri ?: $redirect_uri;
 $g_application_name = $existing_g_application_name;
 
+// Upload storage folder (FILEHOST_DIR)
+$upload_notes = [];
+if ($img_choice === 'yes' && $img_dir_in !== '') {
+    $upload_define = installer_upload_dir_define($img_dir_in, $web_user, $upload_notes);
+    if ($upload_define === null) {
+        ob_end_clean();
+        echo json_encode(['status' => 'error', 'message' => implode('<br>', $upload_notes)]);
+        exit;
+    }
+    $preserved_defines['FILEHOST_DIR'] = $upload_define;
+}
+$version_php = installer_version_literal(PASTE_VERSION);
+$defines_block = $preserved_defines
+    ? implode("\n", $preserved_defines)
+    : "// define('FILEHOST_DIR', '/path/outside/the/web/root/filehost_files');";
+
+// Database settings as PHP literals, so quotes and $ in passwords stay intact
+$dbhost_php     = var_export($dbhost, true);
+$dbuser_php     = var_export($dbuser, true);
+$dbpassword_php = var_export($dbpassword, true);
+$dbname_php     = var_export($dbname, true);
+
 // Build config.php content
 $config_content = <<<EOD
 <?php
 /*
- * Paste \$v3.4 2025/02/01 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -282,18 +314,17 @@ $config_content = <<<EOD
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
 \$devmode = 0; // Only enabled for demo site
-\$currentversion = 3.4;
+\$currentversion = $version_php;
 \$pastelimit = "10"; // 10 MB
 
 // OAuth settings (for signups)
-\$enablefb = "$enablefb";
 \$enablegoog = "$enablegoog";
 \$enablesmtp = "$enablesmtp";
 
@@ -307,10 +338,10 @@ define('G_SCOPES', [
 ]);
 
 // Database information
-\$dbhost = "$dbhost";
-\$dbuser = "$dbuser";
-\$dbpassword = "$dbpassword";
-\$dbname = "$dbname";
+\$dbhost = $dbhost_php;
+\$dbuser = $dbuser_php;
+\$dbpassword = $dbpassword_php;
+\$dbname = $dbname_php;
 
 // Secret key for encryption
 \$sec_key = "$sec_key";
@@ -334,6 +365,9 @@ define('SECRET', \$sec_key);
 \$comments_require_login    = $comments_require_login_str;   // if false, guests can comment
 \$comments_on_protected     = $comments_on_protected_str;  // allow/show comments on password-protected pastes
 
+// Upload storage (/img and FILEHOST); keep it outside the web root. See docs/IMG.md and docs/FILEHOST.md
+$defines_block
+
 /**
  * Build the list of selectable formats
  * - When using highlight.php, we get the json language files from includes/Highlight/languages
@@ -349,13 +383,25 @@ if (\$highlighter === 'highlight') {
     \$HL_ALIAS_MAP = highlight_alias_map(\$langs);      // alias => id
     \$popular_formats = paste_popular_formats_highlight();
 } else {
-    \$geshiformats = ['autodetect' => 'Autodetect (experimental)', 'markdown' => 'Markdown', 'text' => 'Plain Text']
+    \$geshiformats = ['autodetect' => 'Autodetect', 'markdown' => 'Markdown', 'text' => 'Plain Text']
                   + geshi_language_map();
     \$HL_ALIAS_MAP = geshi_alias_map(\$geshiformats);   // alias => id
     \$popular_formats = paste_popular_formats_geshi();
 }
 ?>
 EOD;
+
+// Refuse to write a config.php that would not parse
+$parse_error = null;
+if (!installer_php_parses($config_content, $parse_error)) {
+    ob_end_clean();
+    error_log('configure.php: generated config.php does not parse: ' . $parse_error);
+    echo json_encode([
+        'status'  => 'error',
+        'message' => 'The new config.php would not be valid PHP (' . htmlspecialchars((string)$parse_error, ENT_QUOTES, 'UTF-8') . '). config.php was not changed.'
+    ]);
+    exit;
+}
 
 // Write config.php
 if (file_put_contents($config_file, $config_content, LOCK_EX) === false) {
@@ -372,19 +418,30 @@ if (file_put_contents($config_file, $config_content, LOCK_EX) === false) {
 
 // Set config.php permissions (owner read/write only)
 @chmod($config_file, 0600);
-error_log("configure.php: Successfully wrote config.php");
+installer_forget_cached($config_file);
+$_SESSION['installer_configured_until'] = time() + 3600;
 
 // Prepare success message
 $success_message = '';
 if ($is_upgrade) {
-    $success_message .= '<strong>Upgrade detected!</strong> Upgrading from v' . $existing_version . ' to v3.4.<br>';
+    $success_message .= '<strong>Upgrade detected!</strong> Upgrading from v' . htmlspecialchars((string)$existing_version, ENT_QUOTES, 'UTF-8') . ' to v' . PASTE_VERSION . '.<br>';
     if ($existing_sec_key !== null) {
         $success_message .= 'Your encryption key has been preserved (existing pastes will remain readable).<br>';
     }
     $success_message .= 'Your settings (mod_rewrite, highlighter, comments) have been preserved.<br><br>';
 }
 $success_message .= 'Configuration saved successfully.<br>';
-if ($enablegoog === 'yes' || $enablefb === 'yes') {
+$kept = array_diff(array_keys($preserved_defines), $img_choice === 'yes' && $img_dir_in !== '' ? ['FILEHOST_DIR'] : []);
+if ($kept) {
+    $success_message .= 'Kept from your previous config.php: <code>' . htmlspecialchars(implode(', ', $kept), ENT_QUOTES, 'UTF-8') . '</code><br>';
+}
+if ($img_choice === 'yes') {
+    $success_message .= 'Image and video uploads will be turned on in the next step.<br>';
+    foreach ($upload_notes as $note) {
+        $success_message .= $note . '<br>';
+    }
+}
+if ($enablegoog === 'yes') {
     $success_message .= 'Install OAuth dependencies: <code>cd oauth && composer require google/apiclient:^2.12 league/oauth2-client</code><br>Ensure HTTPS is enabled for secure OAuth redirects.';
 }
 if ($enablesmtp === 'yes') {

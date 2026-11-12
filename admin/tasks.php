@@ -9,21 +9,22 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 $date = date('Y-m-d H:i:s'); // Use DATETIME format for database
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('tasks');
 
 // Check session and validate admin
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
-    error_log("tasks.php: Session validation failed - admin_login or admin_id not set. Session: " . json_encode($_SESSION));
     header("Location: ../index.php");
     exit();
 }
@@ -62,52 +63,61 @@ try {
     $msg = '';
     $msg_type = 'info';
 
-	if (isset($_GET['expired'])) {
-		try {
-			$pdo->beginTransaction();
+    // Tasks run only from this page's buttons, which carry the form token
+    $taskKeys = ['expired', 'all_pastes', 'not_verified', 'admin_history', 'clear_stats', 'clear_view_logs',
+                 'clear_ipbans', 'clear_pages', 'delete_all_users', 'clear_mail_logs'];
+    if (array_intersect($taskKeys, array_keys($_GET)) && !admin_csrf_ok()) {
+        foreach ($taskKeys as $k) unset($_GET[$k]);
+        $msg = 'That link has expired. Use the Run buttons on this page.';
+        $msg_type = 'danger';
+    }
 
-			// Only fetch rows that could possibly expire (not NULL and not SELF)
-			$stmt = $pdo->query("
-				SELECT id, expiry
-				  FROM pastes
-				 WHERE expiry IS NOT NULL
-				   AND expiry != 'SELF'
-			");
-			$pastes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (isset($_GET['expired'])) {
+        try {
+            $pdo->beginTransaction();
 
-			$now = time();
+            // Only fetch rows that could possibly expire (not NULL and not SELF)
+            $stmt = $pdo->query("
+                SELECT id, expiry
+                  FROM pastes
+                 WHERE expiry IS NOT NULL
+                   AND expiry != 'SELF'
+            ");
+            $pastes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-			foreach ($pastes as $row) {
-				$raw = isset($row['expiry']) ? trim((string)$row['expiry']) : '';
-				$id  = (int)$row['id'];
+            $now = time();
 
-				// Skip empties
-				if ($raw === '') {
-					continue;
-				}
+            foreach ($pastes as $row) {
+                $raw = isset($row['expiry']) ? trim((string)$row['expiry']) : '';
+                $id  = (int)$row['id'];
 
-				// Parse expiry strictly; if parsing fails, DON'T delete
-				$ts = strtotime($raw);
-				if ($ts === false) {
-					continue;
-				}
+                // Skip empties
+                if ($raw === '') {
+                    continue;
+                }
 
-				// Delete only if the parsed time is actually in the past
-				if ($ts < $now) {
-					$pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$id]);
-					$pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$id]);
-				}
-			}
+                // Parse expiry strictly; if parsing fails, DON'T delete
+                $ts = strtotime($raw);
+                if ($ts === false) {
+                    continue;
+                }
 
-			$pdo->commit();
-			$msg = 'All expired pastes and their view logs have been deleted.';
-			$msg_type = 'success';
-		} catch (PDOException $e) {
-			$pdo->rollBack();
-			$msg = 'Error deleting expired pastes: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
-			$msg_type = 'danger';
-		}
-	}
+                // Delete only if the parsed time is actually in the past
+                if ($ts < $now) {
+                    $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$id]);
+                    $pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$id]);
+                }
+            }
+
+            $pdo->commit();
+            $msg = 'All expired pastes and their view logs have been deleted.';
+            $msg_type = 'success';
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            $msg = 'Error deleting expired pastes: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+            $msg_type = 'danger';
+        }
+    }
 
     if (isset($_GET['all_pastes'])) {
         try {
@@ -334,18 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('tasks.php'); ?>
     </div>
   </div>
 </div>
@@ -356,18 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('tasks.php'); ?>
         </div>
       </div>
     </div>
@@ -389,16 +377,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr><th>Task</th><th>Action</th></tr>
               </thead>
               <tbody>
-                <tr><td>Delete All Expired Pastes</td><td><a href="?expired" class="btn btn-secondary btn-sm task-expired">Run</a></td></tr>
-                <tr><td>Delete All Pastes</td><td><a href="?all_pastes" class="btn btn-danger btn-sm task-all-pastes">Run</a></td></tr>
-                <tr><td>Delete Unverified Accounts</td><td><a href="?not_verified" class="btn btn-warning btn-sm task-not-verified">Run</a></td></tr>
-                <tr><td>Clear Admin History</td><td><a href="?admin_history" class="btn btn-info btn-sm task-admin-history">Run</a></td></tr>
-                <tr><td>Clear Statistics and Visitor IPs</td><td><a href="?clear_stats" class="btn btn-info btn-sm task-clear-stats">Run</a></td></tr>
-                <tr><td>Clear Paste View Logs and Visitor IPs</td><td><a href="?clear_view_logs" class="btn btn-info btn-sm task-clear-view-logs">Run</a></td></tr>
-                <tr><td>Clear All IP Bans</td><td><a href="?clear_ipbans" class="btn btn-info btn-sm task-clear-ipbans">Run</a></td></tr>
-                <tr><td>Delete All Pages</td><td><a href="?clear_pages" class="btn btn-danger btn-sm task-clear-pages">Run</a></td></tr>
-                <tr><td>Delete All Users</td><td><a href="?delete_all_users" class="btn btn-danger btn-sm task-delete-all-users">Run</a></td></tr>
-                <tr><td>Clear All Mail Logs</td><td><a href="?clear_mail_logs" class="btn btn-info btn-sm task-clear-mail-logs">Run</a></td></tr>
+                <tr><td>Delete All Expired Pastes</td><td><a href="?expired&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-secondary btn-sm task-expired">Run</a></td></tr>
+                <tr><td>Delete All Pastes</td><td><a href="?all_pastes&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-danger btn-sm task-all-pastes">Run</a></td></tr>
+                <tr><td>Delete Unverified Accounts</td><td><a href="?not_verified&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-warning btn-sm task-not-verified">Run</a></td></tr>
+                <tr><td>Clear Admin History</td><td><a href="?admin_history&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-info btn-sm task-admin-history">Run</a></td></tr>
+                <tr><td>Clear Statistics and Visitor IPs</td><td><a href="?clear_stats&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-info btn-sm task-clear-stats">Run</a></td></tr>
+                <tr><td>Clear Paste View Logs and Visitor IPs</td><td><a href="?clear_view_logs&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-info btn-sm task-clear-view-logs">Run</a></td></tr>
+                <tr><td>Clear All IP Bans</td><td><a href="?clear_ipbans&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-info btn-sm task-clear-ipbans">Run</a></td></tr>
+                <tr><td>Delete All Pages</td><td><a href="?clear_pages&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-danger btn-sm task-clear-pages">Run</a></td></tr>
+                <tr><td>Delete All Users</td><td><a href="?delete_all_users&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-danger btn-sm task-delete-all-users">Run</a></td></tr>
+                <tr><td>Clear All Mail Logs</td><td><a href="?clear_mail_logs&amp;csrf_token=<?php echo urlencode(admin_csrf_token()); ?>" onclick="return confirm('Run this task? It cannot be undone.');" class="btn btn-info btn-sm task-clear-mail-logs">Run</a></td></tr>
               </tbody>
             </table>
           </div>
@@ -413,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 </body>
 </html>
 <?php $pdo = null; ?>

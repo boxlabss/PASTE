@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.4 2026/02/04 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -33,14 +33,17 @@
                 'UTF-8'
             ); ?>" target="_self"><?php echo htmlspecialchars($lang['mypastes'] ?? 'My Pastes', ENT_QUOTES, 'UTF-8'); ?></a>
           </div>
-          
+
           <div class="card-body p-4">
-            <?php 
-            if ($_SERVER['REQUEST_METHOD'] === 'POST') {	
+            <?php
+            if (!empty($notice)) {
+              echo '<div class="alert alert-info text-center rounded-3">' . htmlspecialchars($notice, ENT_QUOTES, 'UTF-8') . '</div>';
+            }
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               if (!empty($success)) {
-                echo '<div class="alert alert-success text-center rounded-3">' . htmlspecialchars($success, ENT_QUOTES, 'UTF-8') . '</div>'; 
+                echo '<div class="alert alert-success text-center rounded-3">' . htmlspecialchars($success, ENT_QUOTES, 'UTF-8') . '</div>';
               } elseif (!empty($error)) {
-                echo '<div class="alert alert-danger text-center rounded-3">' . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . '</div>'; 
+                echo '<div class="alert alert-danger text-center rounded-3">' . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . '</div>';
               }
             }
             ?>
@@ -80,20 +83,20 @@
 
                     <i class="bi bi-person position-absolute" style="right: 12px; top: 50%; color: #6c757d; font-size: 1.1rem;"></i>
                   </div>
-					<div class="mb-4 position-relative">
-					  <label class="form-label text-light">
-						<?php echo htmlspecialchars($lang['fullname'] ?? 'Full Name', ENT_QUOTES, 'UTF-8'); ?>
-					  </label>
-					  <input
-						type="text"
-						class="form-control bg-dark text-light pe-5"
-						name="full"
-						value="<?php echo htmlspecialchars($user_full_name ?? '', ENT_QUOTES, 'UTF-8'); ?>"
-						placeholder="<?php echo htmlspecialchars($lang['fullname'] ?? 'Full Name', ENT_QUOTES, 'UTF-8'); ?>"
-					  >
-					  <i class="bi bi-person-badge position-absolute"
-						 style="right: 12px; top: 50%; color: #6c757d; font-size: 1.1rem;"></i>
-					</div>
+                    <div class="mb-4 position-relative">
+                      <label class="form-label text-light">
+                        <?php echo htmlspecialchars($lang['fullname'] ?? 'Full Name', ENT_QUOTES, 'UTF-8'); ?>
+                      </label>
+                      <input
+                        type="text"
+                        class="form-control bg-dark text-light pe-5"
+                        name="full"
+                        value="<?php echo htmlspecialchars($user_full_name ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                        placeholder="<?php echo htmlspecialchars($lang['fullname'] ?? 'Full Name', ENT_QUOTES, 'UTF-8'); ?>"
+                      >
+                      <i class="bi bi-person-badge position-absolute"
+                         style="right: 12px; top: 50%; color: #6c757d; font-size: 1.1rem;"></i>
+                    </div>
                   <div class="mb-4 position-relative">
                     <label class="form-label text-light"><?php echo htmlspecialchars($lang['email'] ?? 'Email', ENT_QUOTES, 'UTF-8'); ?></label>
                     <input
@@ -106,14 +109,18 @@
                     <i class="bi bi-person position-absolute" style="right: 12px; top: 50%; color: #6c757d; font-size: 1.1rem;"></i>
                   </div>
 
+                  <?php if (($user_password ?? '') === ''): ?>
+                  <h5 class="text-center mb-4 text-light"><?php echo htmlspecialchars($lang['setpwd'] ?? 'Set a Password', ENT_QUOTES, 'UTF-8'); ?></h5>
+                  <?php else: ?>
                   <h5 class="text-center mb-4 text-light"><?php echo htmlspecialchars($lang['chgpwd'] ?? 'Change Password', ENT_QUOTES, 'UTF-8'); ?></h5>
-                  
+
                   <div class="mb-4 position-relative">
                     <label class="form-label text-light"><?php echo htmlspecialchars($lang['curpwd'] ?? 'Current Password', ENT_QUOTES, 'UTF-8'); ?></label>
                     <input type="password" class="form-control bg-dark text-light pe-5" name="old_password" placeholder="<?php echo htmlspecialchars($lang['curpwd'] ?? 'Current Password', ENT_QUOTES, 'UTF-8'); ?>">
                     <i class="bi bi-key position-absolute password-toggle" style="right: 12px; top: 50%; color: #6c757d; font-size: 1.1rem; cursor: pointer;"></i>
                   </div>
-                  
+                  <?php endif; ?>
+
                   <div class="mb-4 position-relative">
                     <label class="form-label text-light"><?php echo htmlspecialchars($lang['newpwd'] ?? 'New Password', ENT_QUOTES, 'UTF-8'); ?></label>
                     <input type="password" class="form-control bg-dark text-light pe-5" name="password" placeholder="<?php echo htmlspecialchars($lang['newpwd'] ?? 'New Password', ENT_QUOTES, 'UTF-8'); ?>">
@@ -140,10 +147,10 @@
                 <hr class="my-4">
                 <h5 class="text-light mb-3"><i class="bi bi-key"></i> API Keys</h5>
                 <p class="text-muted small mb-3">
-                  API keys allow you to create pastes programmatically. 
+                  API keys let scripts and apps use your account: pastes, uploads or both.
                   <a href="<?php echo htmlspecialchars($baseurl . 'api-docs.php', ENT_QUOTES, 'UTF-8'); ?>" target="_blank" class="text-info">View API documentation</a>
                 </p>
-                
+
                 <?php if (!empty($newly_created_key)): ?>
                   <div class="alert alert-success">
                     <strong><i class="bi bi-check-circle"></i> <?php echo htmlspecialchars($success ?? 'API key ready!', ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -165,7 +172,7 @@
                 <?php elseif (!empty($success) && strpos($success, 'API') !== false): ?>
                   <div class="alert alert-success"><?php echo htmlspecialchars($success, ENT_QUOTES, 'UTF-8'); ?></div>
                 <?php endif; ?>
-                
+
                 <?php if (!empty($user_api_keys)): ?>
                   <div class="table-responsive mb-3">
                     <table class="table table-dark table-hover">
@@ -173,6 +180,7 @@
                         <tr>
                           <th>Name</th>
                           <th>Key</th>
+                          <th>Can</th>
                           <th>Created</th>
                           <th>Last Used</th>
                           <th>Actions</th>
@@ -182,7 +190,8 @@
                         <?php foreach ($user_api_keys as $key): ?>
                           <tr>
                             <td><?php echo htmlspecialchars($key['name'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><code class="text-info"><?php echo htmlspecialchars($key['key_prefix'], ENT_QUOTES, 'UTF-8'); ?>...</code></td>
+                            <td><code class="text-info"><?php echo htmlspecialchars((string)$key['key_prefix'], ENT_QUOTES, 'UTF-8'); ?>...</code></td>
+                            <td class="small"><?php echo htmlspecialchars(api_scope_summary($key['scopes']), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td class="small"><?php echo htmlspecialchars(date('M j, Y', strtotime($key['created_at'])), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td class="small"><?php echo $key['last_used_at'] ? htmlspecialchars(date('M j, Y H:i', strtotime($key['last_used_at'])), ENT_QUOTES, 'UTF-8') : '<span class="text-muted">Never</span>'; ?></td>
                             <td>
@@ -205,14 +214,28 @@
                 <?php else: ?>
                   <p class="text-muted">No API keys yet. Create one to start using the API.</p>
                 <?php endif; ?>
-                
+
                 <?php if (count($user_api_keys) < $api_keys_per_user): ?>
                   <form method="post" class="row g-2 align-items-end mt-3">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="col-auto">
-                      <label class="form-label text-light">Key Name</label>
-                      <input type="text" name="key_name" class="form-control bg-dark text-light" placeholder="My Script" maxlength="100">
+                      <label class="form-label text-light" for="key_name">Key Name</label>
+                      <input type="text" name="key_name" id="key_name" class="form-control bg-dark text-light" placeholder="My Script" maxlength="100">
                     </div>
+                    <?php if (!empty($api_scopes_ready)): ?>
+                    <div class="col-12">
+                      <span class="form-label text-light d-block">This key can</span>
+                      <?php foreach (API_SCOPES as $scopeKey => [$scopeLabel, $scopeAbout]): ?>
+                        <div class="form-check form-check-inline">
+                          <input class="form-check-input" type="checkbox" name="scopes[]" value="<?php echo htmlspecialchars($scopeKey, ENT_QUOTES, 'UTF-8'); ?>" id="scope_<?php echo htmlspecialchars($scopeKey, ENT_QUOTES, 'UTF-8'); ?>" checked>
+                          <label class="form-check-label text-light" for="scope_<?php echo htmlspecialchars($scopeKey, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($scopeAbout, ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo htmlspecialchars($scopeLabel, ENT_QUOTES, 'UTF-8'); ?> <span class="text-muted small">(<?php echo htmlspecialchars($scopeAbout, ENT_QUOTES, 'UTF-8'); ?>)</span>
+                          </label>
+                        </div>
+                      <?php endforeach; ?>
+                      <div class="form-text">For a script that only uploads images, untick Read and Pastes, so the key cannot read or delete your pastes.</div>
+                    </div>
+                    <?php endif; ?>
                     <div class="col-auto">
                       <button type="submit" name="create_api_key" value="1" class="btn btn-outline-success">
                         <i class="bi bi-plus"></i> Create API Key
@@ -249,7 +272,7 @@
 
                         <div class="modal-body">
                           <p class="mb-2">
-                            <?php echo htmlspecialchars($lang['deletewarn'] ?? 'This will permanently remove your account and all your pastes. This action cannot be undone.', ENT_QUOTES, 'UTF-8'); ?>
+                            <?php echo htmlspecialchars($lang['deletewarn'] ?? 'This will permanently remove your account and all your pastes, comments, uploads and albums. This action cannot be undone.', ENT_QUOTES, 'UTF-8'); ?>
                           </p>
                           <p class="mb-3">
                             <?php echo htmlspecialchars($lang['typedelete'] ?? 'Type DELETE to confirm.', ENT_QUOTES, 'UTF-8'); ?>

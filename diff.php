@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/includes/session.php';
@@ -41,20 +41,11 @@ date_default_timezone_set('UTC');
  * Data access
  * =======================================================*/
 
-// Load paste by ID or slug, decrypting as needed. Returns ['id','slug','title','content','code'] or null
+// Load a paste the visitor may read by ID or slug, decrypting as needed. Returns ['id','slug','title','content','code'] or null
 function load_paste(PDO $pdo, $identifier): ?array {
     try {
-        // Use the shared lookup function if available
-        if (function_exists('getPasteByIdentifier')) {
-            $r = getPasteByIdentifier($pdo, (string)$identifier);
-        } else {
-            // Fallback for numeric ID
-            $st = $pdo->prepare("SELECT id,slug,title,content,code,encrypt FROM pastes WHERE id=? LIMIT 1");
-            $st->execute([(int)$identifier]);
-            $r = $st->fetch();
-        }
-        
-        if (!$r) return null;
+        $r = paste_find_linked($pdo, (string)$identifier);
+        if (!$r || !paste_readable_elsewhere($r, (string)($_SESSION['username'] ?? ''))) return null;
 
         $id      = (int)$r['id'];
         $slug    = (string)($r['slug'] ?? '');
@@ -610,11 +601,7 @@ function compute_change_counts(array $ops): array {
 }
 
 /* =========================================================
- * Server-side merge (moved off the client)
- *
- * The diff opcodes already carry exact original line indices, so applying a
- * hunk is a pure array splice — no DOM line-number reading, and no chance of
- * an earlier merge shifting a later hunk to the wrong lines.
+ * Merging hunks: opcodes carry original line indices, so a merge is an array splice
  * =======================================================*/
 
 /** Group opcodes into hunks carrying original-array offsets/lengths. */
@@ -737,7 +724,7 @@ try {
         $si = $stmt->fetch() ?: [];
         $title     = trim($si['title'] ?? $title);
         $des       = trim($si['des'] ?? '');
-        $baseurl   = rtrim(trim($si['baseurl'] ?? $baseurl), '/') . '/';
+        $baseurl   = paste_request_baseurl(rtrim(trim($si['baseurl'] ?? $baseurl), '/') . '/');
         $keyword   = trim($si['keyword'] ?? '');
         $site_name = trim($si['site_name'] ?? $site_name);
         $email     = trim($si['email'] ?? '');
@@ -790,25 +777,25 @@ try {
 $lid = isset($_GET['a']) ? trim($_GET['a']) : (isset($_GET['left_id']) ? trim($_GET['left_id']) : '');
 $rid = isset($_GET['b']) ? trim($_GET['b']) : (isset($_GET['right_id']) ? trim($_GET['right_id']) : '');
 
-if ($lid) { 
-    $p = load_paste($pdo, $lid); 
-    if ($p) { 
-        $left = $p['content'];  
+if ($lid) {
+    $p = load_paste($pdo, $lid);
+    if ($p) {
+        $left = $p['content'];
         $leftPasteData = $p;
         $leftIdent = $p['slug'] ?: $p['id'];
         $leftLabel = $p['title'] ?: ('Paste ' . $leftIdent);
-        $leftLangFromDB = (string)$p['code']; 
-    } 
+        $leftLangFromDB = (string)$p['code'];
+    }
 }
-if ($rid) { 
-    $p = load_paste($pdo, $rid); 
-    if ($p) { 
-        $right = $p['content']; 
+if ($rid) {
+    $p = load_paste($pdo, $rid);
+    if ($p) {
+        $right = $p['content'];
         $rightPasteData = $p;
         $rightIdent = $p['slug'] ?: $p['id'];
         $rightLabel = $p['title'] ?: ('Paste ' . $rightIdent);
-        $rightLangFromDB = (string)$p['code']; 
-    } 
+        $rightLangFromDB = (string)$p['code'];
+    }
 }
 
 /* ---------- POST inputs (compare/swap; download keeps buffers) ---------- */
@@ -848,7 +835,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !$lid && !$rid && !empty($_SESSION[
 }
 
 /* ---------- Language engine + maps ---------- */
-$engine = function_exists('paste_current_engine') ? paste_current_engine() : ($highlighter ?? 'geshi');
+$engine = paste_current_engine();
 
 if ($engine === 'highlight') {
     $langs         = highlight_supported_languages();
@@ -873,9 +860,7 @@ $normalize = static function($id) use ($engine, $alias_map): string {
     $id = strtolower(trim((string)$id));
     if ($id === '' || $id === 'auto' || $id === 'autodetect') return 'autodetect';
     $id = $alias_map[$id] ?? $id;
-    if (function_exists('paste_normalize_lang')) {
-        $id = paste_normalize_lang($id, $engine === 'highlight' ? 'highlight' : 'geshi', null) ?: $id;
-    }
+    $id = paste_normalize_lang($id, $engine === 'highlight' ? 'highlight' : 'geshi', null) ?: $id;
     return $id;
 };
 
@@ -905,7 +890,7 @@ if ($req_left !== null || $req_right !== null) {
 }
 
 /* For GeSHi, resolve 'autodetect' > concrete id so it actually highlights */
-if ($engine === 'geshi' && function_exists('paste_autodetect_language')) {
+if ($engine === 'geshi') {
     $resolver = static function(string $text) {
         $det = paste_autodetect_language($text, 'geshi', null);
         return !empty($det['id']) ? strtolower((string)$det['id']) : 'text';

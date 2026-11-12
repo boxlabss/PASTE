@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -39,7 +39,7 @@
           </div>
         </div>
       </div>
-      
+
       <?php require_once('theme/' . $default_theme . '/sidebar.php'); ?>
             <?php echo $ads_1 ?? ''; ?>
     </div>

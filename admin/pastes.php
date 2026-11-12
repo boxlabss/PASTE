@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
     header("Location: ../index.php");
@@ -26,6 +26,15 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('pastes');
+require_once __DIR__ . '/../includes/spam.php';
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf    = (string)$_SESSION['csrf_token'];
+$csrfQs  = '&csrf_token=' . urlencode($csrf);
 
 try {
     $pdo = new PDO(
@@ -87,6 +96,14 @@ function banIpAndDeleteComment(PDO $pdo, int $commentId, string $nowDate): void 
         }
     }
     $pdo->prepare("DELETE FROM paste_comments WHERE id = ?")->execute([$commentId]);
+}
+
+/** Teach the spam filter that a paste is spam, before it is deleted. */
+function learnPasteAsSpam(PDO $pdo, int $pasteId): void {
+    $st = $pdo->prepare("SELECT title, content, encrypt FROM pastes WHERE id = ?");
+    $st->execute([$pasteId]);
+    $row = $st->fetch();
+    if ($row) spam_learn_row($pdo, $row, 'spam');
 }
 
 function getPasteDetails(PDO $pdo, int $id): ?array {
@@ -189,6 +206,41 @@ function friendly_lang(?string $id): string {
 
 /** Messages **/
 $msg = '';
+$canBan  = admin_can('ipbans');
+$showIps = admin_can('users');
+$noBan   = '<div class="alert alert-danger text-center">Banning IPs needs access to IP Bans.</div>';
+
+// Every action needs the session token
+$actionKeys = ['delete', 'ban', 'spam', 'ban_spam', 'del_comment', 'ban_comment'];
+$isAction   = array_intersect(array_keys($_GET), $actionKeys) || isset($_POST['bulk_action']);
+if ($isAction && !hash_equals($csrf, (string)($_POST['csrf_token'] ?? $_GET['csrf_token'] ?? ''))) {
+    $msg = '<div class="alert alert-danger text-center">Your session token was missing or expired. Reload the page and try again.</div>';
+    foreach ($actionKeys as $k) unset($_GET[$k]);
+    unset($_POST['bulk_action']);
+}
+
+// Mark as spam: learn it, then delete (and ban the IP for ban_spam)
+foreach (['spam', 'ban_spam'] as $spamAction) {
+    if (!isset($_GET[$spamAction])) continue;
+    if ($spamAction === 'ban_spam' && !$canBan) { $msg = $noBan; continue; }
+    $sid = (int)$_GET[$spamAction];
+    try {
+        learnPasteAsSpam($pdo, $sid);
+        $pdo->beginTransaction();
+        if ($spamAction === 'ban_spam') {
+            banIpAndDeletePaste($pdo, $sid, $date);
+        } else {
+            $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$sid]);
+            $pdo->prepare("DELETE FROM paste_comments WHERE paste_id = ?")->execute([$sid]);
+            $pdo->prepare("DELETE FROM pastes WHERE id = ?")->execute([$sid]);
+        }
+        $pdo->commit();
+        $msg = '<div class="alert alert-success text-center">Paste marked as spam' . ($spamAction === 'ban_spam' ? ', its IP banned' : '') . ' and deleted. The spam filter has learned it.</div>';
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        $msg = '<div class="alert alert-danger text-center">Error marking paste as spam: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+}
 
 // Single paste actions
 if (isset($_GET['delete'])) {
@@ -206,7 +258,9 @@ if (isset($_GET['delete'])) {
     }
 }
 
-if (isset($_GET['ban'])) {
+if (isset($_GET['ban']) && !$canBan) {
+    $msg = $noBan;
+} elseif (isset($_GET['ban'])) {
     $ban_id = (int)filter_var($_GET['ban'], FILTER_SANITIZE_NUMBER_INT);
     try {
         $pdo->beginTransaction();
@@ -230,7 +284,9 @@ if (isset($_GET['del_comment'])) {
     }
 }
 
-if (isset($_GET['ban_comment'])) {
+if (isset($_GET['ban_comment']) && !$canBan) {
+    $msg = $noBan;
+} elseif (isset($_GET['ban_comment'])) {
     $cid = (int)filter_var($_GET['ban_comment'], FILTER_SANITIZE_NUMBER_INT);
     try {
         $pdo->beginTransaction();
@@ -248,11 +304,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action']) && !em
     $bulk = $_POST['bulk_action'];
     $ids = array_map('intval', (array)$_POST['selected_ids']);
 
-    if (in_array($bulk, ['bulk_ban_delete', 'bulk_delete'], true) && !empty($ids)) {
+    if (in_array($bulk, ['bulk_ban_delete', 'bulk_ban_spam'], true) && !$canBan) {
+        $msg = $noBan;
+    } elseif (in_array($bulk, ['bulk_ban_delete', 'bulk_delete', 'bulk_spam', 'bulk_ban_spam'], true) && !empty($ids)) {
         try {
+            if ($bulk === 'bulk_spam' || $bulk === 'bulk_ban_spam') {
+                foreach ($ids as $pid) learnPasteAsSpam($pdo, $pid);
+            }
             $pdo->beginTransaction();
             foreach ($ids as $pid) {
-                if ($bulk === 'bulk_ban_delete') {
+                if ($bulk === 'bulk_ban_delete' || $bulk === 'bulk_ban_spam') {
                     banIpAndDeletePaste($pdo, $pid, $date);
                 } else {
                     $pdo->prepare("DELETE FROM paste_views WHERE paste_id = ?")->execute([$pid]);
@@ -261,7 +322,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action']) && !em
                 }
             }
             $pdo->commit();
-            $label = $bulk === 'bulk_ban_delete' ? 'IPs banned & pastes deleted' : 'Pastes deleted';
+            $label = match ($bulk) {
+                'bulk_ban_delete' => 'IPs banned & pastes deleted',
+                'bulk_spam'       => 'pastes learned as spam and deleted',
+                'bulk_ban_spam'   => 'pastes learned as spam, IPs banned & pastes deleted',
+                default           => 'Pastes deleted',
+            };
             $msg = '<div class="alert alert-success text-center">Bulk action complete: ' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '.</div>';
         } catch (PDOException $e) {
             $pdo->rollBack();
@@ -285,11 +351,15 @@ if ($visibility_filter !== 'all') {
     $whereParts[] = "p.visible = ?";
     $params[] = $visibility_filter;
 }
-if ($q !== '') {
+if ($q !== '' && $showIps) {
     $whereParts[] = "(p.title LIKE ? OR p.member LIKE ? OR p.ip = ?)";
     $params[] = "%$q%";
     $params[] = "%$q%";
     $params[] = $q;
+} elseif ($q !== '') {
+    $whereParts[] = "(p.title LIKE ? OR p.member LIKE ?)";
+    $params[] = "%$q%";
+    $params[] = "%$q%";
 }
 $where = $whereParts ? (' WHERE ' . implode(' AND ', $whereParts)) : '';
 
@@ -302,8 +372,7 @@ $total_pages  = max(1, (int)ceil($total_pastes / $per_page));
 $per_page_safe = (int)$per_page;
 $offset_safe   = (int)$offset;
 
-// NOTE: join in comment counts
-// Check if slug column exists for backwards compatibility
+// Pastes with their comment counts; the slug column may be missing before an upgrade
 $has_slug_col = false;
 try {
     $chk = $pdo->query("SHOW COLUMNS FROM pastes LIKE 'slug'");
@@ -312,7 +381,7 @@ try {
 
 $slug_col = $has_slug_col ? 'p.slug,' : '';
 $sql = "
-SELECT 
+SELECT
     p.id, {$slug_col} p.member, p.ip, p.visible, p.title,
     p.code,
     p.date AS posted_at,
@@ -432,6 +501,15 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   });
+  // Mark as spam
+  document.querySelectorAll('.spam-paste').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (confirm('Mark this paste as spam? The spam filter learns it and the paste is deleted.')) {
+        window.location.href = a.getAttribute('href');
+      }
+    });
+  });
   // Ban IP + delete
   document.querySelectorAll('.ban-paste').forEach(a => {
     a.addEventListener('click', (e) => {
@@ -480,6 +558,8 @@ document.addEventListener('DOMContentLoaded', function() {
       let msg = 'Proceed with bulk action?';
       if (action === 'bulk_ban_delete') msg = 'Ban IPs for selected pastes and delete them (including comments and view logs)?';
       if (action === 'bulk_delete') msg = 'Delete selected pastes (including comments and view logs)?';
+      if (action === 'bulk_spam') msg = 'Mark selected pastes as spam? The spam filter learns them and they are deleted.';
+      if (action === 'bulk_ban_spam') msg = 'Mark selected pastes as spam, ban their IPs and delete them?';
       if (!confirm(msg)) e.preventDefault();
     });
   }
@@ -560,18 +640,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('pastes.php'); ?>
     </div>
   </div>
 </div>
@@ -582,18 +651,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('pastes.php'); ?>
         </div>
       </div>
     </div>
@@ -618,7 +676,7 @@ document.addEventListener('DOMContentLoaded', function() {
                   <tr><td>Password</td><td><?php echo htmlspecialchars($detail['password']); ?></td></tr>
                   <tr><td>Views</td><td><?php echo number_format((int)$detail['views']); ?></td></tr>
                   <tr><td>Comments</td><td><?php echo number_format((int)$detail['comments']); ?></td></tr>
-                  <tr><td>IP</td><td><?php echo htmlspecialchars($detail['ip']); ?></td></tr>
+                  <tr><td>IP</td><td><?php echo htmlspecialchars(admin_personal($detail['ip'])); ?></td></tr>
                   <tr><td>Syntax Highlighting</td><td><?php echo htmlspecialchars($detail['code']); ?></td></tr>
                   <tr><td>Expiration</td><td><?php echo htmlspecialchars($detail['expiry']); ?></td></tr>
                   <tr><td>Encrypted Paste</td><td><?php echo htmlspecialchars($detail['encrypt']); ?></td></tr>
@@ -648,10 +706,10 @@ document.addEventListener('DOMContentLoaded', function() {
           $pinfo = $pdo->prepare("SELECT title, member{$slug_select} FROM pastes WHERE id=?");
           $pinfo->execute([$pid]);
           $pmeta = $pinfo->fetch();
-          
+
           // Determine URL for viewing paste
           $paste_slug = isset($pmeta['slug']) && $pmeta['slug'] !== '' ? $pmeta['slug'] : (string)$pid;
-          $paste_open_url = (string)$mod_rewrite === '1' 
+          $paste_open_url = (string)$mod_rewrite === '1'
               ? '../' . rawurlencode($paste_slug)
               : '../paste.php?id=' . urlencode($paste_slug);
 
@@ -730,10 +788,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             echo ' <span class="text-muted small">(' . htmlspecialchars(ago_from_ts($ts)) . ')</span>';
                           ?>
                         </td>
-                        <td><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($c['ip'] ?? ''); ?>" title="Click to copy IP"><?php echo htmlspecialchars($c['ip'] ?? ''); ?></span></td>
+                        <td><?php if ($showIps): ?><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($c['ip'] ?? ''); ?>" title="Click to copy IP"><?php echo htmlspecialchars($c['ip'] ?? ''); ?></span><?php else: ?><span class="text-secondary small">hidden</span><?php endif; ?></td>
                         <td>
-                          <a class="btn btn-warning btn-sm ban-comment" href="?comments=<?php echo (int)$pid; ?>&ban_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?>">Ban IP + Delete</a>
-                          <a class="btn btn-danger btn-sm delete-comment" href="?comments=<?php echo (int)$pid; ?>&del_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?>">Delete</a>
+                          <?php if ($canBan): ?><a class="btn btn-warning btn-sm ban-comment" href="?comments=<?php echo (int)$pid; ?>&ban_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?><?php echo htmlspecialchars($csrfQs); ?>">Ban IP + Delete</a><?php endif; ?>
+                          <a class="btn btn-danger btn-sm delete-comment" href="?comments=<?php echo (int)$pid; ?>&del_comment=<?php echo (int)$c['id']; ?>&cpage=<?php echo (int)$c_page; ?><?php echo htmlspecialchars($csrfQs); ?>">Delete</a>
                         </td>
                       </tr>
                     <?php endforeach; ?>
@@ -805,7 +863,7 @@ document.addEventListener('DOMContentLoaded', function() {
                   </select>
                 </div>
                 <div class="col-auto">
-                  <input type="text" class="form-control" name="q" placeholder="Search title / user / IP" value="<?php echo htmlspecialchars($q); ?>">
+                  <input type="text" class="form-control" name="q" placeholder="<?php echo $showIps ? 'Search title / user / IP' : 'Search title / user'; ?>" value="<?php echo htmlspecialchars($q); ?>">
                 </div>
                 <div class="col-auto">
                   <button type="submit" class="btn btn-primary">Apply</button>
@@ -814,11 +872,14 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
 
             <form id="bulk-form" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+              <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf); ?>">
               <div class="row g-2 mb-3">
                 <div class="col-auto">
                   <select class="form-select" id="bulk_action" name="bulk_action">
-                    <option value="bulk_ban_delete">Ban IP + Delete (selected)</option>
+                    <?php if ($canBan): ?><option value="bulk_ban_delete">Ban IP + Delete (selected)</option><?php endif; ?>
                     <option value="bulk_delete">Delete (selected)</option>
+                    <option value="bulk_spam">Spam: learn + Delete (selected)</option>
+                    <?php if ($canBan): ?><option value="bulk_ban_spam">Spam: learn + Ban IP + Delete (selected)</option><?php endif; ?>
                   </select>
                 </div>
                 <div class="col-auto">
@@ -840,7 +901,7 @@ document.addEventListener('DOMContentLoaded', function() {
                       <th>Views</th>
                       <th>Comments</th>
                       <th>Visibility</th>
-                      <th>Ban IP + Delete</th>
+                      <?php if ($canBan): ?><th>Ban IP + Delete</th><?php endif; ?>
                       <th>Details</th>
                       <th>View</th>
                       <th>Delete</th>
@@ -863,7 +924,7 @@ document.addEventListener('DOMContentLoaded', function() {
                           $qsBase = $qs ? '&'.http_build_query($qs) : '';
                           // Use slug if available, otherwise fall back to ID
                           $paste_url_id = isset($row['slug']) && $row['slug'] !== '' ? $row['slug'] : (string)$row['id'];
-                          $paste_view_url = (string)$mod_rewrite === '1' 
+                          $paste_view_url = (string)$mod_rewrite === '1'
                               ? '../' . rawurlencode($paste_url_id)
                               : '../paste.php?id=' . urlencode($paste_url_id);
                         ?>
@@ -877,21 +938,22 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="time-abs"><?php echo format_db_datetime($row['posted_at'] ?? null); ?></div>
                             <div class="time-rel text-muted small"><?php echo htmlspecialchars(ago_from_ts((int)($row['posted_ts'] ?? 0))); ?></div>
                           </td>
-                          <td><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($row['ip']); ?>" title="Click to copy IP"><?php echo htmlspecialchars($row['ip']); ?></span></td>
+                          <td><?php if ($showIps): ?><span class="badge bg-primary copyable" data-copy="<?php echo htmlspecialchars($row['ip']); ?>" title="Click to copy IP"><?php echo htmlspecialchars($row['ip']); ?></span><?php else: ?><span class="text-secondary small">hidden</span><?php endif; ?></td>
                           <td><?php echo number_format((int)$row['views']); ?></td>
                           <td>
                             <span class="badge badge-count"><?php echo number_format((int)($row['comments_count'] ?? 0)); ?></span>
                             <a class="btn btn-soft btn-sm ms-1" href="?comments=<?php echo (int)$row['id']; ?>">View</a>
                           </td>
                           <td><?php echo htmlspecialchars($visibility); ?></td>
-                          <td><a href="?ban=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . $qsBase; ?>" class="btn btn-warning btn-sm ban-paste">Ban IP + Delete</a></td>
+                          <?php if ($canBan): ?><td><a href="?ban=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . htmlspecialchars($qsBase . $csrfQs); ?>" class="btn btn-warning btn-sm ban-paste">Ban IP + Delete</a></td><?php endif; ?>
                           <td><a href="?details=<?php echo (int)$row['id']; ?>" class="btn btn-soft btn-sm">Details</a></td>
                           <td><a href="<?php echo htmlspecialchars($paste_view_url); ?>" class="btn btn-soft btn-sm" target="_blank">View</a></td>
-                          <td><a href="?delete=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . $qsBase; ?>" class="btn btn-danger btn-sm delete-paste">Delete</a></td>
+                          <td class="text-nowrap"><a href="?delete=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . htmlspecialchars($qsBase . $csrfQs); ?>" class="btn btn-danger btn-sm delete-paste">Delete</a>
+                            <a href="?spam=<?php echo (int)$row['id']; ?>&page=<?php echo (int)$page . htmlspecialchars($qsBase . $csrfQs); ?>" class="btn btn-outline-danger btn-sm spam-paste" title="Learn as spam and delete">Spam</a></td>
                         </tr>
                       <?php endforeach; ?>
                     <?php else: ?>
-                      <tr><td colspan="14" class="text-center">No pastes found</td></tr>
+                      <tr><td colspan="<?php echo $canBan ? 14 : 13; ?>" class="text-center">No pastes found</td></tr>
                     <?php endif; ?>
                   </tbody>
                 </table>
@@ -938,7 +1000,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <?php
 // logout handler (optional)
 if (isset($_GET['logout'])) {

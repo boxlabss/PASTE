@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,7 +9,7 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -64,6 +64,8 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+    require_once __DIR__ . '/../includes/admin_access.php';
+    admin_require('configuration', $pdo);
 
     // Fetch baseurl for redirect URI
     $stmt = $pdo->query("SELECT baseurl FROM site_info WHERE id = 1");
@@ -93,7 +95,6 @@ try {
         }
         $stmt = $pdo->prepare("UPDATE mail SET oauth_client_id = ?, oauth_client_secret = ? WHERE id = 1");
         $stmt->execute([$client_id, $client_secret]);
-        error_log("oauth/google_smtp.php: OAuth credentials saved for client_id={$client_id}");
         header('Content-Type: application/json; charset=utf-8');
         ob_end_clean();
         echo json_encode(['status' => 'success', 'message' => 'OAuth credentials saved. Click "Authorize Gmail SMTP" to proceed.', 'reload' => true]);
@@ -120,7 +121,6 @@ try {
             throw new Exception("Please save OAuth Client ID and Secret first.");
         }
         $authUrl = $gclient->createAuthUrl();
-        error_log("oauth/google_smtp.php: Redirecting to Google OAuth: $authUrl");
         ob_end_clean();
         header('Location: ' . $authUrl);
         exit;
@@ -151,7 +151,6 @@ try {
         // Save refresh token to DB
         $stmt = $pdo->prepare("UPDATE mail SET oauth_refresh_token = ? WHERE id = 1");
         $stmt->execute([$new_refresh]);
-        error_log("oauth/google_smtp.php: OAuth refresh token saved to DB.");
         ob_end_clean();
         header('Location: ../admin/configuration.php');
         exit;

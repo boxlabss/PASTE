@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 $__cap_color      = isset($captcha_color)      && is_string($captcha_color)      ? $captcha_color      : '#0a58ca';
 $__cap_mode       = isset($captcha_difficulty) && is_string($captcha_difficulty) ? $captcha_difficulty : 'Normal';   // Easy|Normal|Tough
 $__cap_multibg    = isset($captcha_multibg)    && is_string($captcha_multibg)    ? $captcha_multibg    : 'on';       // 'on' or ''

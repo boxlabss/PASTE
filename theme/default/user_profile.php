@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.4 2026/02/04 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -79,12 +79,12 @@ $main_col_class = $is_me_local ? 'col-lg-9 order-lg-1' : 'col-lg-12 order-lg-1';
         </div>
 
         <div class="card-body p-4">
-          <?php 
-          if (isset($_GET['del'])) {	
+          <?php
+          if (isset($_GET['del'])) {
             if (!empty($success)) {
-              echo '<div class="alert alert-success text-center rounded-3">' . htmlspecialchars($success) . '</div>'; 
+              echo '<div class="alert alert-success text-center rounded-3">' . htmlspecialchars($success) . '</div>';
             } elseif (!empty($error)) {
-              echo '<div class="alert alert-danger text-center rounded-3">' . htmlspecialchars($error) . '</div>'; 
+              echo '<div class="alert alert-danger text-center rounded-3">' . htmlspecialchars($error) . '</div>';
             }
           }
           ?>
@@ -140,8 +140,8 @@ $main_col_class = $is_me_local ? 'col-lg-9 order-lg-1' : 'col-lg-12 order-lg-1';
                 <?php
                   if (empty($pastesPage)) {
                     $colspan = $is_me_local ? 6 : 4;
-                    echo '<tr><td colspan="' . $colspan . '" class="text-center text-muted">' 
-                         . htmlspecialchars($lang['emptypastebin'] ?? 'No pastes found') 
+                    echo '<tr><td colspan="' . $colspan . '" class="text-center text-muted">'
+                         . htmlspecialchars($lang['emptypastebin'] ?? 'No pastes found')
                          . '</td></tr>';
                   } else {
                     foreach ($pastesPage as $row) {
@@ -180,12 +180,11 @@ $main_col_class = $is_me_local ? 'col-lg-9 order-lg-1' : 'col-lg-12 order-lg-1';
                       echo '  <td><span class="badge bg-primary">' . htmlspecialchars(strtoupper($p_code), ENT_QUOTES, 'UTF-8') . '</span></td>';
 
                       if ($is_me_local) {
-                        $p_delete_link = ($mod_rewrite == '1')
-                          ? ('user.php?del&user=' . rawurlencode($profile_username) . '&id=' . $p_id)
-                          : ('user.php?del&user=' . rawurlencode($profile_username) . '&id=' . $p_id);
+                        $p_delete_link = 'user.php?del&user=' . rawurlencode($profile_username) . '&id=' . $p_id
+                          . '&csrf_token=' . rawurlencode((string)($_SESSION['csrf_token'] ?? ''));
 
                         echo '  <td class="text-center"><a href="' . htmlspecialchars($baseurl . $p_delete_link, ENT_QUOTES, 'UTF-8')
-                          . '" class="btn btn-sm btn-outline-danger" title="'
+                          . '" class="btn btn-sm btn-outline-danger" onclick="return confirm(\'Delete this paste? This cannot be undone.\');" title="'
                           . htmlspecialchars(sprintf($lang['delete'] ?? 'Delete %s', $title_short), ENT_QUOTES, 'UTF-8')
                           . '"><i class="bi bi-trash" aria-hidden="true"></i></a></td>';
                       }
@@ -401,11 +400,11 @@ $main_col_class = $is_me_local ? 'col-lg-9 order-lg-1' : 'col-lg-12 order-lg-1';
                       $url_identifier = $p_slug !== '' ? $p_slug : $p_id;
                       $p_link = ($mod_rewrite == '1') ? "$url_identifier" : "paste.php?id=$url_identifier";
                       $title  = truncate($title, 20, 50);
-                      echo '<tr> 
-                        <td><a href="' . htmlspecialchars($baseurl . $p_link) . '" title="' . htmlspecialchars($title) . '" class="text-light fw-medium">' . ucfirst(htmlspecialchars($title)) . '</a></td>    
+                      echo '<tr>
+                        <td><a href="' . htmlspecialchars($baseurl . $p_link) . '" title="' . htmlspecialchars($title) . '" class="text-light fw-medium">' . ucfirst(htmlspecialchars($title)) . '</a></td>
                         <td>' . htmlspecialchars($p_date) . '</td>
                         <td><span class="badge bg-primary">' . htmlspecialchars(strtoupper($p_code)) . '</span></td>
-                      </tr>'; 
+                      </tr>';
                     }
                   }
                 } catch (Exception $e) {

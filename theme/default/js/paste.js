@@ -1,4 +1,4 @@
-// --- fixes for older iOS/Android ---
+// Element.matches / closest for older mobile browsers
 (function () {
   var E = Element.prototype;
   if (!E.matches) {
@@ -454,100 +454,100 @@
   };
 
   // ========= drag & drop loader =================================
-	function enableEditorDragDrop(target, opts){
-	  var ta = document.getElementById('edit-code');
-	  if (!target || !ta) return;
+    function enableEditorDragDrop(target, opts){
+      var ta = document.getElementById('edit-code');
+      if (!target || !ta) return;
 
-	  // Use the whole editor wrapper as the drop zone (more reliable than the textarea)
-	  var zone = ta.closest('.editor-wrap') || ta.parentNode || ta;
+      // Use the whole editor wrapper as the drop zone (more reliable than the textarea)
+      var zone = ta.closest('.editor-wrap') || ta.parentNode || ta;
 
-	  // Create overlay once
-	  var overlay = zone.querySelector('.drop-overlay');
-	  if (!overlay) {
-		overlay = document.createElement('div');
-		overlay.className = 'drop-overlay';
-		overlay.textContent = 'Drop file to load';
-		zone.appendChild(overlay);
-	  }
+      // Create overlay once
+      var overlay = zone.querySelector('.drop-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'drop-overlay';
+        overlay.textContent = 'Drop file to load';
+        zone.appendChild(overlay);
+      }
 
-	  var maxBytes = (opts && +opts.maxBytes) || (+ta.dataset.maxBytes || 10 * 1024 * 1024);
+      var maxBytes = (opts && +opts.maxBytes) || (+ta.dataset.maxBytes || 10 * 1024 * 1024);
 
-	  var extMap = (opts && opts.extMap) || {
-		php:'php', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
-		py:'python', rb:'ruby', java:'java', c:'c', h:'c', cpp:'cpp', cc:'cpp', cs:'csharp',
-		go:'go', rs:'rust', kt:'kotlin', swift:'swift', sh:'bash', ps1:'powershell',
-		sql:'sql', html:'html', htm:'html', css:'css', scss:'scss',
-		json:'json', xml:'xml', yml:'yaml', yaml:'yaml', ini:'ini', conf:'ini', md:'markdown'
-	  };
+      var extMap = (opts && opts.extMap) || {
+        php:'php', js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+        py:'python', rb:'ruby', java:'java', c:'c', h:'c', cpp:'cpp', cc:'cpp', cs:'csharp',
+        go:'go', rs:'rust', kt:'kotlin', swift:'swift', sh:'bash', ps1:'powershell',
+        sql:'sql', html:'html', htm:'html', css:'css', scss:'scss',
+        json:'json', xml:'xml', yml:'yaml', yaml:'yaml', ini:'ini', conf:'ini', md:'markdown'
+      };
 
-	  function uiAlert(msg, isErr){
-		if (typeof showNotification === 'function') showNotification(msg, !!isErr);
-		else alert(msg);
-	  }
-	  function looksBinary(s){ return /\x00/.test(s); }
-	  function stripBom(s){ return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s; }
-	  function byteLen(str){
-		try { return (new TextEncoder()).encode(str).length; }
-		catch(_) { return unescape(encodeURIComponent(str)).length; }
-	  }
-	  function setFormatByExt(name){
-		var m = /\.([^.]+)$/.exec(name || '');
-		if (!m) return;
-		var code = extMap[(m[1] || '').toLowerCase()];
-		if (!code) return;
-		var sel = document.getElementById('format');
-		if (!sel) return;
-		var opt = sel.querySelector('option[value="'+code+'"]');
-		if (opt) sel.value = code;
-	  }
+      function uiAlert(msg, isErr){
+        if (typeof showNotification === 'function') showNotification(msg, !!isErr);
+        else alert(msg);
+      }
+      function looksBinary(s){ return /\x00/.test(s); }
+      function stripBom(s){ return s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s; }
+      function byteLen(str){
+        try { return (new TextEncoder()).encode(str).length; }
+        catch(_) { return unescape(encodeURIComponent(str)).length; }
+      }
+      function setFormatByExt(name){
+        var m = /\.([^.]+)$/.exec(name || '');
+        if (!m) return;
+        var code = extMap[(m[1] || '').toLowerCase()];
+        if (!code) return;
+        var sel = document.getElementById('format');
+        if (!sel) return;
+        var opt = sel.querySelector('option[value="'+code+'"]');
+        if (opt) sel.value = code;
+      }
 
-	  // Keep track of nested dragenter/leaves
-	  var enter = 0;
+      // Keep track of nested dragenter/leaves
+      var enter = 0;
 
-	  zone.addEventListener('dragover', function(e){
-		e.preventDefault();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-	  });
+      zone.addEventListener('dragover', function(e){
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      });
 
-	  zone.addEventListener('dragenter', function(e){
-		e.preventDefault();
-		if (enter++ === 0) zone.classList.add('dragging','drag-hover');
-	  });
+      zone.addEventListener('dragenter', function(e){
+        e.preventDefault();
+        if (enter++ === 0) zone.classList.add('dragging','drag-hover');
+      });
 
-	  zone.addEventListener('dragleave', function(){
-		if (--enter <= 0) { enter = 0; zone.classList.remove('dragging','drag-hover'); }
-	  });
+      zone.addEventListener('dragleave', function(){
+        if (--enter <= 0) { enter = 0; zone.classList.remove('dragging','drag-hover'); }
+      });
 
-	  zone.addEventListener('drop', function(e){
-		e.preventDefault();
-		enter = 0; zone.classList.remove('dragging','drag-hover');
+      zone.addEventListener('drop', function(e){
+        e.preventDefault();
+        enter = 0; zone.classList.remove('dragging','drag-hover');
 
-		var files = e.dataTransfer && e.dataTransfer.files;
-		if (!files || !files.length) return;
-		var f = files[0];
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        var f = files[0];
 
-		if (f.size > maxBytes) { uiAlert('File is larger than the site limit.', true); return; }
+        if (f.size > maxBytes) { uiAlert('File is larger than the site limit.', true); return; }
 
-		var reader = new FileReader();
-		reader.onload = function(){
-		  var text = String(reader.result || '');
-		  if (looksBinary(text)) { uiAlert('This file looks binary.', true); return; }
-		  text = stripBom(text).replace(/\r\n?/g, '\n');
-		  if (byteLen(text) > maxBytes) { uiAlert('Loaded text exceeds the site limit.', true); return; }
+        var reader = new FileReader();
+        reader.onload = function(){
+          var text = String(reader.result || '');
+          if (looksBinary(text)) { uiAlert('This file looks binary.', true); return; }
+          text = stripBom(text).replace(/\r\n?/g, '\n');
+          if (byteLen(text) > maxBytes) { uiAlert('Loaded text exceeds the site limit.', true); return; }
 
-		  ta.value = text;
-		  try { triggerInput(ta); } catch(_){}
-		  setFormatByExt(f.name);
+          ta.value = text;
+          try { triggerInput(ta); } catch(_){}
+          setFormatByExt(f.name);
 
-		  var title = document.querySelector('input[name="title"]');
-		  if (title && !title.value) title.value = f.name;
+          var title = document.querySelector('input[name="title"]');
+          if (title && !title.value) title.value = f.name;
 
-		  if (typeof announce === 'function') announce('Loaded ' + f.name);
-		  if (opts && typeof opts.onLoaded === 'function') opts.onLoaded(f);
-		};
-		reader.readAsText(f);
-	  });
-	}
+          if (typeof announce === 'function') announce('Loaded ' + f.name);
+          if (opts && typeof opts.onLoaded === 'function') opts.onLoaded(f);
+        };
+        reader.readAsText(f);
+      });
+    }
 
   // ========= local "Load file into editor" (no upload) ======================
   function setupLocalFileLoader(){
@@ -837,7 +837,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var li = form.closest ? form.closest('.comment-item') : null;
     // Find table row (works on user profile page)
     var tr = form.closest ? form.closest('tr') : null;
-    
+
     var fd = new FormData(form);
     fd.set('ajax', '1');
 

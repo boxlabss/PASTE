@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
@@ -24,60 +24,60 @@ require_once __DIR__ . '/includes/functions.php';
 if (isset($_GET['api']) && $_GET['api'] === 'search') {
   header('Content-Type: application/json');
   header('Access-Control-Allow-Origin: *');
-  
+
   $query = trim($_GET['q'] ?? '');
   if (strlen($query) < 2) {
     echo json_encode(['success' => false, 'error' => 'Query too short (min 2 chars)']);
     exit;
   }
-  
+
   $limit = min(50, max(1, (int)($_GET['limit'] ?? 10)));
   $page = max(1, (int)($_GET['page'] ?? 1));
   $offset = ($page - 1) * $limit;
   $search_term = '%' . $query . '%';
-  
+
   // Check if slug column exists
   $hasSlug = false;
   try {
       $check = $pdo->query("SHOW COLUMNS FROM pastes LIKE 'slug'");
       $hasSlug = $check->fetch() !== false;
   } catch (PDOException $e) {}
-  
+
   $slugCol = $hasSlug ? ', p.slug' : '';
-  
+
   // Get site info for URLs
   $stmt = $pdo->query("SELECT baseurl FROM site_info WHERE id = 1");
   $si = $stmt->fetch() ?: [];
-  $baseurl = rtrim($si['baseurl'] ?? '', '/') . '/';
+  $baseurl = paste_request_baseurl(rtrim($si['baseurl'] ?? '', '/') . '/');
   // mod_rewrite comes from config.php (global)
   global $mod_rewrite;
   $use_mod_rewrite = ((string)($mod_rewrite ?? '0') === '1');
-  
+
   $sql = "SELECT p.id{$slugCol}, p.title, p.code, p.date, p.member, COUNT(pv.id) AS views
           FROM pastes p LEFT JOIN paste_views pv ON p.id = pv.paste_id
-          WHERE p.visible = '0' AND p.password = 'NONE' AND p.encrypt = '0' 
+          WHERE p.visible = '0' AND p.password = 'NONE' AND p.encrypt = '0' AND " . paste_listable_sql('p') . "
           AND (p.title LIKE ? OR p.content LIKE ?)
           GROUP BY p.id ORDER BY p.date DESC LIMIT ? OFFSET ?";
   $stmt = $pdo->prepare($sql);
   $stmt->execute([$search_term, $search_term, $limit, $offset]);
   $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-  
+
   // Add URLs to results
   foreach ($results as &$row) {
       $identifier = ($hasSlug && !empty($row['slug'])) ? $row['slug'] : $row['id'];
       $row['url'] = $use_mod_rewrite ? $baseurl . $identifier : $baseurl . 'paste.php?id=' . $identifier;
   }
   unset($row);
-  
-  $count_sql = "SELECT COUNT(*) FROM pastes WHERE visible = '0' AND password = 'NONE' AND encrypt = '0' AND (title LIKE ? OR content LIKE ?)";
+
+  $count_sql = "SELECT COUNT(*) FROM pastes WHERE visible = '0' AND password = 'NONE' AND encrypt = '0' AND " . paste_listable_sql() . " AND (title LIKE ? OR content LIKE ?)";
   $count_stmt = $pdo->prepare($count_sql);
   $count_stmt->execute([$search_term, $search_term]);
   $total = (int)$count_stmt->fetchColumn();
-  
+
   echo json_encode([
       'success' => true,
       'query' => $query,
-      'results' => $results, 
+      'results' => $results,
       'pagination' => [
           'page' => $page,
           'limit' => $limit,
@@ -106,7 +106,7 @@ try {
     $row = $stmt->fetch();
     $title = trim($row['title']);
     $des = trim($row['des']);
-    $baseurl = trim($row['baseurl']);
+    $baseurl = paste_request_baseurl(trim($row['baseurl']));
     $keyword = trim($row['keyword']);
     $site_name = trim($row['site_name']);
     $email = trim($row['email']);
@@ -131,61 +131,16 @@ try {
     // Site permissions
     $stmt = $pdo->query("SELECT * FROM site_permissions WHERE id = 1 LIMIT 1");
     $row = $stmt->fetch();
-    $siteprivate = trim($row['siteprivate']);
-    $privatesite = ($siteprivate === '0' || $siteprivate === 0) ? '0' : '1';
+    $siteprivate = trim((string)($row['siteprivate'] ?? 'off'));
+    $privatesite = ($siteprivate === 'on' && empty($_SESSION['username'])) ? 'on' : 'off';
 
     // Logout
     if (isset($_GET['logout'])) {
-        header('Location: ' . $_SERVER['HTTP_REFERER']);
-        unset($_SESSION['token']);
-        unset($_SESSION['oauth_uid']);
-        unset($_SESSION['username']);
-        session_destroy();
+        paste_logout_and_redirect($baseurl);
     }
 
     // Page views
-    $date = date('Y-m-d');
-    $ip = $_SERVER['REMOTE_ADDR'];
-
-    try {
-        // Fetch or create the page_view record for today
-        $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-        $stmt->execute([$date]);
-        $row = $stmt->fetch();
-
-        if ($row) {
-            // Record exists for today
-            $page_view_id = $row['id'];
-            $tpage = (int)$row['tpage'] + 1; // Increment total page views
-            $tvisit = (int)$row['tvisit'];
-
-            // Check if this IP has visited today
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-            $stmt->execute([$ip, $date]);
-            if ($stmt->fetchColumn() == 0) {
-                // New unique visitor
-                $tvisit += 1;
-                $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-                $stmt->execute([$ip, $date]);
-            }
-
-            // Update page_view with new counts
-            $stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-            $stmt->execute([$tpage, $tvisit, $page_view_id]);
-        } else {
-            // No record for today: create one
-            $tpage = 1;
-            $tvisit = 1;
-            $stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-            $stmt->execute([$date, $tpage, $tvisit]);
-
-            // Log the visitor's IP
-            $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-            $stmt->execute([$ip, $date]);
-        }
-    } catch (PDOException $e) {
-        error_log("Page view tracking error: " . $e->getMessage());
-    }
+    pageViewTrack($pdo, $ip);
 
     // Ads
     $stmt = $pdo->query("SELECT * FROM ads WHERE id = '1'");
@@ -240,19 +195,19 @@ try {
     $totalPages = 1;
     $error = '';
 
-    // Check if slug column exists (for backwards compatibility)
+    // Databases not yet upgraded may lack the slug column
     $hasSlug = columnExists($pdo, 'pastes', 'slug');
     $slugCol = $hasSlug ? ', p.slug' : '';
     $slugGroup = $hasSlug ? ', p.slug' : '';
 
     // Base query with LEFT JOIN to paste_views
-    $baseQuery = "SELECT p.id{$slugCol}, p.title, p.code, p.date, UNIX_TIMESTAMP(p.date) AS now_time, p.encrypt, p.member, COUNT(pv.id) AS view_count 
-                  FROM pastes p 
-                  LEFT JOIN paste_views pv ON p.id = pv.paste_id 
-                  WHERE p.visible = '0' AND p.password = 'NONE'";
-    $countQuery = "SELECT COUNT(*) 
-                   FROM pastes p 
-                   WHERE p.visible = '0' AND p.password = 'NONE'";
+    $baseQuery = "SELECT p.id{$slugCol}, p.title, p.code, p.date, UNIX_TIMESTAMP(p.date) AS now_time, p.encrypt, p.member, COUNT(pv.id) AS view_count
+                  FROM pastes p
+                  LEFT JOIN paste_views pv ON p.id = pv.paste_id
+                  WHERE p.visible = '0' AND p.password = 'NONE' AND " . paste_listable_sql('p');
+    $countQuery = "SELECT COUNT(*)
+                   FROM pastes p
+                   WHERE p.visible = '0' AND p.password = 'NONE' AND " . paste_listable_sql('p');
     $params = [];
 
     if ($search_query && strlen($search_query) >= 3) { // Search query provided

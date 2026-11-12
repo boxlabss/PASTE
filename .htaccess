@@ -12,12 +12,14 @@ RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
  RewriteRule ^archive archive.php [L] 
  RewriteRule ^profile profile.php [L] 
  RewriteRule ^user/([^/]+)/?$ user.php?user=$1 [L]
- RewriteRule ^contact contact.php [L]
  RewriteRule ^download/(.*)$  paste.php?download&id=$1 [L]
  RewriteRule ^raw/(.*)$  paste.php?raw&id=$1 [L]
  RewriteRule ^filehost/?$ filehost.php [L]
  RewriteRule ^filehost/([A-Za-z0-9]+\.[a-z0-9]+)$ filehost.php?f=$1 [L]
  RewriteRule ^embed/(.*)$  paste.php?embed&id=$1 [L]
+ RewriteRule ^filehost_files(/|$) - [F,L]
+ RewriteRule ^img/([A-Za-z0-9]{6,32})\.([a-z0-9]{1,8})$ img/index.php?f=$1.$2 [L]
+ RewriteRule ^img/([A-Za-z0-9]{6,32})/?$ img/index.php?v=$1 [L]
 </IfModule>
 
 <IfModule mod_rewrite.c>

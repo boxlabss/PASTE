@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -19,6 +19,7 @@
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/api_keys.php';
 
 // UTF-8
 header('Content-Type: text/html; charset=utf-8');
@@ -34,7 +35,7 @@ try {
     $row = $stmt->fetch() ?: [];
     $title      = trim((string)($row['title'] ?? 'Paste'));
     $des        = trim((string)($row['des'] ?? ''));
-    $baseurl    = trim((string)($row['baseurl'] ?? ''));
+    $baseurl    = paste_request_baseurl(trim((string)($row['baseurl'] ?? '')));
     $keyword    = trim((string)($row['keyword'] ?? ''));
     $site_name  = trim((string)($row['site_name'] ?? 'Paste'));
     $email      = trim((string)($row['email'] ?? ''));
@@ -74,10 +75,7 @@ try {
 
     // Logout
     if (isset($_GET['logout'])) {
-        header('Location: ' . ($_SERVER['HTTP_REFERER'] ?? $baseurl));
-        unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username']);
-        session_destroy();
-        exit;
+        paste_logout_and_redirect($baseurl);
     }
 
     // Load current user record
@@ -91,6 +89,10 @@ try {
         header("Location: ./login.php?action=logout");
         exit;
     }
+
+    // One-time message carried from another page (Google sign-in)
+    $notice = (string)($_SESSION['profile_notice'] ?? '');
+    unset($_SESSION['profile_notice']);
 
     $user_id          = (int)$row['id'];
     $user_oauth_uid   = $row['oauth_uid'] == '0' ? "None" : (string)$row['oauth_uid'];
@@ -121,10 +123,7 @@ try {
             if ($new === '' || !isValidUsername($new)) {
                 $error = $lang['usrinvalid'] ?? 'Invalid username.';
             } else {
-                // unique?
-                $stmt = $pdo->prepare("SELECT 1 FROM users WHERE username = ?");
-                $stmt->execute([$new]);
-                if ($stmt->fetch()) {
+                if (paste_username_taken($pdo, $new)) {
                     $error = $lang['userexists'] ?? 'Username already exists.';
                 } else {
                     $old = $user_username;
@@ -137,6 +136,13 @@ try {
                         // Reassign pastes to new username
                         $stmt = $pdo->prepare("UPDATE pastes SET member = ? WHERE member = ?");
                         $stmt->execute([$new, $old]);
+
+                        // and uploads and albums (tables made on first upload)
+                        foreach (['filehost_files', 'img_albums'] as $table) {
+                            if ($pdo->query("SHOW TABLES LIKE '$table'")->fetchColumn() !== false) {
+                                $pdo->prepare("UPDATE `$table` SET account = ? WHERE account = ?")->execute([$new, $old]);
+                            }
+                        }
 
                         // Update session + view vars
                         $_SESSION['username'] = $new;
@@ -156,24 +162,34 @@ try {
     }
 
     // Handle profile changes (full name + password)
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cpassword']) && empty($_POST['set_username_once'])) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cpassword']) && empty($_POST['set_username_once'])
+        && !hash_equals($_SESSION['csrf_token'] ?? '', (string)($_POST['csrf_token'] ?? ''))) {
+        $error = $lang['invalidtoken'] ?? 'Invalid CSRF token.';
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cpassword']) && empty($_POST['set_username_once'])) {
         // Keep current full name by default if field not present in form
         $user_new_full = isset($_POST['full']) ? trim((string)$_POST['full']) : $user_full_name;
 
         $user_old_pass = (string)($_POST['old_password'] ?? '');
         $user_new_pass = (string)($_POST['password'] ?? '');
 
-        if ($user_new_pass === '') {
+        if ($user_new_pass !== '' && $user_new_pass !== (string)($_POST['cpassword'] ?? '')) {
+            $error = $lang['passmismatch'] ?? 'The new passwords do not match.';
+        } elseif ($user_new_pass === '') {
             // full_name only (no password change)
             $stmt = $pdo->prepare("UPDATE users SET full_name = ? WHERE username = ?");
             $stmt->execute([$user_new_full, $user_username]);
             $user_full_name = $user_new_full;
             $success = $lang['profileupdated'] ?? 'Profile updated.';
         } else {
-            if (password_verify($user_old_pass, $user_password)) {
+            // An account without a password (Google sign-in) can set one without the current password
+            if ($user_password === '' || password_verify($user_old_pass, $user_password)) {
                 $user_new_cpass = password_hash($user_new_pass, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("UPDATE users SET full_name = ?, password = ? WHERE username = ?");
-                $stmt->execute([$user_new_full, $user_new_cpass, $user_username]);
+                // A new token signs out the account's other devices; this one keeps it
+                $new_token = bin2hex(random_bytes(32));
+                $stmt = $pdo->prepare("UPDATE users SET full_name = ?, password = ?, token = ? WHERE username = ?");
+                $stmt->execute([$user_new_full, $user_new_cpass, $new_token, $user_username]);
+                $_SESSION['token'] = $new_token;
+                $user_password = $user_new_cpass;
                 $user_full_name = $user_new_full;
                 $success = $lang['profileupdated'] ?? 'Profile updated.';
             } else {
@@ -197,19 +213,11 @@ try {
             $error = $lang['invalidtoken'] ?? 'Invalid CSRF token.';
         } else {
             try {
-                $pdo->beginTransaction();
-
-                // Delete user's pastes
-                $stmt = $pdo->prepare("DELETE FROM pastes WHERE member = ?");
-                $stmt->execute([$user_username]);
-
-                // Delete user
-                $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
-                $stmt->execute([$user_id]);
-
-                $pdo->commit();
+                // Pastes, comments, uploads, albums, API keys and the account
+                paste_delete_account($pdo, $user_id, $user_username);
 
                 // End session
+                paste_remember_cookie(null);
                 session_unset();
                 session_destroy();
 
@@ -240,44 +248,14 @@ try {
     }
 
     // Page views
-    $dateYmd = date('Y-m-d');
-    $ipToday = $_SERVER['REMOTE_ADDR'] ?? '';
-    try {
-        $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-        $stmt->execute([$dateYmd]);
-        $pv = $stmt->fetch();
-
-        if ($pv) {
-            $page_view_id = (int)$pv['id'];
-            $tpage  = (int)$pv['tpage'] + 1;
-            $tvisit = (int)$pv['tvisit'];
-
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-            $stmt->execute([$ipToday, $dateYmd]);
-            if ((int)$stmt->fetchColumn() === 0) {
-                $tvisit += 1;
-                $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-                $stmt->execute([$ipToday, $dateYmd]);
-            }
-
-            $stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-            $stmt->execute([$tpage, $tvisit, $page_view_id]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-            $stmt->execute([$dateYmd, 1, 1]);
-            $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-            $stmt->execute([$ipToday, $dateYmd]);
-        }
-    } catch (PDOException $e) {
-        error_log("Page view tracking error: " . $e->getMessage());
-    }
+    pageViewTrack($pdo, $ip);
 
     $total_pastes = getTotalPastes($pdo, $user_username);
 
     // ========================================================================
     // API Key Management
     // ========================================================================
-    
+
     // Check if API is enabled
     $api_enabled = true;
     $api_keys_per_user = 5;
@@ -293,7 +271,9 @@ try {
     } catch (PDOException $e) {
         // Use defaults
     }
-    
+
+    $api_scopes_ready = $api_enabled && api_keys_ensure($pdo) && api_keys_ready($pdo);
+
     // Handle API key creation
     $newly_created_key = null;
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_api_key']) && $api_enabled) {
@@ -304,26 +284,26 @@ try {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM api_keys WHERE user_id = ?");
             $stmt->execute([$user_id]);
             $keyCount = (int)$stmt->fetchColumn();
-            
+
             if ($keyCount >= $api_keys_per_user) {
                 $error = "You can only have $api_keys_per_user API keys. Please delete one first.";
             } else {
-                $keyName = trim($_POST['key_name'] ?? 'Default');
-                if (empty($keyName)) $keyName = 'Default';
-                
-                // Generate API key
-                $apiKey = bin2hex(random_bytes(32));
-                
-                $stmt = $pdo->prepare("INSERT INTO api_keys (user_id, api_key, name) VALUES (?, ?, ?)");
-                $stmt->execute([$user_id, $apiKey, $keyName]);
-                
-                // Store the full key temporarily so we can show it once
-                $newly_created_key = $apiKey;
-                $success = "API key created successfully!";
+                $keyName = trim((string)($_POST['key_name'] ?? ''));
+                if ($keyName === '') $keyName = 'Default';
+                $keyScopes = $api_scopes_ready
+                    ? array_values(array_intersect(array_keys(API_SCOPES), array_map('strval', (array)($_POST['scopes'] ?? []))))
+                    : array_keys(API_SCOPES);
+                if (!$keyScopes) {
+                    $error = "Choose at least one thing the key can do.";
+                } else {
+                    // Shown once; only its hash is stored
+                    $newly_created_key = api_key_create($pdo, (int)$user_id, mb_substr($keyName, 0, 100), $keyScopes);
+                    $success = "API key created successfully!";
+                }
             }
         }
     }
-    
+
     // Handle API key deletion
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_api_key'])) {
         if (!hash_equals($_SESSION['csrf_token'] ?? '', (string)($_POST['csrf_token'] ?? ''))) {
@@ -337,7 +317,7 @@ try {
             }
         }
     }
-    
+
     // Handle API key regeneration
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['regenerate_api_key'])) {
         if (!hash_equals($_SESSION['csrf_token'] ?? '', (string)($_POST['csrf_token'] ?? ''))) {
@@ -348,23 +328,17 @@ try {
             $stmt = $pdo->prepare("SELECT id FROM api_keys WHERE id = ? AND user_id = ?");
             $stmt->execute([$keyId, $user_id]);
             if ($stmt->fetch()) {
-                // Generate new key
-                $newApiKey = bin2hex(random_bytes(32));
-                $stmt = $pdo->prepare("UPDATE api_keys SET api_key = ?, last_used_at = NULL WHERE id = ?");
-                $stmt->execute([$newApiKey, $keyId]);
-                $newly_created_key = $newApiKey;
+                $newly_created_key = api_key_regenerate($pdo, $keyId);
                 $success = "API key regenerated successfully!";
             }
         }
     }
-    
+
     // Get user's API keys
     $user_api_keys = [];
     if ($api_enabled) {
         try {
-            $stmt = $pdo->prepare("SELECT id, name, LEFT(api_key, 8) as key_prefix, created_at, last_used_at, is_active FROM api_keys WHERE user_id = ? ORDER BY created_at DESC");
-            $stmt->execute([$user_id]);
-            $user_api_keys = $stmt->fetchAll();
+            $user_api_keys = api_keys_for_user($pdo, (int)$user_id);
         } catch (PDOException $e) {
             // Table might not exist
         }

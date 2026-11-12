@@ -1,7 +1,7 @@
 <?php
 /*
  * Email sending utility using PHPMailer with Gmail OAuth 2.0
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -68,7 +68,6 @@ function send_mail(string $to, string $subject, string $message, string $name, s
 {
     global $dbhost, $dbuser, $dbpassword, $dbname;
 
-    error_log("mail.php: send_mail called - To: $to, Subject: $subject, Name: $name, CSRF Token: $csrf_token");
 
 
     // Validate CSRF token
@@ -112,7 +111,6 @@ function send_mail(string $to, string $subject, string $message, string $name, s
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
-        error_log("mail.php: Database connection established");
 
         // Check rate limit
         $email_type = str_contains($subject, 'Account Confirmation') ? 'verification' : (str_contains($subject, 'Password Reset') ? 'reset' : 'test');
@@ -154,13 +152,11 @@ function send_mail(string $to, string $subject, string $message, string $name, s
         $oauth_client_id = trim($mail_settings['oauth_client_id'] ?? '');
         $oauth_client_secret = trim($mail_settings['oauth_client_secret'] ?? '');
         $oauth_refresh_token = trim($mail_settings['oauth_refresh_token'] ?? '');
-        error_log("mail.php: Mail settings - Host: $smtp_host, Username: $smtp_username, Port: $smtp_port, Protocol: $protocol, Auth: $auth, Socket: $socket, Refresh Token: " . ($oauth_refresh_token ? substr($oauth_refresh_token, 0, 10) . '...' : 'none'));
 
         // Log email attempt
         $stmt = $pdo->prepare("INSERT INTO mail_log (email, sent_at, type) VALUES (?, ?, ?)");
         $stmt->execute([$to, date('Y-m-d H:i:s'), $email_type]);
-        error_log("mail.php: Email attempt logged for $to, type: $email_type");
-		
+
         // Validate SMTP settings
         if ($protocol !== '2') {
             error_log("mail.php: Invalid mail protocol: expected SMTP (2), got $protocol");
@@ -242,7 +238,6 @@ function send_mail(string $to, string $subject, string $message, string $name, s
 
         // Send email
         $mailer->send();
-        error_log("mail.php: Email sent successfully to $to");
         ob_end_clean();
         return ['status' => 'success', 'message' => 'Email sent successfully'];
     } catch (Exception $e) {

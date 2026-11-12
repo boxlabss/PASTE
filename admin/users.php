@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 // Guard: admin session
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
@@ -41,7 +41,10 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('users');
 require_once(__DIR__ . '/../includes/spam.php');
+require_once(__DIR__ . '/../includes/account.php');
 
 try {
     $pdo = new PDO("mysql:host=$dbhost;dbname=$dbname;charset=utf8mb4", $dbuser, $dbpassword, [
@@ -101,10 +104,16 @@ if ($hasExempt && (isset($_GET['exempt']) || isset($_GET['unexempt']))) {
 if (isset($_GET['delete'])) {
     $delid = (int)filter_var($_GET['delete'], FILTER_SANITIZE_NUMBER_INT);
     try {
-        $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT username FROM users WHERE id = ?");
         $stmt->execute([$delid]);
-        $msg = '<div class="alert alert-success text-center">User deleted successfully</div>';
-    } catch (PDOException $e) {
+        $delname = $stmt->fetchColumn();
+        if ($delname !== false) {
+            paste_delete_account($pdo, $delid, (string)$delname);
+        }
+        $msg = $delname !== false && paste_username_reserved((string)$delname)
+            ? '<div class="alert alert-success text-center">Account deleted. Content under its reserved name was kept</div>'
+            : '<div class="alert alert-success text-center">User and their pastes, comments, uploads and albums deleted</div>';
+    } catch (Throwable $e) {
         $msg = '<div class="alert alert-danger text-center">Error deleting user: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</div>';
     }
 }
@@ -294,19 +303,7 @@ if (isset($_GET['details'])) {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/spamfilter.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-shield-exclamation me-2"></i>Spam Filter</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('users.php'); ?>
     </div>
   </div>
 </div>
@@ -317,19 +314,7 @@ if (isset($_GET['details'])) {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/dashboard.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/configuration.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/interface.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/admin.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pastes.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'admin/users.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ipbans.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/spamfilter.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-shield-exclamation me-2"></i>Spam Filter</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/stats.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/ads.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/pages.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/sitemap.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'admin/tasks.php', ENT_QUOTES, 'UTF-8'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('users.php'); ?>
         </div>
       </div>
     </div>
@@ -512,14 +497,14 @@ if (isset($_GET['details'])) {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
   // Confirm handlers (Delete / Ban-Unban / Verify)
   document.addEventListener('click', function(e){
     const del = e.target.closest('a.delete-user');
     if (del) {
       e.preventDefault();
-      if (confirm('Delete this user? This cannot be undone.')) window.location.href = del.href;
+      if (confirm('Delete this user and all their pastes, comments, uploads and albums? This cannot be undone.')) window.location.href = del.href;
       return;
     }
     const ban = e.target.closest('a.ban-user');

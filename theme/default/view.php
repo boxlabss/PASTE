@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.4 2026/02/04 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -27,7 +27,7 @@ $initialTheme      = null;
 
 // display label preferring detected label, then map, then friendly fallback
 $display_code = $p_code_label
-  ?? ($geshiformats[$effective_code] ?? (function_exists('paste_friendly_label') ? paste_friendly_label($effective_code) : strtoupper($effective_code)));
+  ?? ($geshiformats[$effective_code] ?? paste_friendly_label($effective_code));
 
 if ($showThemeSwitcher) {
     $candidatesWeb = ['includes/Highlight/styles'];
@@ -74,7 +74,7 @@ $srcMap = [
     'shebang'=>'Shebang','modeline'=>'Editor modeline','fence'=>'Code fence',
     'filename'=>'Filename','markdown'=>'Markdown','heuristic'=>'Heuristics',
     'hljs'=>'Highlighter auto','hljs-auto'=>'Highlighter auto',
-    'php-tag'=>'PHP tag','explicit'=>'Selected','fallback'=>'Fallback'
+    'php-tag'=>'PHP tag','explicit'=>'Selected','fallback'=>'No clear match'
 ];
 $srcLabel = $srcMap[$p_code_source ?? ''] ?? null;
 
@@ -100,9 +100,9 @@ if (!empty($paste_id)) {
 
 $diffUrl = null;
 // Diff URL (if this paste is a fork of another)
-if (isset($p_parent_id) && $p_parent_id > 0 && isset($paste_id) && (int)$paste_id > 0) {
+if (!empty($parent_paste) && isset($paste_id) && (int)$paste_id > 0) {
     // Use slug identifiers if available for URLs
-    $parent_ident = isset($parent_paste['slug']) && $parent_paste['slug'] ? $parent_paste['slug'] : $p_parent_id;
+    $parent_ident = !empty($parent_paste['slug']) ? $parent_paste['slug'] : (int)$parent_paste['id'];
     $current_ident = isset($p_slug) && $p_slug ? $p_slug : $paste_id;
     $diffUrl = rtrim($baseurl ?? '/', '/') . '/diff.php?a=' . urlencode((string)$parent_ident) . '&b=' . urlencode((string)$current_ident);
 }
@@ -156,15 +156,7 @@ if (!function_exists('comment_body_html_safe')) {
 
 // Simple recursive render for threaded comments
 if (!function_exists('render_comment_node')) {
-    /**
-     * @param array    $c           Comment node (may contain children[])
-     * @param bool     $can_comment Current user can reply?
-     * @param string   $commentsActionUrl POST target for comment actions
-     * @param string   $csrf       CSRF token
-     * @param callable $loginNext  login redirect builder
-     * @param int      $depth      current nesting depth (0-based)
-     * @param int      $maxDepth   depth after which children are collapsed
-     */
+    /** One comment and its replies; replies deeper than $maxDepth start collapsed. */
     function render_comment_node(
         array $c,
         bool $can_comment,
@@ -363,7 +355,7 @@ if (!function_exists('render_comment_node')) {
                 <span>Posted on: <?php echo htmlspecialchars($p_date ? date('M j, y @ g:i A', strtotime($p_date)) : date('M j, Y, g:i A')); ?></span>
                 <?php if (isset($parent_paste) && $parent_paste): ?>
                   <span class="text-info">
-                    <i class="bi bi-diagram-2 me-1"></i>Forked from: 
+                    <i class="bi bi-diagram-2 me-1"></i>Forked from:
                     <a href="<?php echo htmlspecialchars($parent_url, ENT_QUOTES, 'UTF-8'); ?>" class="text-info">
                       <?php echo htmlspecialchars($parent_paste['title'] ?: 'Untitled', ENT_QUOTES, 'UTF-8'); ?>
                     </a>
@@ -382,7 +374,7 @@ if (!function_exists('render_comment_node')) {
               </a>
               <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
                 <select class="form-select form-select-sm btn-select hljs-theme-select order-first me-0" title="Code Theme">
-                  <?php foreach ($hl_theme_options as $opt): 
+                  <?php foreach ($hl_theme_options as $opt):
                         $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                   ?>
                     <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -405,7 +397,7 @@ if (!function_exists('render_comment_node')) {
               </button>
               <?php
                 $embed_identifier = $url_identifier ?? $paste_id ?? '';
-                $embed_url  = getEmbedUrl($embed_identifier, $mod_rewrite ?? false, $baseurl ?? '');
+                $embed_url  = $p_embed ?? getEmbedUrl($embed_identifier, $mod_rewrite ?? false, $baseurl ?? '');
                 $embed_code = $embed_identifier ? '<iframe src="' . htmlspecialchars($embed_url, ENT_QUOTES, 'UTF-8') . '" width="100%" height="400px" frameborder="0" allowfullscreen></iframe>' : '';
               ?>
               <button type="button" class="btn btn-outline-secondary embed-tool" title="Embed Paste" onclick="showEmbedCode('<?php echo addslashes(htmlspecialchars($embed_code, ENT_QUOTES, 'UTF-8')); ?>')">
@@ -436,30 +428,30 @@ if (!function_exists('render_comment_node')) {
               <!-- Code block: movable into fullscreen modal -->
               <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
               <span id="code-content-home"></span>
-			<!-- Decryption Passphrase Modal -->
-			<div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
-			  <div class="modal-dialog">
-				<div class="modal-content">
-				  <div class="modal-header">
-					<h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
-					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-				  </div>
-				  <div class="modal-body">
-					<p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
-					<div class="input-group mb-3">
-					  <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
-					  <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
-						<i class="bi bi-eye" id="decryptPassIcon"></i>
-					  </button>
-					</div>
-				  </div>
-				  <div class="modal-footer">
-					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-					<button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
-				  </div>
-				</div>
-			  </div>
-			</div>
+            <!-- Decryption Passphrase Modal -->
+            <div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
+                    <div class="input-group mb-3">
+                      <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
+                      <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
+                        <i class="bi bi-eye" id="decryptPassIcon"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
+                  </div>
+                </div>
+              </div>
+            </div>
             <?php endif; ?>
 
             <!-- Raw paste (lazy load; JS wraps textarea later) -->
@@ -501,6 +493,7 @@ if (!function_exists('render_comment_node')) {
                   <div class="card-body">
                     <form class="form-horizontal" name="mainForm" action="index.php" method="POST">
                       <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                      <?= spam_form_fields() ?>
                       <div class="row mb-3 g-3">
                         <div class="col-sm-4">
                           <div class="input-group">
@@ -572,7 +565,7 @@ if (!function_exists('render_comment_node')) {
                           <select class="form-select" name="visibility">
                             <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
                             <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
-                            <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
+                            <?php if (isset($_SESSION['username'])): ?><option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option><?php endif; ?>
                           </select>
                         </div>
                       </div>
@@ -616,7 +609,7 @@ if (!function_exists('render_comment_node')) {
 
                       <div class="d-flex flex-wrap gap-2">
                         <input type="hidden" name="paste_id" value="<?php echo htmlspecialchars($url_identifier ?? $paste_id ?? '', ENT_QUOTES, 'UTF-8'); ?>" />
-                        <input type="hidden" name="fork_from" value="<?php echo htmlspecialchars((string)($paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>" />
+                        <input type="hidden" name="fork_from" value="<?php echo htmlspecialchars((string)($url_identifier ?? $paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>" />
                         <?php if (isset($_SESSION['username']) && $_SESSION['username'] == ($p_member ?? 'Guest')): ?>
                           <input class="btn btn-primary paste-button" type="submit" name="edit" id="edit" value="<?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit Paste', ENT_QUOTES, 'UTF-8'); ?>" />
                         <?php endif; ?>
@@ -646,7 +639,7 @@ if (!function_exists('render_comment_node')) {
                   <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
                     <div class="ms-2" style="min-width:180px">
                       <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                        <?php foreach ($hl_theme_options as $opt): 
+                        <?php foreach ($hl_theme_options as $opt):
                               $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                         ?>
                           <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -706,7 +699,7 @@ if (!function_exists('render_comment_node')) {
             </div>
             <div class="card-body p-0">
               <ul class="list-group list-group-flush">
-                <?php foreach ($child_pastes as $fork): 
+                <?php foreach ($child_pastes as $fork):
                   $fork_ident = !empty($fork['slug']) ? $fork['slug'] : $fork['id'];
                   $fork_url = ($mod_rewrite == '1') ? $baseurl . $fork_ident : $baseurl . 'paste.php?id=' . $fork_ident;
                   $diff_url = rtrim($baseurl, '/') . '/diff.php?a=' . urlencode((string)$url_identifier) . '&b=' . urlencode((string)$fork_ident);
@@ -960,7 +953,7 @@ if (!function_exists('render_comment_node')) {
               <select
                 class="form-select form-select-sm btn-select hljs-theme-select order-first me-0"
                 title="Code Theme">
-                <?php foreach ($hl_theme_options as $opt): 
+                <?php foreach ($hl_theme_options as $opt):
                       $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                 ?>
                   <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -983,7 +976,7 @@ if (!function_exists('render_comment_node')) {
             </button>
             <?php
               $embed_identifier = $url_identifier ?? $paste_id ?? '';
-              $embed_url  = getEmbedUrl($embed_identifier, $mod_rewrite ?? false, $baseurl ?? '');
+              $embed_url  = $p_embed ?? getEmbedUrl($embed_identifier, $mod_rewrite ?? false, $baseurl ?? '');
               $embed_code = $embed_identifier ? '<iframe src="' . htmlspecialchars($embed_url, ENT_QUOTES, 'UTF-8') . '" width="100%" height="400px" frameborder="0" allowfullscreen></iframe>' : '';
             ?>
             <button type="button" class="btn btn-outline-secondary embed-tool" title="Embed Paste" onclick="showEmbedCode('<?php echo addslashes(htmlspecialchars($embed_code, ENT_QUOTES, 'UTF-8')); ?>')">
@@ -1020,30 +1013,30 @@ if (!function_exists('render_comment_node')) {
             <!-- Code block: movable into fullscreen modal -->
             <div class="code-content" id="code-content"><?php echo $p_content ?? ''; ?></div>
             <span id="code-content-home"></span>
-			<!-- Decryption Passphrase Modal -->
-			<div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
-			  <div class="modal-dialog">
-				<div class="modal-content">
-				  <div class="modal-header">
-					<h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
-					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-				  </div>
-				  <div class="modal-body">
-					<p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
-					<div class="input-group mb-3">
-					  <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
-					  <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
-						<i class="bi bi-eye" id="decryptPassIcon"></i>
-					  </button>
-					</div>
-				  </div>
-				  <div class="modal-footer">
-					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-					<button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
-				  </div>
-				</div>
-			  </div>
-			</div>
+            <!-- Decryption Passphrase Modal -->
+            <div class="modal fade" id="decryptPassModal" tabindex="-1" aria-labelledby="decryptPassLabel" aria-hidden="true">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="decryptPassLabel">Decrypt Paste</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body">
+                    <p>Encrypted client-side. Enter the passphrase to decrypt this paste.</p>
+                    <div class="input-group mb-3">
+                      <input type="password" class="form-control" id="decryptPassInput" autocomplete="current-password">
+                      <button type="button" class="btn btn-outline-secondary" id="toggleDecryptPass" title="Show/Hide Password" aria-label="Toggle password visibility">
+                        <i class="bi bi-eye" id="decryptPassIcon"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="decryptConfirm">Decrypt</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           <?php endif; ?>
           <!-- Raw paste (lazy load; textarea prefilled as fallback) -->
           <div class="mb-3 position-relative" id="raw-block"
@@ -1086,6 +1079,7 @@ if (!function_exists('render_comment_node')) {
                 <div class="card-body">
                   <form class="form-horizontal" name="mainForm" action="index.php" method="POST">
                       <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                      <?= spam_form_fields() ?>
                     <div class="row mb-3 g-3">
                       <div class="col-sm-4">
                         <div class="input-group">
@@ -1163,7 +1157,7 @@ if (!function_exists('render_comment_node')) {
                         <select class="form-select" name="visibility">
                           <option value="0" <?php echo ($p_visible ?? '0') == "0" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['public'] ?? 'Public', ENT_QUOTES, 'UTF-8'); ?></option>
                           <option value="1" <?php echo ($p_visible ?? '0') == "1" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['unlisted'] ?? 'Unlisted', ENT_QUOTES, 'UTF-8'); ?></option>
-                          <option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option>
+                          <?php if (isset($_SESSION['username'])): ?><option value="2" <?php echo ($p_visible ?? '0') == "2" ? 'selected' : ''; ?>><?php echo htmlspecialchars($lang['private'] ?? 'Private', ENT_QUOTES, 'UTF-8'); ?></option><?php endif; ?>
                         </select>
                       </div>
                     </div>
@@ -1212,7 +1206,7 @@ if (!function_exists('render_comment_node')) {
 
                     <div class="d-flex flex-wrap gap-2">
                       <input type="hidden" name="paste_id" value="<?php echo htmlspecialchars($url_identifier ?? $paste_id ?? '', ENT_QUOTES, 'UTF-8'); ?>" />
-                      <input type="hidden" name="fork_from" value="<?php echo htmlspecialchars((string)($paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>" />
+                      <input type="hidden" name="fork_from" value="<?php echo htmlspecialchars((string)($url_identifier ?? $paste_id ?? ''), ENT_QUOTES, 'UTF-8'); ?>" />
                       <?php if (isset($_SESSION['username']) && $_SESSION['username'] == ($p_member ?? 'Guest')): ?>
                         <input class="btn btn-primary paste-button" type="submit" name="edit" id="edit" value="<?php echo htmlspecialchars($lang['editpaste'] ?? 'Edit Paste', ENT_QUOTES, 'UTF-8'); ?>" />
                       <?php endif; ?>
@@ -1242,7 +1236,7 @@ if (!function_exists('render_comment_node')) {
                 <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
                   <div class="ms-2" style="min-width:180px">
                     <select class="form-select form-select-sm hljs-theme-select" title="Code Theme">
-                      <?php foreach ($hl_theme_options as $opt): 
+                      <?php foreach ($hl_theme_options as $opt):
                             $sel = ($initialTheme && $opt['id'] === $initialTheme) ? ' selected' : '';
                       ?>
                         <option value="<?php echo htmlspecialchars($opt['id']); ?>" data-href="<?php echo htmlspecialchars($opt['href']); ?>"<?php echo $sel; ?>>
@@ -1302,7 +1296,7 @@ if (!function_exists('render_comment_node')) {
           </div>
           <div class="card-body p-0">
             <ul class="list-group list-group-flush">
-              <?php foreach ($child_pastes as $fork): 
+              <?php foreach ($child_pastes as $fork):
                 $fork_ident = !empty($fork['slug']) ? $fork['slug'] : $fork['id'];
                 $fork_url = ($mod_rewrite == '1') ? $baseurl . $fork_ident : $baseurl . 'paste.php?id=' . $fork_ident;
                 $diff_url = rtrim($baseurl, '/') . '/diff.php?a=' . urlencode((string)$url_identifier) . '&b=' . urlencode((string)$fork_ident);
@@ -1519,7 +1513,7 @@ if (!function_exists('render_comment_node')) {
 <input type="hidden" id="originalLanguage" value="<?php echo htmlspecialchars($original_p_code ?? 'plaintext', ENT_QUOTES, 'UTF-8'); ?>">
 
 <!-- Load Highlight.js only for client-encrypted pastes -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js" integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous"></script>
 <script>
 document.addEventListener('DOMContentLoaded', async function() {
   var decryptModalEl = document.getElementById('decryptPassModal');
@@ -1605,21 +1599,30 @@ document.addEventListener('DOMContentLoaded', async function() {
       var iv = combined.slice(16, 28);
       var encrypted = combined.slice(28);
 
+      // PBKDF2 rounds: a salt starting C5 9E carries them in thousands; older pastes used 100000
       var keyMaterial = await crypto.subtle.importKey(
         'raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits', 'deriveKey']
       );
-      var key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-        keyMaterial, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
-      );
-
-      var decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+      var openWith = async function (rounds) {
+        var key = await crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt, iterations: rounds, hash: 'SHA-256' },
+          keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+        );
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+      };
+      var rounds = (salt[0] === 0xC5 && salt[1] === 0x9E && ((salt[2] << 8) | salt[3]) > 0)
+        ? ((salt[2] << 8) | salt[3]) * 1000 : 100000;
+      var decrypted = rounds === 100000
+        ? await openWith(100000)
+        : await openWith(rounds).catch(function () { return openWith(100000); });
       var decText = new TextDecoder().decode(decrypted);
 
       // Highlighting and line numbers
       var lang = mapToHlLang(origLangInput.value || 'plaintext');
       var highlightedHtml, hlLang;
-      if (hljs) {
+      var escapeText = function (t) { return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+      // highlight.js comes from a CDN; without it the text is shown plain
+      if (typeof hljs !== 'undefined') {
         try {
           if (lang === 'plaintext' && origLangInput.value.toLowerCase() === 'autodetect') {
             const result = hljs.highlightAuto(decText);
@@ -1631,11 +1634,11 @@ document.addEventListener('DOMContentLoaded', async function() {
           }
         } catch (e) {
           console.warn('Highlight.js failed for lang:', lang, e);
-          highlightedHtml = decText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          highlightedHtml = escapeText(decText);
           hlLang = 'plaintext';
         }
       } else {
-        highlightedHtml = decText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        highlightedHtml = escapeText(decText);
         hlLang = 'plaintext';
       }
 

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,14 +15,14 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 // reCAPTCHA and Turnstile config
 $cap_e = $_SESSION['cap_e'] ?? 'off';
 $mode = $_SESSION['mode'] ?? 'normal';
 $recaptcha_version = $_SESSION['recaptcha_version'] ?? 'v2';
 $recaptcha_sitekey = $_SESSION['recaptcha_sitekey'] ?? '';
 $turnstile_sitekey = $_SESSION['turnstile_sitekey'] ?? '';
-$captcha_enabled = ($cap_e === 'on' && in_array($mode, ['reCAPTCHA', 'turnstile']) && (!empty($recaptcha_sitekey) || !empty($turnstile_sitekey)));
+$captcha_enabled = empty($no_third_party) && ($cap_e === 'on' && in_array($mode, ['reCAPTCHA', 'turnstile']) && (!empty($recaptcha_sitekey) || !empty($turnstile_sitekey)));
 ?>
 <!-- Footer -->
 <footer class="container-xxl py-3 my-4 border-top">
@@ -126,7 +126,7 @@ $captcha_enabled = ($cap_e === 'on' && in_array($mode, ['reCAPTCHA', 'turnstile'
   </div>
 </div>
 <!-- Scripts -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js">// Client side passphrase</script>
+<script src="https://cdn.jsdelivr.net/npm/zxcvbn@4.4.2/dist/zxcvbn.js" integrity="sha384-LXuP8lknSGBOLVn4fwVOl+rWR+zOEtZx6CF9ZLaN6gKBgLByU4D79VWWjV4/gefq" crossorigin="anonymous">// Client side passphrase</script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   var encryptModalEl = document.getElementById('encryptPassModal');
@@ -181,11 +181,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var labels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
     var colors = ['bg-danger', 'bg-warning', 'bg-info', 'bg-primary', 'bg-success'];
     var widths = [20, 40, 60, 80, 100];
-    
+
     strengthBar.style.width = widths[strength] + '%';
     strengthBar.className = 'progress-bar ' + colors[strength];
     strengthText.textContent = 'Strength: ' + labels[strength];
-    
+
     encryptConfirm.disabled = (val.length < 12 || strength < 2);
   });
 
@@ -211,27 +211,28 @@ document.addEventListener('DOMContentLoaded', function() {
     clientPass = pass; // Store for later #pass= append (client-side only)
     var dataField = document.querySelector('[name="paste_data"]');
     var data = new TextEncoder().encode(dataField.value);
-    
-    // Derive key (PBKDF2)
+
+    // Derive key (PBKDF2, 600000 rounds); the salt's first four bytes record the rounds (C5 9E, then thousands)
     var salt = crypto.getRandomValues(new Uint8Array(16));
+    salt[0] = 0xC5; salt[1] = 0x9E; salt[2] = 600 >> 8; salt[3] = 600 & 255;
     var keyMaterial = await crypto.subtle.importKey(
       'raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits', 'deriveKey']
     );
     var key = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
       keyMaterial, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
     );
-    
+
     // Encrypt
     var iv = crypto.getRandomValues(new Uint8Array(12));
     var encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-    
+
     // Combine
     var combined = new Uint8Array(salt.byteLength + iv.byteLength + encrypted.byteLength);
     combined.set(salt, 0);
     combined.set(iv, salt.byteLength);
     combined.set(new Uint8Array(encrypted), salt.byteLength + iv.byteLength);
-    
+
     dataField.value = bytesToBase64(combined);
     document.getElementById('is_client_encrypted').value = '1';
     encryptModal.hide();
@@ -265,14 +266,14 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
-<script src="<?php echo htmlspecialchars($baseurl . 'theme/' . ($default_theme ?? 'default') . '/js/paste.min.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars(paste_theme_asset($baseurl, $default_theme ?? 'default', 'js/paste.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php if (!empty($showThemeSwitcher) && !empty($hl_theme_options)): ?>
   <script>
     // Highlight.php theme picker
     window.__HL_THEMES = <?php echo json_encode($hl_theme_options, JSON_UNESCAPED_SLASHES); ?>;
     window.__HL_INITIAL = <?php echo isset($initialTheme) ? json_encode($initialTheme) : 'null'; ?>;
   </script>
-  <script src="<?php echo htmlspecialchars($baseurl . 'theme/' . ($default_theme ?? 'default') . '/js/highlightTheme.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+  <script src="<?php echo htmlspecialchars(paste_theme_asset($baseurl, $default_theme ?? 'default', 'js/highlightTheme.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php endif; ?>
 <script>
 (function () {
@@ -409,10 +410,7 @@ document.addEventListener('DOMContentLoaded', function() {
         siteKey: <?php echo json_encode($recaptcha_sitekey); ?>
       };
       (function () {
-        function logOk(m) { console.log('%c' + m, 'color:#16a34a;font-weight:600'); }
-        function logErr(m) { console.log('%c' + m, 'color:#ef4444;font-weight:700'); }
-        function logWarn(m) { console.log('%c' + m, 'color:#f59e0b;font-weight:600'); }
-        logOk('[reCAPTCHA] v3 enabled; loading api.js…');
+        function logErr(m) { console.warn(m); }
         var s = document.createElement('script');
         s.async = true;
         s.defer = true;
@@ -420,7 +418,6 @@ document.addEventListener('DOMContentLoaded', function() {
         s.onload = function () {
           if (!window.grecaptcha) { logErr('[reCAPTCHA] api.js loaded but grecaptcha missing'); return; }
           grecaptcha.ready(function () {
-            logOk('[reCAPTCHA] grecaptcha ready.');
             var actionMap = {
               'mainForm': 'create_paste',
               'signin-form': 'login',
@@ -430,11 +427,10 @@ document.addEventListener('DOMContentLoaded', function() {
               'reset-form': 'reset',
               'resend-form': 'resend'
             };
-			setInterval(function() {
-			  grecaptcha.execute(window.pasteConfig.siteKey, { action: 'keepalive' })
-				.then(function(t) { console.log('[reCAPTCHA] keepalive token generated'); })
-				.catch(function(e) { logErr('[reCAPTCHA] keepalive failed: ' + e); });
-			}, 110000); // Every ~1.8 minutes
+            setInterval(function() {
+              grecaptcha.execute(window.pasteConfig.siteKey, { action: 'keepalive' })
+                .catch(function(e) { logErr('[reCAPTCHA] keepalive failed: ' + e); });
+            }, 110000); // Every ~1.8 minutes
             function ensureHidden(form) {
               var h = form.querySelector('input[name="g-recaptcha-response"]');
               if (!h) {
@@ -452,10 +448,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 var id = form.id || '';
                 var action = actionMap[id] || 'submit';
                 var hidden = form.querySelector('input[name="g-recaptcha-response"]');
-                if (hidden && hidden.value) { logWarn('[reCAPTCHA] token already present for "' + action + '"; allow submit.'); return; }
+                if (hidden && hidden.value) return;
                 e.preventDefault();
                 grecaptcha.execute(window.pasteConfig.siteKey, { action: action }).then(function (token) {
-                  console.log('[reCAPTCHA] action="%s" token: %s…', action, token.slice(0, 28));
                   ensureHidden(form).value = token;
                   HTMLFormElement.prototype.submit.call(form);
                 }).catch(function (e2) {
@@ -477,24 +472,9 @@ document.addEventListener('DOMContentLoaded', function() {
         var POLL_MS  = 200;
         var MAX_WAIT = 25000;
 
-        // Widgets are rendered implicitly by api.js from their data-* values.
-        // sitekey, action, appearance, execution, size, theme, retry and
-        // retry-interval are FIXED at that moment, and passing any of them
-        // again to render() or execute() makes Turnstile throw "parameters ...
-        // not allowed be changed between the calls of render() and execute()".
-        // Nothing below ever passes an options object.
-
-        // The token is read with getResponse(widget), which is scoped to a
-        // single widget. That matters because ids are duplicated on some pages:
-        // the header sign in and sign up modals reuse the same input ids and
-        // form ids as the login page forms, so getElementById alone is not
-        // trustworthy there. The callbacks below are a best effort fast path;
-        // getResponse is the authoritative, form-scoped read.
-        // Fill the matching hidden input the moment a widget solves. A widget
-        // that is not deferred solves at render time, so for those the token is
-        // already in the form before anyone clicks submit and the handler below
-        // never has to do anything. That is how the paste form has always
-        // worked and it must keep working without depending on the handler.
+        // Widgets render from their data-* attributes; render() and execute() are never given options,
+        // which Turnstile refuses once a widget exists. Tokens are read per widget with getResponse(),
+        // since some pages repeat input ids; these callbacks fill the hidden inputs as soon as a widget solves.
         function setToken(id, token) {
           var el = document.getElementById(id);
           if (el && !el.value) { el.value = token; }
@@ -519,19 +499,12 @@ document.addEventListener('DOMContentLoaded', function() {
           try { return turnstile.getResponse(widget) || ''; } catch (err) { return ''; }
         }
 
-        // Re-fire the submit rather than calling form.submit(), so that other
-        // submit listeners still get to run with the token already in place.
-        // The paste form has one: the client side encryption handler builds a
-        // FormData snapshot, and if it runs before the token lands it posts an
-        // empty cf-turnstile-response and the server reports a missing token.
-        // requestSubmit() also re-runs constraint validation, which is fine
-        // because the original submit already passed it.
+        // Submit again with the token in place, so other submit handlers (paste encryption) see it
         function reSubmit(form) {
           if (typeof HTMLFormElement.prototype.requestSubmit === 'function') {
             HTMLFormElement.prototype.requestSubmit.call(form);
           } else {
-            // Prototype method: a control with id or name "submit" shadows
-            // form.submit on several of these forms.
+            // From the prototype: a control named "submit" hides form.submit
             HTMLFormElement.prototype.submit.call(form);
           }
         }

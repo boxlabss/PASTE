@@ -3,7 +3,7 @@
  * Documentation Index
  * shows available docs
  *
- * Paste $v3.4 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,13 +15,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 $cap_e = $_SESSION['cap_e'] ?? 'off';
 $mode = $_SESSION['mode'] ?? 'normal';
 $recaptcha_version = $_SESSION['recaptcha_version'] ?? 'v2';
 $recaptcha_sitekey = $_SESSION['recaptcha_sitekey'] ?? '';
 $turnstile_sitekey = $_SESSION['turnstile_sitekey'] ?? '';
-$captcha_enabled = ($cap_e === 'on');
+$captcha_enabled = ($cap_e === 'on') && empty($no_third_party);
 $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
 ?>
 
@@ -36,123 +36,130 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
     <link rel="shortcut icon" href="<?= htmlspecialchars($baseurl . 'theme/' . ($default_theme ?? 'default') . '/img/favicon.ico', ENT_QUOTES, 'UTF-8') ?>">
     <link href="//cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <link href="//cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" rel="stylesheet">
-	<?php if (($highlighter ?? 'geshi') === 'highlight'): ?>
-	  <?php
-	  // Highlight.php theme CSS (only when using highlight.php)
-	  $stylesRel = 'includes/Highlight/styles';
-	  $styleFile = $hl_style ?? 'hybrid.css';
-	  $href = rtrim($baseurl ?? '/', '/') . '/' . $stylesRel . '/' . $styleFile;
-	  ?>
-	  <link rel="stylesheet" id="hljs-theme-link" href="<?= htmlspecialchars($href, ENT_QUOTES, 'UTF-8') ?>">
-	<?php endif; ?>
-	<?php if (isset($ges_style)): ?><?= $ges_style ?><?php endif; ?>
-    <link href="<?= htmlspecialchars($baseurl . 'theme/' . ($default_theme ?? 'default') . '/css/paste.css', ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css">
+    <?php if (($highlighter ?? 'geshi') === 'highlight'): ?>
+      <?php
+      // Highlight.php theme CSS (only when using highlight.php)
+      $stylesRel = 'includes/Highlight/styles';
+      $styleFile = $hl_style ?? 'hybrid.css';
+      $href = rtrim($baseurl ?? '/', '/') . '/' . $stylesRel . '/' . $styleFile;
+      ?>
+      <link rel="stylesheet" id="hljs-theme-link" href="<?= htmlspecialchars($href, ENT_QUOTES, 'UTF-8') ?>">
+    <?php endif; ?>
+    <?php if (isset($ges_style)): ?><?= $ges_style ?><?php endif; ?>
+    <link href="<?= htmlspecialchars(paste_theme_asset($baseurl, $default_theme ?? 'default', 'css/paste.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet" type="text/css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,222;1,222&display=swap');
     </style>
-	<?php if ($captcha_enabled): ?>
-	  <?php if ($mode === 'reCAPTCHA' && strtolower($recaptcha_version) === 'v2'): ?>
-		<!-- reCAPTCHA v2 -->
-		<script src="https://www.google.com/recaptcha/api.js" async defer></script>
-	  <?php elseif ($mode === 'reCAPTCHA' && strtolower($recaptcha_version) === 'v3'): ?>
-		<!-- reCAPTCHA v3 -->
-		<script src="https://www.google.com/recaptcha/api.js?render=<?php echo urlencode($recaptcha_sitekey); ?>" async defer></script>
-	  <?php elseif ($mode === 'turnstile'): ?>
-		<!-- Cloudflare Turnstile -->
-		<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
-	  <?php endif; ?>
-	<?php endif; ?>
+    <?php if ($captcha_enabled): ?>
+      <?php if ($mode === 'reCAPTCHA' && strtolower($recaptcha_version) === 'v2'): ?>
+        <!-- reCAPTCHA v2 -->
+        <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+      <?php elseif ($mode === 'reCAPTCHA' && strtolower($recaptcha_version) === 'v3'): ?>
+        <!-- reCAPTCHA v3 -->
+        <script src="https://www.google.com/recaptcha/api.js?render=<?php echo urlencode($recaptcha_sitekey); ?>" async defer></script>
+      <?php elseif ($mode === 'turnstile'): ?>
+        <!-- Cloudflare Turnstile -->
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+      <?php endif; ?>
+    <?php endif; ?>
 </head>
 <body>
-	<!-- Header -->
-	<nav class="navbar navbar-expand-lg bg-dark">
-		<div class="container-xxl d-flex align-items-center">
-			<!-- Top bar -->
-			<div class="d-flex align-items-center">
-				<!-- Logo -->
-				<a class="navbar-brand" href="<?= htmlspecialchars($baseurl ?? '', ENT_QUOTES, 'UTF-8') ?>">
-					<i class="bi bi-clipboard"></i> <?= htmlspecialchars($site_name ?? '', ENT_QUOTES, 'UTF-8') ?>
-				</a>
+    <!-- Header -->
+    <nav class="navbar navbar-expand-lg bg-dark">
+        <div class="container-xxl d-flex align-items-center">
+            <!-- Top bar -->
+            <div class="d-flex align-items-center">
+                <!-- Logo -->
+                <a class="navbar-brand" href="<?= htmlspecialchars($baseurl ?? '', ENT_QUOTES, 'UTF-8') ?>">
+                    <i class="bi bi-clipboard"></i> <?= htmlspecialchars($site_name ?? '', ENT_QUOTES, 'UTF-8') ?>
+                </a>
 
-				<?php if (!isset($privatesite) || $privatesite != 'on'): ?>
-					<!-- Search -->
-					<div class="navbar-center">
-						<form class="search-form" action="<?= htmlspecialchars($baseurl . ($mod_rewrite == '1' ? 'archive' : 'archive.php'), ENT_QUOTES, 'UTF-8') ?>" method="get">
-							<input class="form-control me-2" type="search" name="q" id="searchInput"
-								   placeholder="<?= htmlspecialchars($lang['search'] ?? 'Search pastes...', ENT_QUOTES, 'UTF-8') ?>"
-								   value="<?= htmlspecialchars($_GET['q'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="off">
-							<button class="btn btn-outline-light" type="submit"><i class="bi bi-search"></i></button>
-						</form>
-					</div>
-				<?php endif; ?>
+                <?php if (!isset($privatesite) || $privatesite != 'on'): ?>
+                    <!-- Search -->
+                    <div class="navbar-center">
+                        <form class="search-form" action="<?= htmlspecialchars($baseurl . ($mod_rewrite == '1' ? 'archive' : 'archive.php'), ENT_QUOTES, 'UTF-8') ?>" method="get">
+                            <input class="form-control me-2" type="search" name="q" id="searchInput"
+                                   placeholder="<?= htmlspecialchars($lang['search'] ?? 'Search pastes...', ENT_QUOTES, 'UTF-8') ?>"
+                                   value="<?= htmlspecialchars($_GET['q'] ?? '', ENT_QUOTES, 'UTF-8') ?>" autocomplete="off">
+                            <button class="btn btn-outline-light" type="submit"><i class="bi bi-search"></i></button>
+                        </form>
+                    </div>
+                <?php endif; ?>
 
-				<!-- Toggler -->
-				<button class="navbar-toggler flex-shrink-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
-						aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-					<span class="navbar-toggler-icon"></span>
-				</button>
-			</div>
+                <!-- Toggler -->
+                <button class="navbar-toggler flex-shrink-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                        aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+            </div>
 
-			<!-- Menu  -->
-			<div class="collapse navbar-collapse" id="navbarNav">
-				<ul class="navbar-nav ms-auto">
-					<?php
-					// Archive link
-					if (!isset($privatesite) || $privatesite != 'on') {
-						if ($mod_rewrite == '1') {
-							echo '<li class="nav-item"><a class="nav-link" href="' . htmlspecialchars($baseurl . 'archive', ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($lang['archive'] ?? 'Archive', ENT_QUOTES, 'UTF-8') . '</a></li>';
-						} else {
-							echo '<li class="nav-item"><a class="nav-link" href="' . htmlspecialchars($baseurl . 'archive.php', ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($lang['archive'] ?? 'Archive', ENT_QUOTES, 'UTF-8') . '</a></li>';
-						}
-					}
-					// Dynamic pages (header/both) from `pages` table
-					$headerLinks = getNavLinks($pdo, 'header');
-					echo renderBootstrapNav($headerLinks);
-					?>
+            <!-- Menu  -->
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <?php
+                    // Archive link
+                    if (!isset($privatesite) || $privatesite != 'on') {
+                        if ($mod_rewrite == '1') {
+                            echo '<li class="nav-item"><a class="nav-link" href="' . htmlspecialchars($baseurl . 'archive', ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($lang['archive'] ?? 'Archive', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                        } else {
+                            echo '<li class="nav-item"><a class="nav-link" href="' . htmlspecialchars($baseurl . 'archive.php', ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($lang['archive'] ?? 'Archive', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                        }
+                    }
+                    // Image and video uploads
+                    $imgNav = function_exists('img_settings') && isset($pdo) && $pdo instanceof PDO && (int)(img_settings($pdo)['img_enabled'] ?? 0) === 1;
+                    if ($imgNav) {
+                        echo '<li class="nav-item"><a class="nav-link" href="' . htmlspecialchars(img_home_url($baseurl), ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($lang['images'] ?? 'Images', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                    }
+                    // Dynamic pages (header/both) from `pages` table
+                    $headerLinks = getNavLinks($pdo, 'header');
+                    echo renderBootstrapNav($headerLinks);
+                    ?>
 
-					<!-- Account/Guest dropdown -->
-					<li class="nav-item dropdown navbar-nav-guest">
-					<?php if (isset($_SESSION['token'])): ?>
-						<a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-							<i class="bi bi-person"></i> <?= htmlspecialchars($_SESSION['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>
-						</a>
-						<ul class="dropdown-menu dropdown-menu-end">
-							<li><h6 class="dropdown-header"><?= htmlspecialchars($lang['my_account'] ?? 'My Account', ENT_QUOTES, 'UTF-8') ?></h6></li>
-						<?php
-						if ($mod_rewrite == '1') {
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'user/' . urlencode($_SESSION['username'] ?? ''), ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-clipboard"></i> ' . htmlspecialchars($lang['pastes'] ?? 'Pastes', ENT_QUOTES, 'UTF-8') . '</a></li>';
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'profile', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-person"></i> ' . htmlspecialchars($lang['settings'] ?? 'Settings', ENT_QUOTES, 'UTF-8') . '</a></li>';
-							echo '<li><hr class="dropdown-divider"></li>';
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'login.php?action=logout', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-box-arrow-right"></i> ' . htmlspecialchars($lang['logout'] ?? 'Logout', ENT_QUOTES, 'UTF-8') . '</a></li>';
-						} else {
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'user.php?user=' . urlencode($_SESSION['username'] ?? ''), ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-clipboard"></i> ' . htmlspecialchars($lang['pastes'] ?? 'Pastes', ENT_QUOTES, 'UTF-8') . '</a></li>';
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'profile.php', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-person"></i> ' . htmlspecialchars($lang['settings'] ?? 'Settings', ENT_QUOTES, 'UTF-8') . '</a></li>';
-							echo '<li><hr class="dropdown-divider"></li>';
-							echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'login.php?action=logout', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-box-arrow-right"></i> ' . htmlspecialchars($lang['logout'] ?? 'Logout', ENT_QUOTES, 'UTF-8') . '</a></li>';
-						}
-						?>
-						</ul>
-						<?php else: ?>
-						<a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-							<i class="bi bi-person"></i> <?= htmlspecialchars($lang['guest'] ?? 'Guest', ENT_QUOTES, 'UTF-8') ?>
-						</a>
-						<ul class="dropdown-menu dropdown-menu-end">
-							<li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#signin"><i class="bi bi-box-arrow-in-right"></i> <?= htmlspecialchars($lang['login'] ?? 'Login', ENT_QUOTES, 'UTF-8') ?></a></li>
-							<li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#signup"><i class="bi bi-person-plus"></i> <?= htmlspecialchars($lang['signup'] ?? 'Register', ENT_QUOTES, 'UTF-8') ?></a></li>
-							<?php if ($enablegoog == 'yes'): ?>
-							<li><a class="dropdown-item btn-oauth" href="<?= htmlspecialchars($baseurl . 'login.php?login=google', ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-google oauth-icon"></i> <?= htmlspecialchars($lang['login_with_google'] ?? 'Google', ENT_QUOTES, 'UTF-8') ?></a></li>
-							<?php endif; ?>
-							<?php if ($enablefb == 'yes'): ?>
-							<li><a class="dropdown-item btn-oauth" href="<?= htmlspecialchars($baseurl . 'login.php?login=facebook', ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-facebook oauth-icon"></i> <?= htmlspecialchars($lang['login_with_facebook'] ?? 'Facebook', ENT_QUOTES, 'UTF-8') ?></a></li>
-							<?php endif; ?>
-						</ul>
-						<?php endif; ?>
-					</li>
-				</ul>
-			</div>
-		</div>
-	</nav>
-	
+                    <!-- Account/Guest dropdown -->
+                    <li class="nav-item dropdown navbar-nav-guest">
+                    <?php if (isset($_SESSION['token'])): ?>
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person"></i> <?= htmlspecialchars($_SESSION['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><h6 class="dropdown-header"><?= htmlspecialchars($lang['my_account'] ?? 'My Account', ENT_QUOTES, 'UTF-8') ?></h6></li>
+                        <?php
+                        $myUploads = $imgNav
+                            ? '<li><a class="dropdown-item" href="' . htmlspecialchars(img_home_url($baseurl), ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-images"></i> ' . htmlspecialchars($lang['my_uploads'] ?? 'Uploads', ENT_QUOTES, 'UTF-8') . '</a></li>'
+                            : '';
+                        if ($mod_rewrite == '1') {
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'user/' . urlencode($_SESSION['username'] ?? ''), ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-clipboard"></i> ' . htmlspecialchars($lang['pastes'] ?? 'Pastes', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                            echo $myUploads;
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'profile', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-person"></i> ' . htmlspecialchars($lang['settings'] ?? 'Settings', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                            echo '<li><hr class="dropdown-divider"></li>';
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'login.php?action=logout', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-box-arrow-right"></i> ' . htmlspecialchars($lang['logout'] ?? 'Logout', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                        } else {
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'user.php?user=' . urlencode($_SESSION['username'] ?? ''), ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-clipboard"></i> ' . htmlspecialchars($lang['pastes'] ?? 'Pastes', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                            echo $myUploads;
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'profile.php', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-person"></i> ' . htmlspecialchars($lang['settings'] ?? 'Settings', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                            echo '<li><hr class="dropdown-divider"></li>';
+                            echo '<li><a class="dropdown-item" href="' . htmlspecialchars($baseurl . 'login.php?action=logout', ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-box-arrow-right"></i> ' . htmlspecialchars($lang['logout'] ?? 'Logout', ENT_QUOTES, 'UTF-8') . '</a></li>';
+                        }
+                        ?>
+                        </ul>
+                        <?php else: ?>
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person"></i> <?= htmlspecialchars($lang['guest'] ?? 'Guest', ENT_QUOTES, 'UTF-8') ?>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#signin"><i class="bi bi-box-arrow-in-right"></i> <?= htmlspecialchars($lang['login'] ?? 'Login', ENT_QUOTES, 'UTF-8') ?></a></li>
+                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#signup"><i class="bi bi-person-plus"></i> <?= htmlspecialchars($lang['signup'] ?? 'Register', ENT_QUOTES, 'UTF-8') ?></a></li>
+                            <?php if ($enablegoog == 'yes'): ?>
+                            <li><a class="dropdown-item btn-oauth" href="<?= htmlspecialchars($baseurl . 'login.php?login=google', ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-google oauth-icon"></i> <?= htmlspecialchars($lang['login_with_google'] ?? 'Google', ENT_QUOTES, 'UTF-8') ?></a></li>
+                            <?php endif; ?>
+                        </ul>
+                        <?php endif; ?>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
 <?php if (!isset($privatesite) || $privatesite != 'on'): ?>
     <!-- Sign in Modal -->
     <div class="modal fade" id="signin" tabindex="-1" aria-labelledby="signinModalLabel" aria-hidden="true">
@@ -183,48 +190,27 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
                                 <input type="password" name="password" class="form-control" id="signinModalPassword" placeholder="<?= htmlspecialchars($lang['password'] ?? 'Password', ENT_QUOTES, 'UTF-8') ?>" autocomplete="current-password" required>
                             </div>
                         </div>
-						<?php if ($captcha_enabled): ?>
-						<?php if ($captcha_mode === 'recaptcha'): ?>
+                        <?php if ($captcha_enabled): ?>
+                        <?php if ($captcha_mode === 'recaptcha'): ?>
                         <!-- reCAPTCHA v2 checkbox -->
                         <div class="g-recaptcha mb-3" data-sitekey="<?= htmlspecialchars($recaptcha_sitekey, ENT_QUOTES, 'UTF-8') ?>" data-callback="onRecaptchaSuccessSignin"></div>
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signin">
-						<?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
+                        <?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
                         <!-- reCAPTCHA v3 -->
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signin">
-						<?php elseif ($captcha_mode === 'turnstile'): ?>
+                        <?php elseif ($captcha_mode === 'turnstile'): ?>
                         <!-- Cloudflare Turnstile -->
-						<input type="hidden" id="cf-turnstile-response-signin" name="cf-turnstile-response">
-						<div class="cf-turnstile mb-3"
-						   data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
-						   data-callback="onTurnstileSuccessSignin"
-						   data-error-callback="onTurnstileError"
-						   data-action="login"
-						   data-appearance="execute"
-						   data-retry="auto"></div>
-						<script>
-						(function() {
-						  if (typeof turnstile !== 'undefined') {
-							  turnstile.ready(function() {
-								  document.getElementById('signin-form').addEventListener('submit', function(e) {
-									  var tokenInput = document.getElementById('cf-turnstile-response-signin');
-									  if (!tokenInput.value) {
-										  e.preventDefault();
-										  turnstile.render('.cf-turnstile', {
-											  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-											  callback: function(token) { tokenInput.value = token; document.getElementById('signin-form').submit(); },
-											  action: 'login',
-											  size: 'compact',
-											  retry: 'auto',
-											  'retry-interval': 1000
-										  });
-									  }
-								  });
-							  });
-						  }
-						})();
-						</script>
-							<?php endif; ?>
-						<?php endif; ?>
+                        <input type="hidden" id="cf-turnstile-response-signin" name="cf-turnstile-response">
+                        <div class="cf-turnstile mb-3"
+                           data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
+                           data-callback="onTurnstileSuccessSignin"
+                           data-error-callback="onTurnstileError"
+                           data-action="login"
+                           data-appearance="execute"
+                           data-execution="execute"
+                           data-retry="auto"></div>
+                            <?php endif; ?>
+                        <?php endif; ?>
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="signinRememberme" name="rememberme" checked>
                             <label class="form-check-label" for="signinRememberme"><?= htmlspecialchars($lang['rememberme'] ?? 'Keep me signed in.', ENT_QUOTES, 'UTF-8') ?></label>
@@ -283,48 +269,27 @@ $captcha_mode = $_SESSION['captcha_mode'] ?? 'none';
                                 <input type="password" class="form-control" id="signupModalPassword" name="password" autocomplete="new-password" required>
                             </div>
                         </div>
-						<?php if ($captcha_enabled): ?>
-						<?php if ($captcha_mode === 'recaptcha'): ?>
+                        <?php if ($captcha_enabled): ?>
+                        <?php if ($captcha_mode === 'recaptcha'): ?>
                         <!-- reCAPTCHA v2 checkbox -->
                         <div class="g-recaptcha mb-3" data-sitekey="<?= htmlspecialchars($recaptcha_sitekey, ENT_QUOTES, 'UTF-8') ?>" data-callback="onRecaptchaSuccessSignup"></div>
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signup">
-						<?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
+                        <?php elseif ($captcha_mode === 'recaptcha_v3'): ?>
                         <!-- reCAPTCHA v3 -->
                         <input type="hidden" name="g-recaptcha-response" id="g-recaptcha-response-signup">
-						<?php elseif ($captcha_mode === 'turnstile'): ?>
+                        <?php elseif ($captcha_mode === 'turnstile'): ?>
                         <!-- Cloudflare Turnstile -->
-						<input type="hidden" id="cf-turnstile-response-signup" name="cf-turnstile-response">
-						<div class="cf-turnstile mb-3"
-						   data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
-						   data-callback="onTurnstileSuccessSignup"
-						   data-error-callback="onTurnstileError"
-						   data-action="signup"
-						   data-appearance="execute"
-						   data-retry="auto"></div>
-						  <script>
-						  (function() {
-							  if (typeof turnstile !== 'undefined') {
-								  turnstile.ready(function() {
-									  document.getElementById('signup-form').addEventListener('submit', function(e) {
-										  var tokenInput = document.getElementById('cf-turnstile-response-signup');
-										  if (!tokenInput.value) {
-											  e.preventDefault();
-											  turnstile.render('.cf-turnstile', {
-												  sitekey: '<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>',
-												  callback: function(token) { tokenInput.value = token; document.getElementById('signup-form').submit(); },
-												  action: 'signup',
-												  size: 'compact',
-												  retry: 'auto',
-												  'retry-interval': 1000
-											  });
-										  }
-									  });
-								  });
-							  }
-						  })();
-						  </script>
-						<?php endif; ?>
-					<?php endif; ?>
+                        <input type="hidden" id="cf-turnstile-response-signup" name="cf-turnstile-response">
+                        <div class="cf-turnstile mb-3"
+                           data-sitekey="<?php echo htmlspecialchars($turnstile_sitekey, ENT_QUOTES, 'UTF-8'); ?>"
+                           data-callback="onTurnstileSuccessSignup"
+                           data-error-callback="onTurnstileError"
+                           data-action="signup"
+                           data-appearance="execute"
+                           data-execution="execute"
+                           data-retry="auto"></div>
+                        <?php endif; ?>
+                    <?php endif; ?>
                         <button type="submit" name="signup" id="signupSubmit" class="btn btn-primary btn-perky fw-bold w-100"><?= htmlspecialchars($lang['signup'] ?? 'Register', ENT_QUOTES, 'UTF-8') ?></button>
                     </form>
                 </div>

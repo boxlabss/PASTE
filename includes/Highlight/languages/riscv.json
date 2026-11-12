@@ -1,0 +1,78 @@
+{
+  "name": "RISC-V Assembly",
+  "id": "riscv",
+  "aliases": [
+    "riscv",
+    "rv32",
+    "rv64",
+    "risc-v"
+  ],
+  "case_insensitive": true,
+  "lexemes": "\\.?[a-z_][\\w.]*",
+  "keywords": {
+    "keyword": "add addi addiw addw amoadd.d amoadd.d.aq amoadd.d.aqrl amoadd.d.rl amoadd.w amoadd.w.aq amoadd.w.aqrl amoadd.w.rl amoand.d amoand.d.aq amoand.d.aqrl amoand.d.rl amoand.w amoand.w.aq amoand.w.aqrl amoand.w.rl amomax.d amomax.d.aq amomax.d.aqrl amomax.d.rl amomax.w amomax.w.aq amomax.w.aqrl amomax.w.rl amomaxu.d amomaxu.d.aq amomaxu.d.aqrl amomaxu.d.rl amomaxu.w amomaxu.w.aq amomaxu.w.aqrl amomaxu.w.rl amomin.d amomin.d.aq amomin.d.aqrl amomin.d.rl amomin.w amomin.w.aq amomin.w.aqrl amomin.w.rl amominu.d amominu.d.aq amominu.d.aqrl amominu.d.rl amominu.w amominu.w.aq amominu.w.aqrl amominu.w.rl amoor.d amoor.d.aq amoor.d.aqrl amoor.d.rl amoor.w amoor.w.aq amoor.w.aqrl amoor.w.rl amoswap.d amoswap.d.aq amoswap.d.aqrl amoswap.d.rl amoswap.w amoswap.w.aq amoswap.w.aqrl amoswap.w.rl amoxor.d amoxor.d.aq amoxor.d.aqrl amoxor.d.rl amoxor.w amoxor.w.aq amoxor.w.aqrl amoxor.w.rl and andi auipc beq bge bgeu blt bltu bne csrrc csrrci csrrs csrrsi csrrw csrrwi div divu divuw divw ebreak ecall fadd.d fadd.s fclass.d fclass.s fcvt.d.l fcvt.d.lu fcvt.d.s fcvt.d.w fcvt.d.wu fcvt.l.d fcvt.l.s fcvt.lu.d fcvt.lu.s fcvt.s.d fcvt.s.l fcvt.s.lu fcvt.s.w fcvt.s.wu fcvt.w.d fcvt.w.s fcvt.wu.d fcvt.wu.s fdiv.d fdiv.s fence fence.i fence.tso feq.d feq.s fld fle.d fle.s flt.d flt.s flw fmadd.d fmadd.s fmax.d fmax.s fmin.d fmin.s fmsub.d fmsub.s fmul.d fmul.s fmv.d.x fmv.w.x fmv.x.d fmv.x.w fnmadd.d fnmadd.s fnmsub.d fnmsub.s fsd fsgnj.d fsgnj.s fsgnjn.d fsgnjn.s fsgnjx.d fsgnjx.s fsqrt.d fsqrt.s fsub.d fsub.s fsw jal jalr lb lbu ld lh lhu lr.d lr.d.aq lr.d.aqrl lr.d.rl lr.w lr.w.aq lr.w.aqrl lr.w.rl lui lw lwu mret mul mulh mulhsu mulhu mulw or ori rem remu remuw remw sb sc.d sc.d.aq sc.d.aqrl sc.d.rl sc.w sc.w.aq sc.w.aqrl sc.w.rl sd sfence.vma sh sll slli slliw sllw slt slti sltiu sltu sra srai sraiw sraw sret srl srli srliw srlw sub subw sw uret wfi xor xori beqz bgez bgt bgtu bgtz ble bleu blez bltz bnez call csrc csrci csrr csrs csrsi csrw csrwi fabs.d fabs.s fmv.d fmv.s fneg.d fneg.s frcsr frflags frrm fscsr fsflags fsrm j jr la li lla mv neg negw nop not rdcycle rdcycleh rdinstret rdinstreth rdtime rdtimeh ret seqz sext.w sgtz sltz snez tail zext.b",
+    "built_in": "x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 x31 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 f20 f21 f22 f23 f24 f25 f26 f27 f28 f29 f30 f31 zero ra sp gp tp fp pc t0 t1 t2 t3 t4 t5 t6 s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 a0 a1 a2 a3 a4 a5 a6 a7 ft0 ft1 ft2 ft3 ft4 ft5 ft6 ft7 ft8 ft9 ft10 ft11 fs0 fs1 fs2 fs3 fs4 fs5 fs6 fs7 fs8 fs9 fs10 fs11 fa0 fa1 fa2 fa3 fa4 fa5 fa6 fa7",
+    "meta": ".align .ascii .asciz .attribute .balign .bss .byte .comm .data .double .dword .else .end_macro .endif .endm .equ .eqv .extern .file .float .global .globl .half .ident .if .include .lcomm .local .macro .option .p2align .quad .rodata .section .set .size .space .string .text .type .weak .word .zero"
+  },
+  "contains": [
+    {
+      "className": "comment",
+      "begin": "#",
+      "end": "$",
+      "relevance": 0
+    },
+    {
+      "className": "comment",
+      "begin": "\\/\\/",
+      "end": "$",
+      "relevance": 0
+    },
+    {
+      "className": "comment",
+      "begin": "\\/\\*",
+      "end": "\\*\\/",
+      "relevance": 0
+    },
+    {
+      "className": "string",
+      "begin": "\"",
+      "end": "\"",
+      "illegal": "\\n",
+      "contains": [
+        {
+          "begin": "\\\\[\\s\\S]"
+        }
+      ]
+    },
+    {
+      "className": "string",
+      "begin": "'",
+      "end": "[^\\\\]'",
+      "relevance": 0
+    },
+    {
+      "className": "symbol",
+      "begin": "^[ \\t]*[a-z_.$][\\w.$]*:",
+      "relevance": 0
+    },
+    {
+      "className": "built_in",
+      "begin": "%(?:hi|lo|pcrel_hi|pcrel_lo|tprel_hi|tprel_lo|tprel_add|got_pcrel_hi)\\b"
+    },
+    {
+      "className": "number",
+      "variants": [
+        {
+          "begin": "\\b0x[0-9a-f]+\\b"
+        },
+        {
+          "begin": "\\b0b[01]+\\b"
+        },
+        {
+          "begin": "(?<![\\w.$])-?\\d+\\b"
+        }
+      ],
+      "relevance": 0
+    }
+  ]
+}

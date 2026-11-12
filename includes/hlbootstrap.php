@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -9,7 +9,7 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -29,7 +29,7 @@ if (!defined('HL_LIB_DIR')) {
     $candidate = __DIR__ . '/Highlight';
     define('HL_LIB_DIR', is_dir($candidate) ? $candidate : __DIR__);
 }
-// Back-compat alias used below
+// Alias used below
 if (!defined('HL_BASE_DIR')) {
     define('HL_BASE_DIR', HL_LIB_DIR);
 }
@@ -103,7 +103,7 @@ function make_highlighter(): ?\Highlight\Highlighter {
             // fall through
         }
 
-        // Older constructor style
+        // Constructor taking only the factory (older highlight.php)
         try {
             return new \Highlight\Highlighter($factory);
         } catch (\Throwable $e) {

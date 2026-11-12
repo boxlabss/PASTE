@@ -9,13 +9,13 @@
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; either version 3
  * of the License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License in LICENCE for more details.
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 // Guard: admin session
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
@@ -27,6 +27,8 @@ $date = date('Y-m-d H:i:s');
 $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
 require_once('../config.php'); // expects $dbhost,$dbuser,$dbpassword,$dbname,$mod_rewrite
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('sitemap');
 
 try {
     $pdo = new PDO(
@@ -69,6 +71,12 @@ try {
     $written_count = null;
 
     // Save options
+    if (($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['rebuild'])) && !admin_csrf_ok()) {
+        $msg = 'Your form token was missing or expired. Please try again.';
+        $msg_type = 'danger';
+        unset($_GET['rebuild']);
+        $_POST = [];
+    }
     if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['save_options'])) {
         // validate priority
         $p = trim((string)($_POST['priority'] ?? '0.5'));
@@ -138,14 +146,14 @@ try {
         // Stream in chunks
         $limit   = 500;
         $written = 1; // homepage
-        
+
         // Check if slug column exists
         $has_slug = false;
         try {
             $chk = $pdo->query("SHOW COLUMNS FROM pastes LIKE 'slug'");
             $has_slug = ($chk && $chk->rowCount() > 0);
         } catch (Exception $e) { /* ignore */ }
-        
+
         // Check URL mode preference
         $url_mode = 'slug'; // default
         try {
@@ -155,12 +163,12 @@ try {
                 $url_mode = $modeRow['option_value'];
             }
         } catch (Exception $e) { /* ignore - use default */ }
-        
+
         // Only use slugs if URL mode is 'slug' and slug column exists
         $use_slugs = ($has_slug && $url_mode === 'slug');
-        
+
         $select_cols = $use_slugs ? "id, slug" : "id";
-        
+
         for ($offset=0; $offset < $total_public; $offset += $limit) {
             $st = $pdo->prepare("SELECT {$select_cols} FROM pastes WHERE visible='0' ORDER BY id DESC LIMIT :lim OFFSET :off");
             $st->bindValue(':lim', $limit, PDO::PARAM_INT);
@@ -170,8 +178,8 @@ try {
 
             foreach ($rows as $r) {
                 // Use slug if available and URL mode is 'slug', otherwise use numeric ID
-                $url_id = ($use_slugs && isset($r['slug']) && $r['slug'] !== '') 
-                    ? $r['slug'] 
+                $url_id = ($use_slugs && isset($r['slug']) && $r['slug'] !== '')
+                    ? $r['slug']
                     : (string)$r['id'];
                 if ((string)$mod_rewrite === "1") {
                     $url = $baseurl . '/' . rawurlencode($url_id);
@@ -271,6 +279,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (confirm('Rebuild sitemap.xml now? This will overwrite the existing file.')) {
         const u = new URL(window.location.href);
         u.searchParams.set('rebuild', '1');
+        u.searchParams.set('csrf_token', <?php echo json_encode(admin_csrf_token()); ?>);
         window.location.href = u.toString();
       }
     });
@@ -316,18 +325,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-      <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'/admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-      <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('sitemap.php'); ?>
     </div>
   </div>
 </div>
@@ -338,18 +336,7 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/dashboard.php'); ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/configuration.php'); ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/interface.php'); ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/admin.php'); ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pastes.php'); ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/users.php'); ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ipbans.php'); ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/stats.php'); ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/ads.php'); ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/pages.php'); ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item active" href="<?php echo htmlspecialchars($baseurl.'/admin/sitemap.php'); ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?php echo htmlspecialchars($baseurl.'/admin/tasks.php'); ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('sitemap.php'); ?>
         </div>
       </div>
     </div>
@@ -366,6 +353,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="card-body">
           <h4 class="card-title mb-3">Sitemap Options</h4>
           <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+            <?= admin_csrf_field() ?>
             <div class="row g-2">
               <div class="col-md-4">
                 <label class="form-label">Change Frequency</label>
@@ -430,7 +418,7 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <?php
 // Handle logout from dropdown
 if (isset($_GET['logout'])) {

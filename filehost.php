@@ -14,8 +14,8 @@
  * server is needed.  Text uploads become unlisted pastes owned by the
  * configured service user; everything else is stored under FILEHOST_DIR.
  *
- * Configuration: see docs/filehost.md and docs/config.example.php
- * (FILEHOST_* constants).  Schema: upgrade/2.1-to-2.2-filehost.sql.
+ * Configuration: see docs/FILEHOST.md and docs/config.example.php
+ * (FILEHOST_* constants). The installer and upgrader create the tables.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -29,6 +29,7 @@ declare(strict_types=1);
  * to the server log; the client gets the JSON 500 below. */
 ini_set('display_errors', '0');
 
+define('PASTE_JSON_ERRORS', true);
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/filehost_jwt.php';
@@ -42,7 +43,7 @@ $fh_enabled  = defined('FILEHOST_ENABLED') ? (bool)FILEHOST_ENABLED : false;
 $fh_url      = defined('FILEHOST_URL') ? (string)FILEHOST_URL : '';
 $fh_pubkey   = defined('FILEHOST_PUBKEY') ? (string)FILEHOST_PUBKEY : '';
 $fh_issuer   = defined('FILEHOST_ISSUER') ? (string)FILEHOST_ISSUER : '';
-$fh_dir      = defined('FILEHOST_DIR') ? (string)FILEHOST_DIR : __DIR__ . '/../filehost_files';
+$fh_dir      = filehost_storage_dir();
 $fh_max      = defined('FILEHOST_MAX_BYTES') ? (int)FILEHOST_MAX_BYTES : 25 * 1024 * 1024;
 $fh_accept   = defined('FILEHOST_ACCEPT') ? (string)FILEHOST_ACCEPT : 'image/*, video/*, text/*';
 $fh_member   = defined('FILEHOST_MEMBER') ? (string)FILEHOST_MEMBER : 'irc';
@@ -81,10 +82,16 @@ function fh_error(int $status, string $code, string $message, array $headers = [
     fh_json($status, ['success' => false, 'error' => $code, 'message' => $message], $headers);
 }
 
-/* CLI cron: php filehost.php --cron */
+/* CLI cron: php filehost.php --cron (expired files, then entries whose files are gone) */
 if (PHP_SAPI === 'cli') {
     if (in_array('--cron', $argv ?? [], true)) {
         filehost_sweep($pdo, $fh_dir, $now, 10000);
+        img_sweep($pdo, 10000);
+        if (img_ensure_table($pdo)) {
+            $p = filecrypt_prune_missing($pdo, $fh_dir);
+            if ($p['removed'] > 0) echo "filehost: removed {$p['removed']} entries whose files no longer exist\n";
+            if ($p['held']) echo "filehost: {$p['missing']} entries have no file, but $fh_dir is empty, so none were removed (check FILEHOST_DIR)\n";
+        }
         echo "filehost: sweep done\n";
     } else {
         echo "usage: php filehost.php --cron\n";
@@ -96,6 +103,9 @@ fh_cors();
 
 if (!$fh_enabled) {
     fh_error(404, 'disabled', 'FILEHOST is not enabled on this site');
+}
+if (!img_ensure_table($pdo)) {
+    fh_error(500, 'storage_error', 'File storage is not available');
 }
 
 /* ---- OPTIONS: capabilities + CORS preflight ---- */
@@ -113,70 +123,18 @@ if ($method === 'GET' || $method === 'HEAD') {
     if (!preg_match('/^([A-Za-z0-9]{6,32})\.([a-z0-9]{1,8})$/', $f, $m)) {
         fh_error(404, 'not_found', 'No such file');
     }
-    $st = $pdo->prepare('SELECT slug, ext, mime, size, filename, expires FROM filehost_files WHERE slug = ? AND paste_id IS NULL');
-    $st->execute([$m[1]]);
+    /* Files are found by the id of their link name */
+    $st = $pdo->prepare('SELECT slug, ext, mime, expires, meta FROM filehost_files
+                         WHERE paste_id IS NULL AND network <> ? AND slug = ? AND encrypted = ?');
+    $st->execute([IMG_NETWORK, filecrypt_id($m[1]), FILECRYPT_MODE]);
     $row = $st->fetch();
     if (!$row || $row['ext'] !== $m[2]
         || ($row['expires'] !== null && strtotime($row['expires']) < $now)) {
         fh_error(404, 'not_found', 'No such file');
     }
-    $path = $fh_dir . '/' . $row['slug'] . '.' . $row['ext'];
-    if (!is_file($path)) {
-        fh_error(404, 'not_found', 'No such file');
-    }
-    $size = (int)$row['size'];
-    $mime = $row['mime'] ?: 'application/octet-stream';
-    header('Content-Type: ' . $mime);
-    header('X-Content-Type-Options: nosniff');
-    header('Accept-Ranges: bytes');
-    header('Cache-Control: public, max-age=86400, immutable');
-    header('Content-Security-Policy: default-src \'none\'; sandbox');
-    $dl = $row['filename'] ? '; filename="' . addcslashes((string)$row['filename'], '"\\') . '"' : '';
-    header('Content-Disposition: inline' . $dl);
-
-    /* Single byte range so browsers can seek video/audio. */
-    $start = 0;
-    $end = $size - 1;
-    $range = $_SERVER['HTTP_RANGE'] ?? '';
-    if ($range !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $range, $r) && ($r[1] !== '' || $r[2] !== '')) {
-        if ($r[1] === '') {                       /* suffix: last N bytes */
-            $start = max(0, $size - (int)$r[2]);
-        } else {
-            $start = (int)$r[1];
-            if ($r[2] !== '') {
-                $end = min($size - 1, (int)$r[2]);
-            }
-        }
-        if ($start > $end || $start >= $size) {
-            http_response_code(416);
-            header('Content-Range: bytes */' . $size);
-            exit;
-        }
-        http_response_code(206);
-        header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
-    } else {
-        http_response_code(200);
-    }
-    header('Content-Length: ' . ($end - $start + 1));
-    if ($method === 'HEAD') {
-        exit;
-    }
-    $fp = fopen($path, 'rb');
-    if ($fp === false) {
-        exit;
-    }
-    fseek($fp, $start);
-    $left = $end - $start + 1;
-    while ($left > 0 && !feof($fp)) {
-        $chunk = fread($fp, min(65536, $left));
-        if ($chunk === false || $chunk === '') {
-            break;
-        }
-        echo $chunk;
-        $left -= strlen($chunk);
-    }
-    fclose($fp);
-    exit;
+    $meta = filecrypt_open_meta($row['meta'], $m[1]);
+    filecrypt_send($fh_dir . '/' . $row['slug'] . '.enc', $m[1], (string)$row['mime'],
+        isset($meta['n']) ? (string)$meta['n'] : null, $method === 'HEAD');
 }
 
 if ($method !== 'POST') {
@@ -206,7 +164,7 @@ if (!is_array($claims)) {
 }
 
 $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-if (function_exists('is_banned') && is_banned($pdo, $ip)) {
+if (is_banned($pdo, $ip)) {
     fh_error(403, 'banned', 'Uploads from this address are not accepted');
 }
 
@@ -238,8 +196,8 @@ try {
 
 /* Per-account rate limit. */
 if ($fh_perhour > 0) {
-    $st = $pdo->prepare('SELECT COUNT(*) FROM filehost_files WHERE account = ? AND created > DATE_SUB(NOW(), INTERVAL 1 HOUR)');
-    $st->execute([$claims['sub']]);
+    $st = $pdo->prepare('SELECT COUNT(*) FROM filehost_files WHERE account = ? AND network <> ? AND created > DATE_SUB(NOW(), INTERVAL 1 HOUR)');
+    $st->execute([$claims['sub'], IMG_NETWORK]);
     if ((int)$st->fetchColumn() >= $fh_perhour) {
         fh_error(429, 'rate_limited', 'Upload limit reached for this account; try again later', ['Retry-After: 600']);
     }
@@ -313,14 +271,18 @@ try {
         }
         header('X-Filehost-Metadata: ' . ($stripped ? 'stripped' : 'kept'));
         $ext = FILEHOST_EXT[$mime] ?? 'bin';
-        $slug = filehost_new_slug($pdo);
-        filehost_store_file($fh_dir, $body, $slug, $ext);
         $expires = $fh_retain > 0 ? date('Y-m-d H:i:s', $now + $fh_retain * 86400) : null;
-        $st = $pdo->prepare('INSERT INTO filehost_files (slug, account, network, mime, size, ext, filename, paste_id, ip, created, expires)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NOW(), ?)');
-        $st->execute([$slug, $claims['sub'], $claims['iss'], $mime, $size, $ext, $filename, $ip, $expires]);
-        $location = $rewrite ? $baseurl . 'filehost/' . $slug . '.' . $ext
-                             : $baseurl . 'filehost.php?f=' . $slug . '.' . $ext;
+        /* Stored encrypted; the link name is the key and is not kept on the server */
+        $name = filecrypt_store($pdo, $fh_dir, $body, [
+            'account' => $claims['sub'],
+            'network' => $claims['iss'],
+            'mime'    => $mime,
+            'ext'     => $ext,
+            'ip'      => $ip,
+            'expires' => $expires,
+        ], $filename);
+        $location = $rewrite ? $baseurl . 'filehost/' . $name . '.' . $ext
+                             : $baseurl . 'filehost.php?f=' . $name . '.' . $ext;
     }
 } catch (Throwable $e) {
     error_log('filehost: store failed: ' . $e->getMessage());

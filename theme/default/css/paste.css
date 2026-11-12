@@ -126,6 +126,14 @@ body {
 .geshi .re0{ color:#ffd166 !important; }
 .geshi .me1, .geshi .me2{ color:#7dd3fc !important; }
 
+/* HexDroid scripts (hex): groups the colours above don't cover */
+.code-content .hex .kw3{ color:#c792ea !important; }   /* functions */
+.code-content .hex .kw4{ color:#7dd3fc !important; }   /* fields */
+.code-content .hex .kw5{ color:#ff9e64 !important; font-weight:600; }   /* events */
+.code-content .hex .kw6{ color:#f59e0b !important; }   /* isin, iswm */
+.code-content .hex a{ color:inherit; text-decoration:none; }
+.code-content .hex a:hover{ text-decoration:underline; text-underline-offset:2px; }
+
 .geshi ol.geshi-ln { color:#5a6073; }
 .geshi.geshi-fancy ol.geshi-ln > li { border-left-color:#2a2f3d; }
 
@@ -296,7 +304,7 @@ html{ scroll-behavior:smooth; }
 
 /* IMPORTANT: cancel Bootstrap’s flex list-group inside comments */
 #comments .list-group{ display:block; }
-#comments .list-group-item{ 
+#comments .list-group-item{
   display:block !important;   /* overrides .list-group-item{display:flex} */
   overflow:visible;
 }
@@ -378,7 +386,7 @@ html{ scroll-behavior:smooth; }
   z-index: 10;
 }
 
-/* Splitter — wide hit area, thin visual line */
+/* Splitter: wide hit area, thin visual line */
 .diff-area .splitter{
   position: absolute;
   top: 0;
@@ -498,7 +506,7 @@ html{ scroll-behavior:smooth; }
   }
 }
 
-/* Change surfaces — stronger row backgrounds
+/* Change surfaces: stronger row backgrounds
    Use !important to beat zebra nth-child whose specificity ties ours */
 .diff-table td.ctx  { background: transparent; }
 .diff-table td.add  {

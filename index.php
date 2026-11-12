@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.4 2026/02/02 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -15,7 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License in LICENCE for more details.
  */
- 
+
 // If the installer exists, redirect to prevent errors from empty config variables
 $directory = 'install';
 if (file_exists($directory)) {
@@ -23,10 +23,6 @@ if (file_exists($directory)) {
     exit();
 }
 require_once 'includes/session.php';
-// Debugging for reCAPTCHA - /index.php?forcefail=1 - index.php?forcepass=1
-// Only uncomment if you need to test.
-//if (isset($_GET['forcefail'])) { $_SESSION['forcefail'] = (int)$_GET['forcefail']; }
-//if (isset($_GET['forcepass'])) { $_SESSION['forcepass'] = (int)$_GET['forcepass']; }
 // production-style error handling
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
@@ -50,7 +46,7 @@ try {
     $siteinfo = $stmt->fetch() ?: [];
     $title = trim($siteinfo['title'] ?? 'Paste');
     $des = trim($siteinfo['des'] ?? '');
-    $baseurl = trim($siteinfo['baseurl'] ?? '');
+    $baseurl = paste_request_baseurl(trim($siteinfo['baseurl'] ?? ''));
     $keyword = trim($siteinfo['keyword'] ?? '');
     $site_name = trim($siteinfo['site_name'] ?? 'Paste');
     $ga = trim($siteinfo['ga'] ?? '');
@@ -81,27 +77,20 @@ try {
     $allowed = trim($cap['allowed'] ?? '');
     $cap_e = trim($cap['cap_e'] ?? 'off'); // "on" | "off"
     $recaptcha_sitekey = trim($cap['recaptcha_sitekey'] ?? '');
-    $recaptcha_secretkey = trim($cap['recaptcha_secretkey'] ?? '');
     $recaptcha_version = trim($cap['recaptcha_version'] ?? 'v2'); // "v2" | "v3"
     $turnstile_sitekey = trim($cap['turnstile_sitekey'] ?? '');
-    $turnstile_secretkey = trim($cap['turnstile_secretkey'] ?? '');
     // permissions
     $stmt = $pdo->query("SELECT * FROM site_permissions WHERE id='1'");
     $perm = $stmt->fetch() ?: [];
     $disableguest = trim($perm['disableguest'] ?? 'off');
     $siteprivate = trim($perm['siteprivate'] ?? 'off');
     $hiderecentpastes = trim($perm['hiderecentpastes'] ?? 'off');
-    error_log("index.php: site_permissions query result: disableguest=$disableguest, siteprivate=$siteprivate");
     // Mirror captcha config into session for recaptcha.php (expects these names)
     $_SESSION['cap_e'] = $cap_e; // 'on'|'off'
     $_SESSION['mode'] = $mode; // 'reCAPTCHA'|'normal'
     $_SESSION['recaptcha_version'] = $recaptcha_version; // 'v2'|'v3'
     $_SESSION['recaptcha_sitekey'] = $recaptcha_sitekey; // site key used by client
-    $_SESSION['recaptcha_secretkey'] = $recaptcha_secretkey; // secret key used by server
     $_SESSION['turnstile_sitekey'] = $turnstile_sitekey;
-    $_SESSION['turnstile_secretkey'] = $turnstile_secretkey;
-    // Debug captcha settings
-    error_log("index.php: cap_e=$cap_e, mode=$mode, turnstile_sitekey=$turnstile_sitekey, captcha_mode=" . ($_SESSION['captcha_mode'] ?? 'none') . ", captcha=" . ($_SESSION['captcha'] ?? 'none'));
 } catch (PDOException $e) {
     error_log("index.php: DB error ".$e->getMessage());
     $error = $lang['db_error'] ?? 'Database error.';
@@ -124,8 +113,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         $_SESSION['captcha_mode'] = "none";
     }
 }
-// Debug CAPTCHA condition for main.php
-error_log("index.php: CAPTCHA condition: cap_e=$cap_e, username=" . ($_SESSION['username'] ?? 'none') . ", disableguest=$disableguest");
 // ban check
 if (is_banned($pdo, $ip)) {
     $error = $lang['banned'] ?? 'You are banned from this site.';
@@ -141,49 +128,25 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 // logout passthrough
 if (isset($_GET['logout'])) {
-    header('Location: ' . ($_SERVER['HTTP_REFERER'] ?? $baseurl));
-    unset($_SESSION['token'], $_SESSION['oauth_uid'], $_SESSION['username'], $_SESSION['pic']);
-    session_destroy();
+    paste_logout_and_redirect($baseurl);
 }
-// page views
-try {
-    $date = date('Y-m-d');
-    $stmt = $pdo->prepare("SELECT id, tpage, tvisit FROM page_view WHERE date = ?");
-    $stmt->execute([$date]);
-    $pv = $stmt->fetch();
-    if ($pv) {
-        $page_view_id = (int)$pv['id'];
-        $tpage = (int)$pv['tpage'] + 1;
-        $tvisit = (int)$pv['tvisit'];
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM visitor_ips WHERE ip = ? AND visit_date = ?");
-        $stmt->execute([$ip, $date]);
-        if ((int)$stmt->fetchColumn() === 0) {
-            $tvisit += 1;
-            $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-            $stmt->execute([$ip, $date]);
-        }
-        $stmt = $pdo->prepare("UPDATE page_view SET tpage = ?, tvisit = ? WHERE id = ?");
-        $stmt->execute([$tpage, $tvisit, $page_view_id]);
-    } else {
-        $stmt = $pdo->prepare("INSERT INTO page_view (date, tpage, tvisit) VALUES (?, ?, ?)");
-        $stmt->execute([$date, 1, 1]);
-        $stmt = $pdo->prepare("INSERT INTO visitor_ips (ip, visit_date) VALUES (?, ?)");
-        $stmt->execute([$ip, $date]);
-    }
-} catch (PDOException $e) {
-    error_log("index.php: page view err ".$e->getMessage());
-}
+// Page views
+pageViewTrack($pdo, $ip);
 // POST: create paste
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Check if this is an edit of an existing paste (only if "edit" button was clicked)
     $isEdit = isset($_POST['edit']) && isset($_POST['paste_id']) && !empty($_POST['paste_id']);
     // Check if this is an explicit fork (fork button clicked)
     $isFork = isset($_POST['fork']) && isset($_POST['fork_from']) && !empty($_POST['fork_from']);
-    
-    // Check guest permissions - guests cannot paste or fork if disabled
+
+    // Check guest permissions - guests cannot paste or fork if disabled, and cannot make private pastes
     if (!isset($_SESSION['username'])) {
         if ($disableguest === 'on') {
             $error = $lang['guestsdisabled'] ?? 'Guest posting is disabled. Please login or register.';
+            goto OutPut;
+        }
+        if ((string)($_POST['visibility'] ?? '0') === '2') {
+            $error = $lang['guestprivate'] ?? 'Private pastes need an account. Sign in, or choose Public or Unlisted.';
             goto OutPut;
         }
     }
@@ -199,27 +162,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $editPasteSlug = null;
     $editPastePassword = null;
     $forkParentId = null; // Track the original paste when forking
-    
+
     // Handle explicit fork - always create new paste with parent_id
+    $currentUser = (string)($_SESSION['username'] ?? '');
+    // A parent is linked when it is found by its own page's identifier and is not someone else's private paste
+    $linkableParent = static function (?array $row) use ($currentUser): ?int {
+        if (!$row) return null;
+        if ((string)($row['visible'] ?? '0') === '2' && ($currentUser === '' || (string)$row['member'] !== $currentUser)) return null;
+        return (int)$row['id'];
+    };
     if ($isFork) {
-        $forkFromId = $_POST['fork_from'];
         try {
-            // Get the parent paste ID
-            if (function_exists('getPasteByIdentifier')) {
-                $parentPaste = getPasteByIdentifier($pdo, $forkFromId);
-            } else {
-                if (ctype_digit((string)$forkFromId)) {
-                    $stmt = $pdo->prepare("SELECT id FROM pastes WHERE id = ?");
-                    $stmt->execute([(int)$forkFromId]);
-                } else {
-                    $stmt = $pdo->prepare("SELECT id FROM pastes WHERE slug = ?");
-                    $stmt->execute([$forkFromId]);
-                }
-                $parentPaste = $stmt->fetch(PDO::FETCH_ASSOC);
-            }
-            if ($parentPaste) {
-                $forkParentId = (int)$parentPaste['id'];
-            }
+            $forkParentId = $linkableParent(paste_find_linked($pdo, (string)$_POST['fork_from']));
         } catch (PDOException $e) {
             error_log("index.php: fork lookup error: " . $e->getMessage());
         }
@@ -227,37 +181,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     // Handle edit button - only update if user owns the paste
     elseif ($isEdit) {
-        // Verify the user owns this paste
-        $editPasteId = $_POST['paste_id'];
+        $editPasteId = (string)$_POST['paste_id'];
         try {
-            // Try to get the paste - support both slug and numeric ID
-            if (function_exists('getPasteByIdentifier')) {
-                $existingPaste = getPasteByIdentifier($pdo, $editPasteId);
-            } else {
-                // Fallback for older code
-                if (ctype_digit((string)$editPasteId)) {
-                    $stmt = $pdo->prepare("SELECT id, slug, member FROM pastes WHERE id = ?");
-                    $stmt->execute([(int)$editPasteId]);
-                } else {
-                    $stmt = $pdo->prepare("SELECT id, slug, member FROM pastes WHERE slug = ?");
-                    $stmt->execute([$editPasteId]);
-                }
-                $existingPaste = $stmt->fetch(PDO::FETCH_ASSOC);
-            }
-            
+            $existingPaste = paste_find_linked($pdo, $editPasteId);
             if (!$existingPaste) {
                 $error = $lang['notfound'] ?? 'Paste not found.';
                 goto OutPut;
             }
-            
-            // Check ownership
-            $pasteOwner = $existingPaste['member'] ?? 'Guest';
-            $currentUser = $_SESSION['username'] ?? '';
-            
-            if ($currentUser === '' || $currentUser !== $pasteOwner) {
+
+            if ($currentUser === '' || $currentUser !== (string)($existingPaste['member'] ?? 'Guest')) {
                 // Not the owner - fall back to creating a fork (new paste)
                 $isEdit = false;
-                $forkParentId = (int)$existingPaste['id']; // Track the parent for diff
+                $editPasteId = null;
+                $forkParentId = $linkableParent($existingPaste);
             } else {
                 // User owns the paste - get the numeric ID and slug for update
                 $editPasteId = (int)$existingPaste['id'];
@@ -267,9 +203,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } catch (PDOException $e) {
             error_log("index.php: edit verify err " . $e->getMessage());
             $isEdit = false; // Fall back to creating new paste
+            $editPasteId = null;
         }
     }
-    
+
     // empty content
     if (empty($_POST["paste_data"]) || trim($_POST["paste_data"]) === '') {
         $error = $lang['empty_paste'] ?? 'Paste content cannot be empty.';
@@ -285,63 +222,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $error = $lang['error'] ?? 'Invalid form submission.';
         goto OutPut;
     }
-    // --- debug overrides (forcefail/forcepass) ---
-    // Persisted earlier via GET -> session. Handle them here to bypass ALL captcha paths.
-    $captchaOverridePass = !empty($_SESSION['forcepass']);
-    $captchaOverrideFail = !empty($_SESSION['forcefail']);
-    // consume them so they only affect one submit
-    if ($captchaOverridePass) unset($_SESSION['forcepass']);
-    if ($captchaOverrideFail) unset($_SESSION['forcefail']);
-    
-    // Determine if guest needs captcha check
-    // Run captcha if: guest AND guest posting is enabled
-    $guestNeedsCaptcha = !isset($_SESSION['username']) && ($disableguest !== "on");
-    
-    // captcha checks for guests (respect admin config)
-    if ($guestNeedsCaptcha) {
-        // 1) debug overrides first
-        if ($captchaOverridePass) {
-            // Skip ALL captcha checks
-            // (do nothing)
-        } elseif ($captchaOverrideFail) {
-            // Force a visible, soft error like the internal captcha branch does
-            $error = $lang['recaptcha_failed'] ?? 'reCAPTCHA verification failed.';
-            goto OutPut;
-        } else {
-            // 2) normal behaviour
-            if ($cap_e === "on") {
-                if ($mode === "reCAPTCHA") {
-                    require_once __DIR__ . '/includes/recaptcha.php';
-                    require_human('create_paste');
-                    if (!empty($error)) {
-                        $error = $lang['recaptcha_failed'] ?? 'reCAPTCHA failed to verify you\'re not a bot. Refresh and try again.';
-                        goto OutPut;
-                    }
-                } elseif ($mode === "turnstile") {
-                    require_once __DIR__ . '/includes/turnstile.php';
-                    if (!require_human_turnstile('create_paste')) {
-                        $error = $error ?: ($lang['turnstile_failed'] ?? 'Turnstile verification failed. Refresh and try again.');
-                        goto OutPut;
-                    }
-                } else {
-                    // internal captcha (image)
-                    $posted = strtolower(preg_replace('/\s+/', '', (string)($_POST['scode'] ?? '')));
-                    $cfg = isset($_SESSION['_CAPTCHA']['config'])
-                        ? @unserialize($_SESSION['_CAPTCHA']['config'], ['allowed_classes' => false])
-                        : null;
-                    $cap_code = strtolower((string)($cfg['code'] ?? ($_SESSION['captcha']['code'] ?? '')));
-                    // timing-safe compare; require non-empty
-                    if ($cap_code === '' || !hash_equals($cap_code, $posted)) {
-                        $error = $lang['image_wrong'] ?? 'Incorrect CAPTCHA code.';
-                        goto OutPut;
-                    }
-                    unset($_SESSION['captcha'], $_SESSION['_CAPTCHA']);
-                }
+    // Captcha for guests when guest posting is allowed
+    if (!isset($_SESSION['username']) && $disableguest !== "on" && $cap_e === "on") {
+        if ($mode === "reCAPTCHA") {
+            require_once __DIR__ . '/includes/recaptcha.php';
+            require_human('create_paste');
+            if (!empty($error)) {
+                $error = $lang['recaptcha_failed'] ?? 'reCAPTCHA failed to verify you\'re not a bot. Refresh and try again.';
+                goto OutPut;
             }
+        } elseif ($mode === "turnstile") {
+            require_once __DIR__ . '/includes/turnstile.php';
+            if (!require_human_turnstile('create_paste')) {
+                $error = $error ?: ($lang['turnstile_failed'] ?? 'Turnstile verification failed. Refresh and try again.');
+                goto OutPut;
+            }
+        } else {
+            // internal captcha (image)
+            $posted = strtolower(preg_replace('/\s+/', '', (string)($_POST['scode'] ?? '')));
+            $cfg = isset($_SESSION['_CAPTCHA']['config'])
+                ? @unserialize($_SESSION['_CAPTCHA']['config'], ['allowed_classes' => false])
+                : null;
+            $cap_code = strtolower((string)($cfg['code'] ?? ($_SESSION['captcha']['code'] ?? '')));
+            // timing-safe compare; require non-empty
+            if ($cap_code === '' || !hash_equals($cap_code, $posted)) {
+                $error = $lang['image_wrong'] ?? 'Incorrect CAPTCHA code.';
+                goto OutPut;
+            }
+            unset($_SESSION['captcha'], $_SESSION['_CAPTCHA']);
         }
     }
     // sanitize inputs
-    $p_title = trim(htmlspecialchars($_POST['title'] ?? '', ENT_QUOTES, 'UTF-8')) ?: 'Untitled';
+    $p_title = paste_store_title((string)($_POST['title'] ?? '')) ?: 'Untitled';
     $p_content = htmlspecialchars($_POST['paste_data'], ENT_QUOTES, 'UTF-8');
     $p_visible = (string)($_POST['visibility'] ?? '0');
     if (!in_array($p_visible, ['0', '1', '2'], true)) {
@@ -358,63 +270,59 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $p_date = date('Y-m-d H:i:s');
     $now_time = mktime(date("H"), date("i"), date("s"), date("n"), date("j"), date("Y"));
     $s_date = date('Y-m-d');
-	
-	// Client-side encrypted? Skip server encryption
-	$is_client_encrypted = isset($_POST['is_client_encrypted']) && $_POST['is_client_encrypted'] === '1';
 
-	// Client-encrypted bodies must be the base64 salt|iv|ciphertext blob built by the browser
-	if ($is_client_encrypted) {
-		$blob = trim((string)$_POST['paste_data']);
-		$raw  = preg_match('~^[A-Za-z0-9+/]+={0,2}$~', $blob) ? base64_decode($blob, true) : false;
-		if ($raw === false || strlen($raw) < 28) {
-			$error = $lang['error'] ?? 'Invalid encrypted paste data.';
-			goto OutPut;
-		}
-	}
+    // Client-side encrypted? Skip server encryption
+    $is_client_encrypted = isset($_POST['is_client_encrypted']) && $_POST['is_client_encrypted'] === '1';
 
-	// ---- Spam filter (new pastes, forks and edits; runs on plaintext before encryption) ----
-	$spam_verdict = ['action' => 'allow', 'score' => 0, 'reasons' => []];
-	$scanTitle = html_entity_decode($p_title, ENT_QUOTES, 'UTF-8');
-	// Body is unreadable for client-encrypted pastes -> judge on title + IP only.
-	$scanBody  = $is_client_encrypted ? '' : html_entity_decode($p_content, ENT_QUOTES, 'UTF-8');
-	if (function_exists('spam_evaluate')) {
-		$isGuest      = !isset($_SESSION['username']) || $p_member === 'Guest';
-		$spam_verdict = spam_evaluate($pdo, $ip, $p_member, $scanTitle, $scanBody, $isGuest, ($isEdit && $editPasteId) ? 'edit' : 'paste');
-		// Edits cannot be queued, so a held edit is refused like a blocked one
-		if ($spam_verdict['action'] === 'block' || ($spam_verdict['action'] === 'hold' && $isEdit && $editPasteId)) {
-			$error = $lang['spam_blocked'] ?? 'This paste was flagged as spam and was not posted.';
-			goto OutPut;
-		}
-	}
+    // Client-encrypted bodies must be the base64 salt|iv|ciphertext blob built by the browser
+    if ($is_client_encrypted) {
+        $blob = trim((string)$_POST['paste_data']);
+        $raw  = preg_match('~^[A-Za-z0-9+/]+={0,2}$~', $blob) ? base64_decode($blob, true) : false;
+        if ($raw === false || strlen($raw) < 28) {
+            $error = $lang['error'] ?? 'Invalid encrypted paste data.';
+            goto OutPut;
+        }
+    }
 
-	if ($is_client_encrypted) {
-		$p_encrypt = '2'; // Client-encrypted flag
-		$p_content = $blob;
-	} else {
-		// encrypt content
-		try {
-			if (!defined('SECRET')) {
-				error_log("index.php: SECRET undefined");
-				$error = $lang['error'] ?? 'Server configuration error.';
-				goto OutPut;
-			}
-			$p_content = encrypt($p_content, hex2bin(SECRET));
-			if ($p_content === null) {
-				$error = $lang['error'] ?? 'Encryption failed.';
-				goto OutPut;
-			}
-		} catch (RuntimeException $e) {
-			$error = ($lang['error'] ?? 'Error') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
-			goto OutPut;
-		}
-	}
+    // ---- Spam filter (new pastes, forks and edits; runs on plaintext before encryption) ----
+    $spam_verdict = ['action' => 'allow', 'score' => 0, 'reasons' => []];
+    $scanTitle = html_entity_decode($p_title, ENT_QUOTES, 'UTF-8');
+    // Body is unreadable for client-encrypted pastes -> judge on title + IP only.
+    $scanBody  = $is_client_encrypted ? '' : html_entity_decode($p_content, ENT_QUOTES, 'UTF-8');
+    $isGuest      = !isset($_SESSION['username']) || $p_member === 'Guest';
+    $isPrivate    = $p_visible === '2' || $p_password !== 'NONE'
+                    || ($isEdit && $editPasteId && ($editPastePassword ?? 'NONE') !== 'NONE');
+    $spam_verdict = spam_evaluate($pdo, $ip, $p_member, $scanTitle, $scanBody, $isGuest, ($isEdit && $editPasteId) ? 'edit' : 'paste', $_POST, $isPrivate);
+    // Edits cannot be queued, so a held edit is refused like a blocked one
+    if ($spam_verdict['action'] === 'block' || ($spam_verdict['action'] === 'hold' && $isEdit && $editPasteId)) {
+        $error = $lang['spam_blocked'] ?? 'This paste was flagged as spam and was not posted.';
+        goto OutPut;
+    }
+
+    if ($is_client_encrypted) {
+        $p_encrypt = '2'; // Client-encrypted flag
+        $p_content = $blob;
+    } else {
+        // encrypt content
+        try {
+            if (!defined('SECRET')) {
+                error_log("index.php: SECRET undefined");
+                $error = $lang['error'] ?? 'Server configuration error.';
+                goto OutPut;
+            }
+            $p_content = encrypt($p_content, hex2bin(SECRET));
+            if ($p_content === null) {
+                $error = $lang['error'] ?? 'Encryption failed.';
+                goto OutPut;
+            }
+        } catch (RuntimeException $e) {
+            $error = ($lang['error'] ?? 'Error') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+            goto OutPut;
+        }
+    }
     // hash password if provided; a blank password on edit keeps the existing one
     if ($p_password !== "NONE") {
         $p_password = password_hash($p_password, PASSWORD_DEFAULT);
-        if ($p_password === false) {
-            $error = $lang['error'] ?? 'Password hashing failed.';
-            goto OutPut;
-        }
     } elseif ($isEdit && $editPasteId && $editPastePassword !== null) {
         $p_password = $editPastePassword;
     }
@@ -426,23 +334,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // UPDATE existing paste (user owns it)
             $stmt = $pdo->prepare("UPDATE pastes SET title = ?, content = ?, visible = ?, code = ?, expiry = ?, password = ?, encrypt = ?, date = ?, ip = ?, now_time = ?, s_date = ? WHERE id = ?");
             $stmt->execute([$p_title, $p_content, $p_visible, $p_code, $expires, $p_password, $p_encrypt, $p_date, $ip, $now_time, $s_date, $editPasteId]);
-            
+
             $paste_id = $editPasteId;
             $p_slug = $editPasteSlug; // Preserve the original slug
-            
+
             // Update sitemap based on visibility
-            if ($p_visible === '0') {
+            if ($p_visible === '0' && $expires !== 'SELF') {
                 addToSitemap($pdo, (int)$paste_id, $priority, $changefreq, $mod_rewrite == '1', $p_slug);
             } else {
                 // Remove from sitemap if no longer public
                 removeFromSitemap($pdo, (int)$paste_id);
             }
-            
+
             // Determine URL identifier (slug or numeric ID)
             $url_identifier = ($p_slug && $p_slug !== '') ? $p_slug : $paste_id;
         } else {
+            // Slug for the new paste (also given to a held paste, so its author gets the link)
+            $useSlug = false;
+            $p_slug = null;
+            if (getPasteUrlMode($pdo) === 'slug') {
+                if (ensureSlugColumnExists($pdo)) {
+                    $useSlug = true;
+                    $p_slug = generateUniquePasteSlug($pdo, getPasteSlugLength($pdo));
+                } else {
+                    error_log("index.php: Failed to ensure slug column exists");
+                }
+            }
+
             // ---- Held for moderation? Stash the exact row and stop here. ----
-            if (($spam_verdict['action'] ?? 'allow') === 'hold' && function_exists('spam_enqueue')) {
+            if (($spam_verdict['action'] ?? 'allow') === 'hold') {
                 $row = [
                     'parent_id' => $forkParentId,
                     'title'     => $p_title,
@@ -458,32 +378,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     'now_time'  => $now_time,
                     's_date'    => $s_date,
                 ];
+                if ($useSlug) {
+                    $row['slug'] = $p_slug;
+                }
                 // If the queue is unavailable the paste is published rather than lost
                 if (spam_enqueue($pdo, $row, $ip, $p_member, (int)($spam_verdict['score'] ?? 0), $spam_verdict['reasons'] ?? [], $scanTitle, mb_substr($scanBody, 0, 500))) {
                     $notice = $lang['spam_held'] ?? 'Your paste was submitted and is awaiting moderator approval.';
+                    if ($useSlug) {
+                        $notice .= ' ' . ($lang['spam_held_link'] ?? 'Once it is approved it will be at this link:');
+                        $notice_link = ($mod_rewrite == '1') ? ($baseurl . $p_slug) : ($baseurl . 'paste.php?id=' . $p_slug);
+                    }
                     goto OutPut;
                 }
             }
 
             // INSERT new paste
-            // Check if URL mode is 'slug' and ensure slug column exists
-            $useSlug = false;
-            $p_slug = null;
-            $urlMode = getPasteUrlMode($pdo);
-            error_log("index.php: URL mode = '$urlMode'");
-            
-            if ($urlMode === 'slug') {
-                // Ensure slug column exists (auto-creates if missing)
-                if (ensureSlugColumnExists($pdo)) {
-                    $useSlug = true;
-                    $slugLength = getPasteSlugLength($pdo);
-                    $p_slug = generateUniquePasteSlug($pdo, $slugLength);
-                    error_log("index.php: Generated slug = '$p_slug' (length=$slugLength)");
-                } else {
-                    error_log("index.php: Failed to ensure slug column exists");
-                }
-            }
-            
             if ($useSlug) {
                 $stmt = $pdo->prepare("INSERT INTO pastes (slug, parent_id, title, content, visible, code, expiry, password, encrypt, member, date, ip, now_time, s_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([$p_slug, $forkParentId, $p_title, $p_content, $p_visible, $p_code, $expires, $p_password, $p_encrypt, $p_member, $p_date, $ip, $now_time, $s_date]);
@@ -491,25 +400,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $stmt = $pdo->prepare("INSERT INTO pastes (parent_id, title, content, visible, code, expiry, password, encrypt, member, date, ip, now_time, s_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([$forkParentId, $p_title, $p_content, $p_visible, $p_code, $expires, $p_password, $p_encrypt, $p_member, $p_date, $ip, $now_time, $s_date]);
             }
-            
+
             $paste_id = $pdo->lastInsertId();
-            
-            // sitemap for public
-            if ($p_visible === '0') {
+
+            // sitemap for public pastes that are not view-once
+            if ($p_visible === '0' && $expires !== 'SELF') {
                 addToSitemap($pdo, (int)$paste_id, $priority, $changefreq, $mod_rewrite == '1', $p_slug);
             }
-            
+
             // Determine URL identifier (slug or numeric ID)
             $url_identifier = ($useSlug && $p_slug) ? $p_slug : $paste_id;
         }
-        
+
         // redirect to paste
         $paste_url = ($mod_rewrite == '1') ? ($baseurl . $url_identifier) : ($baseurl . 'paste.php?id=' . $url_identifier);
         header("Location: " . $paste_url);
         exit;
     } catch (PDOException $e) {
         error_log("index.php: " . ($isEdit ? "update" : "insert") . " err " . $e->getMessage());
-        $error = ($lang['paste_db_error'] ?? 'Database error.') . ': ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+        $error = $lang['paste_db_error'] ?? 'Database error.';
         goto OutPut;
     }
 }
@@ -552,7 +461,7 @@ if ($error_hard) {
 } else {
     // SOFT: show form with inline alert
     if ($error_text !== '') { $flash_error = $error_text; }
-    if (!empty($notice)) { $flash_notice = $notice; }
+    if (!empty($notice)) { $flash_notice = $notice; $flash_notice_link = $notice_link ?? ''; }
     // Keep what the user typed when a submission is rejected
     if ($error_text !== '' && $_SERVER['REQUEST_METHOD'] === 'POST'
         && ($_POST['is_client_encrypted'] ?? '0') !== '1') {

@@ -1,6 +1,6 @@
 <?php
 /*
- * Paste $v3.3 2025/10/24 https://github.com/boxlabss/PASTE
+ * Paste https://github.com/boxlabss/PASTE
  * demo: https://paste.boxlabs.uk/
  *
  * https://phpaste.sourceforge.io/
@@ -24,7 +24,8 @@
                 <div class="card text-center shadow-sm border-0" style="background-color: #212529; color: #fff;">
                     <div class="card-body py-5">
                         <i class="bi bi-lock" style="font-size: 5rem; color: #dc3545;"></i>
-                        <h1 class="mt-3"><?php echo htmlspecialchars($lang['siteprivate'] ?? 'This site is private', ENT_QUOTES, 'UTF-8'); ?></h1>
+                        <h1 class="mt-3"><?php echo htmlspecialchars(trim(strip_tags((string)preg_replace('~<a\b[^>]*>.*?</a>~is', '', $lang['siteprivate'] ?? 'This site is private'))), ENT_QUOTES, 'UTF-8'); ?></h1>
+                        <a href="<?php echo htmlspecialchars($baseurl . 'login.php', ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary mt-3"><?php echo htmlspecialchars($lang['login'] ?? 'Login', ENT_QUOTES, 'UTF-8'); ?></a>
                     </div>
                 </div>
             </div>
@@ -96,7 +97,7 @@
                                                 $title = truncate($title, 20, 50);
                                                 // Use slug if available, otherwise fall back to numeric ID
                                                 $url_identifier = $p_slug !== '' ? $p_slug : $p_id;
-                                                $url = $mod_rewrite == '1' 
+                                                $url = $mod_rewrite == '1'
                                                     ? htmlspecialchars($baseurl . '' . $url_identifier, ENT_QUOTES, 'UTF-8')
                                                     : htmlspecialchars($baseurl . 'paste.php?id=' . $url_identifier, ENT_QUOTES, 'UTF-8');
                                                 ?>

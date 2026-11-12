@@ -3,7 +3,7 @@
  * Paste Admin — IP Bans
  * Supports exact IPs and wildcard patterns: 49.37.117.* / 49.37.* / 49.*
  */
-session_start();
+require_once __DIR__ . '/../includes/admin_session.php';
 
 if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
     header("Location: ../index.php");
@@ -12,6 +12,8 @@ if (!isset($_SESSION['admin_login']) || !isset($_SESSION['admin_id'])) {
 
 $date = date('Y-m-d H:i:s');
 require_once('../config.php');
+require_once __DIR__ . '/../includes/admin_access.php';
+admin_require('ipbans');
 
 try {
     $pdo = new PDO(
@@ -45,6 +47,13 @@ function is_wildcard(string $ip): bool { return str_contains($ip, '*'); }
 
 /* ── Actions ─────────────────────────────────────────────────────────── */
 $msg = '';
+
+// Changes need the form token
+if (($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['delete'])) && !admin_csrf_ok()) {
+    $msg = '<div class="alert alert-danger">Your form token was missing or expired. Please try again.</div>';
+    unset($_GET['delete']);
+    $_POST = [];
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ban_ip'])) {
     $ban_ip = validate_ban_entry((string)$_POST['ban_ip']);
@@ -170,11 +179,7 @@ $ex_count  = $all_count - $wc_count;
   </div>
   <div class="offcanvas-body">
     <div class="list-group">
-      <a class="list-group-item" href="<?= $h($baseurl.'admin/dashboard.php') ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-      <a class="list-group-item" href="<?= $h($baseurl.'admin/configuration.php') ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-      <a class="list-group-item" href="<?= $h($baseurl.'admin/pastes.php') ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-      <a class="list-group-item" href="<?= $h($baseurl.'admin/users.php') ?>"><i class="bi bi-people me-2"></i>Users</a>
-      <a class="list-group-item active" href="<?= $h($baseurl.'admin/ipbans.php') ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
+<?php admin_nav('ipbans.php'); ?>
     </div>
   </div>
 </div>
@@ -186,18 +191,7 @@ $ex_count  = $all_count - $wc_count;
     <div class="col-lg-2 d-none d-lg-block">
       <div class="sidebar-desktop">
         <div class="list-group">
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/dashboard.php') ?>"><i class="bi bi-house me-2"></i>Dashboard</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/configuration.php') ?>"><i class="bi bi-gear me-2"></i>Configuration</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/interface.php') ?>"><i class="bi bi-eye me-2"></i>Interface</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/admin.php') ?>"><i class="bi bi-person me-2"></i>Admin Account</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/pastes.php') ?>"><i class="bi bi-clipboard me-2"></i>Pastes</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/users.php') ?>"><i class="bi bi-people me-2"></i>Users</a>
-          <a class="list-group-item active" href="<?= $h($baseurl.'admin/ipbans.php') ?>"><i class="bi bi-ban me-2"></i>IP Bans</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/stats.php') ?>"><i class="bi bi-graph-up me-2"></i>Statistics</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/ads.php') ?>"><i class="bi bi-currency-pound me-2"></i>Ads</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/pages.php') ?>"><i class="bi bi-file-earmark me-2"></i>Pages</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/sitemap.php') ?>"><i class="bi bi-map me-2"></i>Sitemap</a>
-          <a class="list-group-item" href="<?= $h($baseurl.'admin/tasks.php') ?>"><i class="bi bi-list-task me-2"></i>Tasks</a>
+<?php admin_nav('ipbans.php'); ?>
         </div>
       </div>
     </div>
@@ -224,6 +218,7 @@ $ex_count  = $all_count - $wc_count;
             Wildcard (class&nbsp;A): <code>49.*</code>
           </p>
           <form method="POST" class="row g-2 align-items-end">
+            <?= admin_csrf_field() ?>
             <div class="col-sm-8 col-lg-9">
               <input type="text" class="form-control ip-mono" name="ban_ip"
                      placeholder="e.g. 203.0.113.45  or  49.37.117.*"
@@ -266,6 +261,7 @@ $ex_count  = $all_count - $wc_count;
           </div>
 
           <form method="POST" id="bulk-form">
+            <?= admin_csrf_field() ?>
             <!-- Bulk action bar -->
             <div class="d-flex align-items-center gap-2 mb-2">
               <button type="submit" name="bulk_delete" value="1" class="btn btn-danger btn-sm" id="bulk-btn" disabled>
@@ -313,7 +309,7 @@ $ex_count  = $all_count - $wc_count;
                       <?php endif; ?>
                     </td>
                     <td>
-                      <a href="?delete=<?= (int)$r['id'] ?>&page=<?= (int)$page ?>&filter=<?= $h($filter) ?><?= $q!==''?'&q='.$h($q):'' ?>"
+                      <a href="?delete=<?= (int)$r['id'] ?>&amp;page=<?= (int)$page ?>&amp;filter=<?= $h(urlencode($filter)) ?><?= $q!==''?'&amp;q='.$h(urlencode($q)):'' ?>&amp;csrf_token=<?= $h(urlencode(admin_csrf_token())) ?>"
                          class="btn btn-danger btn-sm del-btn" title="Remove ban">
                         <i class="bi bi-trash"></i>
                       </a>
@@ -354,7 +350,7 @@ $ex_count  = $all_count - $wc_count;
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.del-btn').forEach(a => {
