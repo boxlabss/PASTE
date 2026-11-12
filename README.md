@@ -8,17 +8,6 @@ The original source is available from the previous owner's **[GitHub repository]
 
 A public version can be found **[here](https://paste.boxlabs.uk/)**
 
-<table>
-  <tr>
-    <td><img src="https://paste.boxlabs.uk/demoimg/editor.png" alt="editormobile" width = 279px height = auto></td>
-    <td><img src="https://paste.boxlabs.uk/demoimg/editor2.png" alt="editor" width = 288px height = auto></td>  
-    <td><img src="https://paste.boxlabs.uk/demoimg/diff.png" alt="diff" width = 279px height = auto></td>
-    <td><img src="https://paste.boxlabs.uk/demoimg/login.png" alt="login" width = 279px height = auto></td>
-    <td><img src="https://paste.boxlabs.uk/demoimg/settings.png" alt="settings" width = 279px height = auto></td>
-    <td><img src="https://paste.boxlabs.uk/demoimg/admin.png" alt="admin panel" width = 279px height = auto></td>
-  </tr>
-</table>
-
 IRC: If you would like support or want to contribute to Paste connect to irc.afternet.org in channel #PASTE
 
 Any bugs can be reported at:
